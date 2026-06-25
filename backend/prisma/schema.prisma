@@ -1,0 +1,427 @@
+// WhatsApp Automation Platform — multi-tenant schema
+// Postgres + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Module 1: Tenant onboarding ----------------
+
+enum BusinessCategory {
+  RESTAURANT
+  SALON
+  RETAIL
+  CLINIC
+  OTHER
+}
+
+enum UserRole {
+  OWNER
+  MANAGER
+  AGENT
+}
+
+model Tenant {
+  id            String           @id @default(uuid())
+  businessName  String
+  category      BusinessCategory @default(OTHER)
+  contactNumber String?
+  address       String?
+  website       String?
+  logoUrl       String?
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  users           User[]
+  whatsappAccount WhatsappAccount?
+  keywords        KeywordRule[]
+  fallback        FallbackRule?
+  customers       Customer[]
+  conversations   Conversation[]
+  messages        Message[]
+  menuCategories  MenuCategory[]
+  menuItems       MenuItem[]
+  addonGroups     AddonGroup[]
+  carts           Cart[]
+  orders          Order[]
+  templates       MessageTemplate[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         UserRole @default(OWNER)
+  isActive     Boolean  @default(true)
+  emailVerified Boolean @default(false)
+  verifyToken  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  internalNotes         InternalNote[]
+}
+
+// ---------------- Module 2: WhatsApp embedded signup ----------------
+
+model WhatsappAccount {
+  id              String   @id @default(uuid())
+  tenantId        String   @unique
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  wabaId          String
+  phoneNumberId   String
+  displayPhone    String?
+  businessName    String?
+  accessToken     String   // encrypt at rest in production
+  tokenExpiresAt  DateTime?
+  connectedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------- Module 3-5: Customers, conversations, messages ----------------
+
+model Customer {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  waId         String
+  name         String?
+  phone        String?
+  lastSeenAt   DateTime?
+  lifetimeSpend Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  conversations Conversation[]
+  messages      Message[]
+  orders        Order[]
+  cart          Cart?
+
+  @@unique([tenantId, waId])
+  @@index([tenantId, lastSeenAt])
+}
+
+enum ConversationStatus {
+  OPEN
+  HUMAN_TAKEOVER
+  CLOSED
+}
+
+model Conversation {
+  id               String             @id @default(uuid())
+  tenantId         String
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status           ConversationStatus @default(OPEN)
+  automationPaused Boolean            @default(false)
+  assignedAgentId  String?
+  assignedAgent    User?              @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  lastMessageAt    DateTime?
+  unreadCount      Int                @default(0)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  messages Message[]
+  notes    InternalNote[]
+
+  @@index([tenantId, status, lastMessageAt])
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  LOCATION
+  INTERACTIVE
+  TEMPLATE
+  SYSTEM
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  RECEIVED
+}
+
+model Message {
+  id             String           @id @default(uuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  direction      MessageDirection
+  type           MessageType
+  status         MessageStatus    @default(RECEIVED)
+  waMessageId    String?
+  body           String?
+  payload        Json?
+  mediaUrl       String?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model InternalNote {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation(fields: [authorId], references: [id])
+  body           String
+  createdAt      DateTime     @default(now())
+}
+
+// ---------------- Module 4: Keyword automation ----------------
+
+model KeywordRule {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  keywords  String[]
+  response  String
+  isActive  Boolean  @default(true)
+  priority  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, isActive])
+}
+
+model FallbackRule {
+  id        String   @id @default(uuid())
+  tenantId  String   @unique
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  response  String
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------- Module 6: Menu management ----------------
+
+model MenuCategory {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items MenuItem[]
+
+  @@index([tenantId])
+}
+
+model MenuItem {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  basePrice   Decimal      @db.Decimal(10, 2)
+  imageUrl    String?
+  inStock     Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  addonGroups MenuItemAddonGroup[]
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+
+  @@index([tenantId, categoryId])
+}
+
+model AddonGroup {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  minSelect   Int          @default(0)
+  maxSelect   Int          @default(1)
+  options     AddonOption[]
+  items       MenuItemAddonGroup[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model AddonOption {
+  id          String     @id @default(uuid())
+  groupId     String
+  group       AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name        String
+  priceDelta  Decimal    @default(0) @db.Decimal(10, 2)
+  sortOrder   Int        @default(0)
+
+  cartItemAddons   CartItemAddon[]
+  orderItemAddons  OrderItemAddon[]
+}
+
+model MenuItemAddonGroup {
+  itemId   String
+  groupId  String
+  item     MenuItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  group    AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, groupId])
+}
+
+// ---------------- Module 7: Ordering flow / cart ----------------
+
+enum CartState {
+  IDLE
+  BROWSING_CATEGORY
+  BROWSING_ITEMS
+  SELECTING_QUANTITY
+  REVIEWING_CART
+  COLLECTING_NAME
+  COLLECTING_ADDRESS
+  CHECKOUT_READY
+}
+
+model Cart {
+  id             String     @id @default(uuid())
+  tenantId       String
+  tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId     String     @unique
+  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  state          CartState  @default(IDLE)
+  context        Json?      // current category, item being configured, etc.
+  customerName   String?
+  deliveryAddr   String?
+  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime   @default(now())
+
+  items CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      MenuItem @relation(fields: [itemId], references: [id])
+  quantity  Int      @default(1)
+  unitPrice Decimal  @db.Decimal(10, 2)
+  addons    CartItemAddon[]
+  createdAt DateTime @default(now())
+}
+
+model CartItemAddon {
+  id          String      @id @default(uuid())
+  cartItemId  String
+  cartItem    CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  optionId    String
+  option      AddonOption @relation(fields: [optionId], references: [id])
+  priceDelta  Decimal     @db.Decimal(10, 2)
+}
+
+// ---------------- Module 8: Orders ----------------
+
+enum OrderStatus {
+  NEW
+  ACCEPTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId      String
+  customer        Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderNumber     Int         @default(autoincrement())
+  status          OrderStatus @default(NEW)
+  customerName    String
+  deliveryAddress String
+  contactPhone    String?
+  subtotal        Decimal     @db.Decimal(12, 2)
+  totalAmount     Decimal     @db.Decimal(12, 2)
+  notes           String?
+  placedAt        DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items OrderItem[]
+
+  @@index([tenantId, status, placedAt])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      MenuItem @relation(fields: [itemId], references: [id])
+  itemName  String
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2)
+  lineTotal Decimal  @db.Decimal(10, 2)
+  addons    OrderItemAddon[]
+}
+
+model OrderItemAddon {
+  id          String      @id @default(uuid())
+  orderItemId String
+  orderItem   OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  optionId    String
+  option      AddonOption @relation(fields: [optionId], references: [id])
+  name        String
+  priceDelta  Decimal     @db.Decimal(10, 2)
+}
+
+// ---------------- Module 9: Templates ----------------
+
+enum TemplateTrigger {
+  ORDER_CREATED
+  ORDER_ACCEPTED
+  ORDER_PREPARING
+  ORDER_READY
+  ORDER_OUT_FOR_DELIVERY
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  CUSTOM
+}
+
+model MessageTemplate {
+  id            String          @id @default(uuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  trigger       TemplateTrigger
+  metaTemplate  String          // approved Meta template name
+  language      String          @default("en")
+  body          String          // human-readable body for preview
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([tenantId, trigger])
+}
