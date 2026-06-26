@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatDateTime } from '@/lib/utils';
 import { useFacebookSdk } from '@/hooks/useFacebookSdk';
+import { useAuthStore } from '@/stores/auth.store';
 import {
   RefreshCw, Copy, ExternalLink, AlertTriangle, Shield,
   Eye, EyeOff, Info, CheckCircle2, Smartphone,
@@ -37,6 +38,7 @@ function CopyButton({ value }: { value: string }) {
 
 export default function Whatsapp() {
   const qc = useQueryClient();
+  const tenant = useAuthStore((s) => s.tenant);
   const [newToken, setNewToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [manual, setManual] = useState({ wabaId: '', phoneNumberId: '', displayPhone: '', accessToken: '' });
@@ -150,74 +152,76 @@ export default function Whatsapp() {
         <div className="space-y-4">
           {/* Connection card */}
           <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-            {/* View in Meta link */}
-            <div className="flex justify-end px-5 pt-4">
+            {/* Top bar: View in Meta */}
+            <div className="flex justify-end px-5 pt-4 pb-0">
               <a
                 href={`https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${account.wabaId}`}
                 target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 border rounded-lg px-3 py-1.5 hover:bg-accent transition-colors"
               >
-                View in Meta <ExternalLink className="w-3 h-3" />
+                View in Meta <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
 
-            <div className="flex flex-col md:flex-row gap-6 px-6 pb-6">
-              {/* Left: status + disconnect */}
-              <div className="flex flex-col items-start gap-4 md:w-64 shrink-0">
-                {/* WhatsApp logo with check */}
-                <div className="relative">
-                  <div className="w-20 h-20 rounded-full bg-emerald-50 border-4 border-emerald-100 flex items-center justify-center">
-                    <div className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center">
-                      <svg viewBox="0 0 24 24" className="w-8 h-8 fill-white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
-                    </div>
-                  </div>
+            <div className="flex flex-col md:flex-row items-start gap-6 px-6 pb-6 pt-4">
+              {/* Left: image + status + disconnect */}
+              <div className="flex items-start gap-4 shrink-0">
+                {/* whatsapp_connect image */}
+                <div className="relative shrink-0">
+                  <img
+                    src="/whatsapp_connect.png"
+                    alt="WhatsApp Connected"
+                    className="w-20 h-20 rounded-full object-cover border-4 border-emerald-100"
+                  />
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
                     <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                   </div>
                 </div>
 
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Connection Status</p>
-                  <p className="text-3xl font-bold text-slate-900 mt-0.5">Connected</p>
-                  {account.tokenExpired && (
-                    <Badge className="mt-2 bg-amber-100 text-amber-700 border-amber-300 font-semibold">
-                      Token Expired
-                    </Badge>
-                  )}
-                  {account.tokenExpired && (
-                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                      Your WhatsApp Business account is connected, but{' '}
-                      <span className="text-red-500 font-medium">the access token has expired.</span>
-                    </p>
-                  )}
+                {/* Status text + disconnect */}
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Connection Status</p>
+                    <p className="text-3xl font-bold text-slate-900 mt-0.5">Connected</p>
+                    {account.tokenExpired && (
+                      <Badge className="mt-1.5 bg-amber-100 text-amber-700 border-amber-300 font-semibold">
+                        Token Expired
+                      </Badge>
+                    )}
+                    {account.tokenExpired && (
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed max-w-[200px]">
+                        Your WhatsApp Business account is connected, but{' '}
+                        <span className="text-red-500 font-medium">the access token has expired.</span>
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-red-500 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-600 w-fit mt-1"
+                    onClick={() => disconnect.mutate()}
+                    disabled={disconnect.isPending}
+                  >
+                    {disconnect.isPending
+                      ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Disconnecting…</>
+                      : <><span className="text-red-400">⏻</span> Disconnect</>}
+                  </Button>
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 text-red-500 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
-                  onClick={() => disconnect.mutate()}
-                  disabled={disconnect.isPending}
-                >
-                  {disconnect.isPending
-                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Disconnecting…</>
-                    : <><span className="text-red-400">⏻</span> Disconnect</>}
-                </Button>
               </div>
 
               {/* Divider */}
-              <div className="hidden md:block w-px bg-slate-100 self-stretch" />
+              <div className="hidden md:block w-px bg-slate-100 self-stretch mx-2" />
 
               {/* Right: info grid */}
               <div className="flex-1 grid grid-cols-2 gap-x-8 gap-y-4 content-start">
                 {[
-                  { label: 'WABA ID', value: account.wabaId, copy: true, icon: '</>' },
-                  { label: 'Business Name', value: account.businessName || '—', icon: '🏢' },
-                  { label: 'Phone Number ID', value: account.phoneNumberId, copy: true, icon: '📞' },
-                  { label: 'Connected On', value: formatDateTime(account.connectedAt), icon: '📅' },
-                  { label: 'Display Name', value: account.displayPhone || '—', copy: !!account.displayPhone, icon: '👤' },
-                  { label: 'Business Account Status', value: 'ACTIVE', isStatus: true, icon: '🕐' },
-                ].map(({ label, value, copy, icon, isStatus }) => (
+                  { label: 'WABA ID', value: account.wabaId, copy: true },
+                  { label: 'Business Name', value: account.businessName || tenant?.businessName || '—' },
+                  { label: 'Phone Number ID', value: account.phoneNumberId, copy: true },
+                  { label: 'Connected On', value: formatDateTime(account.connectedAt) },
+                  { label: 'Display Name', value: account.displayPhone || '—', copy: !!account.displayPhone },
+                  { label: 'Business Account Status', value: 'ACTIVE', isStatus: true },
+                ].map(({ label, value, copy, isStatus }) => (
                   <div key={label}>
                     <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">{label}</p>
                     <div className="flex items-center mt-1">

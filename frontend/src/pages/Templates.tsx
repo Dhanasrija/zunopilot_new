@@ -795,9 +795,7 @@ export default function Templates() {
           >
             <Plus className="w-4 h-4" /> Create Template
           </Button>
-          <Button variant="ghost" size="icon" className="w-9 h-9">
-            <Settings className="w-4 h-4" />
-          </Button>
+
         </div>
       </div>
 
@@ -806,8 +804,8 @@ export default function Templates() {
         <div className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isConnected ? 'bg-emerald-100' : 'bg-red-100'}`}>
             <svg viewBox="0 0 24 24" className={`w-5 h-5 ${isConnected ? 'fill-emerald-600' : 'fill-red-500'}`}>
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z" />
             </svg>
           </div>
           <div>
@@ -891,130 +889,130 @@ export default function Templates() {
               {/* Table column */}
               <div className="flex-1 min-w-0">
                 <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-                    {/* Search + filters bar */}
-                    <div className="flex items-center gap-2 p-4 border-b flex-wrap">
-                      <div className="relative flex-1 min-w-48">
-                        <input
-                          className="w-full h-9 pl-9 pr-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
-                          placeholder="Search templates..."
-                          value={searchQuery}
-                          onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                        />
-                        <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
-                      </div>
-                      <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
-                        <SelectTrigger className="h-9 w-40 text-sm"><SelectValue placeholder="All Categories" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ALL">All Categories</SelectItem>
-                          <SelectItem value="UTILITY">Utility</SelectItem>
-                          <SelectItem value="MARKETING">Marketing</SelectItem>
-                          <SelectItem value="AUTHENTICATION">Authentication</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-                        <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="All Status" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ALL">All Status</SelectItem>
-                          <SelectItem value="APPROVED">Approved</SelectItem>
-                          <SelectItem value="PENDING">Pending</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={langFilter} onValueChange={(v) => { setLangFilter(v); setPage(1); }}>
-                        <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="All Languages" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ALL">All Languages</SelectItem>
-                          {uniqueLangs.map((l) => <SelectItem key={l} value={l}>{LANG_LABEL[l] || l}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                  {/* Search + filters bar */}
+                  <div className="flex items-center gap-2 p-4 border-b flex-wrap">
+                    <div className="relative flex-1 min-w-48">
+                      <input
+                        className="w-full h-9 pl-9 pr-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
+                        placeholder="Search templates..."
+                        value={searchQuery}
+                        onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                      />
+                      <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
                     </div>
+                    <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
+                      <SelectTrigger className="h-9 w-40 text-sm"><SelectValue placeholder="All Categories" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Categories</SelectItem>
+                        <SelectItem value="UTILITY">Utility</SelectItem>
+                        <SelectItem value="MARKETING">Marketing</SelectItem>
+                        <SelectItem value="AUTHENTICATION">Authentication</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+                      <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="All Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Status</SelectItem>
+                        <SelectItem value="APPROVED">Approved</SelectItem>
+                        <SelectItem value="PENDING">Pending</SelectItem>
+                        <SelectItem value="REJECTED">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={langFilter} onValueChange={(v) => { setLangFilter(v); setPage(1); }}>
+                      <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="All Languages" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Languages</SelectItem>
+                        {uniqueLangs.map((l) => <SelectItem key={l} value={l}>{LANG_LABEL[l] || l}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                    {/* Table */}
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide pl-4">Template Name</TableHead>
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Category</TableHead>
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Language</TableHead>
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Status</TableHead>
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide pr-4 text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {isLoadingMeta ? (
-                          <TableRow><TableCell colSpan={6} className="py-16 text-center">
-                            <RefreshCw className="w-6 h-6 animate-spin text-violet-500 mx-auto" />
-                          </TableCell></TableRow>
-                        ) : paginated.length === 0 ? (
-                          <TableRow><TableCell colSpan={6} className="py-16 text-center text-muted-foreground text-sm">
-                            No templates match your filters.
-                          </TableCell></TableRow>
-                        ) : paginated.map((t) => {
-                          const cs = CAT_STYLE[t.category] || CAT_STYLE.UTILITY;
-                          const bodyPreview = getCompText(t, 'BODY').slice(0, 55);
+                  {/* Table */}
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide pl-4">Template Name</TableHead>
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Category</TableHead>
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Language</TableHead>
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">Status</TableHead>
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide pr-4 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingMeta ? (
+                        <TableRow><TableCell colSpan={6} className="py-16 text-center">
+                          <RefreshCw className="w-6 h-6 animate-spin text-violet-500 mx-auto" />
+                        </TableCell></TableRow>
+                      ) : paginated.length === 0 ? (
+                        <TableRow><TableCell colSpan={6} className="py-16 text-center text-muted-foreground text-sm">
+                          No templates match your filters.
+                        </TableCell></TableRow>
+                      ) : paginated.map((t) => {
+                        const cs = CAT_STYLE[t.category] || CAT_STYLE.UTILITY;
+                        const bodyPreview = getCompText(t, 'BODY').slice(0, 55);
+                        return (
+                          <TableRow key={t.id} className="hover:bg-slate-50/50">
+                            <TableCell className="pl-4">
+                              <div className="flex items-center gap-3">
+                                <CatIcon category={t.category} />
+                                <div>
+                                  <p className="font-medium text-sm text-slate-800">{t.name}</p>
+                                  <p className="text-[11px] text-slate-400 truncate max-w-[200px]">{bodyPreview}{bodyPreview.length === 55 ? '…' : ''}</p>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${cs.bg} ${cs.text}`}>
+                                {t.category.charAt(0) + t.category.slice(1).toLowerCase()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-sm text-slate-600">{LANG_LABEL[t.language] || t.language}</TableCell>
+                            <TableCell><StatusBadge status={t.status} /></TableCell>
+                            <TableCell className="pr-4">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => handleView(t)}>
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-violet-600" onClick={() => handleEdit(t)}>
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-500"
+                                  onClick={() => setDeleteConfirm({ open: true, type: 'meta', targetIdOrName: t.name, displayName: t.name })}>
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t text-sm text-slate-500">
+                      <span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} templates</span>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                          const n = i + 1;
                           return (
-                            <TableRow key={t.id} className="hover:bg-slate-50/50">
-                              <TableCell className="pl-4">
-                                <div className="flex items-center gap-3">
-                                  <CatIcon category={t.category} />
-                                  <div>
-                                    <p className="font-medium text-sm text-slate-800">{t.name}</p>
-                                    <p className="text-[11px] text-slate-400 truncate max-w-[200px]">{bodyPreview}{bodyPreview.length === 55 ? '…' : ''}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${cs.bg} ${cs.text}`}>
-                                  {t.category.charAt(0) + t.category.slice(1).toLowerCase()}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-sm text-slate-600">{LANG_LABEL[t.language] || t.language}</TableCell>
-                              <TableCell><StatusBadge status={t.status} /></TableCell>
-                              <TableCell className="pr-4">
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => handleView(t)}>
-                                    <Eye className="w-4 h-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-violet-600" onClick={() => handleEdit(t)}>
-                                    <Pencil className="w-4 h-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-500"
-                                    onClick={() => setDeleteConfirm({ open: true, type: 'meta', targetIdOrName: t.name, displayName: t.name })}>
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
+                            <Button key={n} variant={page === n ? 'default' : 'ghost'} size="icon"
+                              className={`h-8 w-8 text-xs ${page === n ? 'bg-violet-600 text-white hover:bg-violet-700' : ''}`}
+                              onClick={() => setPage(n)}>
+                              {n}
+                            </Button>
                           );
                         })}
-                      </TableBody>
-                    </Table>
-
-                    {/* Pagination */}
-                    {totalPages > 1 && (
-                      <div className="flex items-center justify-between px-4 py-3 border-t text-sm text-slate-500">
-                        <span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} templates</span>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-                            <ChevronLeft className="w-4 h-4" />
-                          </Button>
-                          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                            const n = i + 1;
-                            return (
-                              <Button key={n} variant={page === n ? 'default' : 'ghost'} size="icon"
-                                className={`h-8 w-8 text-xs ${page === n ? 'bg-violet-600 text-white hover:bg-violet-700' : ''}`}
-                                onClick={() => setPage(n)}>
-                                {n}
-                              </Button>
-                            );
-                          })}
-                          {totalPages > 5 && <span className="px-1">…</span>}
-                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-                            <ChevronRight className="w-4 h-4" />
-                          </Button>
-                        </div>
+                        {totalPages > 5 && <span className="px-1">…</span>}
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
                       </div>
-                    )}
+                    </div>
+                  )}
                 </div>
               </div>
 
