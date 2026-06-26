@@ -14,10 +14,7 @@ datasource db {
 
 enum BusinessCategory {
   RESTAURANT
-  SALON
-  RETAIL
-  CLINIC
-  OTHER
+  ECOMMERCE_GROCERY
 }
 
 enum UserRole {
@@ -29,7 +26,7 @@ enum UserRole {
 model Tenant {
   id            String           @id @default(uuid())
   businessName  String
-  category      BusinessCategory @default(OTHER)
+  category      BusinessCategory @default(RESTAURANT)
   contactNumber String?
   address       String?
   website       String?
@@ -246,6 +243,8 @@ model MenuItem {
   imageUrl    String?
   inStock     Boolean      @default(true)
   sortOrder   Int          @default(0)
+  // Category-specific extra fields (e.g. grocery: sku, brand, unit, stockQty)
+  attributes  Json?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 

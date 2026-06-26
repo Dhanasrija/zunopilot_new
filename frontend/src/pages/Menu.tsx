@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuthStore } from '@/stores/auth.store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,106 +11,142 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Trash2 } from 'lucide-react';
+import {
+  Plus, Trash2, ShoppingBag, UtensilsCrossed, Search,
+  ChevronLeft, ChevronRight, LayoutGrid, PackageX, PackageCheck, Tag,
+} from 'lucide-react';
 
-interface Category { id: string; name: string; description?: string; sortOrder: number; isActive: boolean; _count?: { items: number } }
-interface Item { id: string; categoryId: string; name: string; description?: string; basePrice: number | string; inStock: boolean; category?: { name: string } }
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export default function MenuPage() {
+interface Category {
+  id: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  isActive: boolean;
+  _count?: { items: number };
+}
+
+interface GroceryAttributes {
+  sku?: string;
+  brand?: string;
+  unit?: string;
+  stockQty?: number | null;
+}
+
+interface Item {
+  id: string;
+  categoryId: string;
+  name: string;
+  description?: string;
+  basePrice: number | string;
+  inStock: boolean;
+  category?: { name: string };
+  attributes?: GroceryAttributes | Record<string, unknown> | null;
+}
+
+const GROCERY_UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'pack', 'dozen', 'box', 'bundle'];
+const PAGE_SIZE = 10;
+
+const isGrocery = (cat: string) => cat === 'ECOMMERCE_GROCERY';
+
+// ── Stats cards ───────────────────────────────────────────────────────────────
+
+function StatsCards({ items, categories, grocery }: { items: Item[]; categories: Category[]; grocery: boolean }) {
+  const stats = useMemo(() => {
+    const inStock = items.filter((i) => i.inStock).length;
+    const outOfStock = items.filter((i) => !i.inStock).length;
+    const lowStock = grocery
+      ? items.filter((i) => {
+          const qty = ((i.attributes ?? {}) as GroceryAttributes).stockQty;
+          return qty != null && qty > 0 && qty <= 5;
+        }).length
+      : 0;
+
+    return { total: items.length, cats: categories.length, inStock, outOfStock, lowStock };
+  }, [items, categories, grocery]);
+
+  const cards = grocery
+    ? [
+        { label: 'Total Products', value: stats.total, icon: ShoppingBag, iconBg: 'bg-violet-100', iconColor: 'text-violet-600' },
+        { label: 'Categories', value: stats.cats, icon: LayoutGrid, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
+        { label: 'In Stock', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+        { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+      ]
+    : [
+        { label: 'Total Items', value: stats.total, icon: UtensilsCrossed, iconBg: 'bg-orange-100', iconColor: 'text-orange-500' },
+        { label: 'Categories', value: stats.cats, icon: Tag, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
+        { label: 'Available', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+        { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+      ];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Menu</h1>
-        <p className="text-sm text-muted-foreground">Manage categories, items and add-on groups.</p>
-      </div>
-      <Tabs defaultValue="items">
-        <TabsList>
-          <TabsTrigger value="items">Items</TabsTrigger>
-          <TabsTrigger value="categories">Categories</TabsTrigger>
-        </TabsList>
-        <TabsContent value="items"><ItemsTab /></TabsContent>
-        <TabsContent value="categories"><CategoriesTab /></TabsContent>
-      </Tabs>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {cards.map(({ label, value, icon: Icon, iconBg, iconColor }) => (
+        <div key={label} className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
+          <div className={`w-11 h-11 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
+            <Icon className={`w-5 h-5 ${iconColor}`} />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="text-2xl font-bold mt-0.5">{value}</p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function CategoriesTab() {
-  const qc = useQueryClient();
-  const { data = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: async () => (await api.get<{ data: Category[] }>('/menu/categories')).data.data,
-  });
+// ── Restaurant items tab ──────────────────────────────────────────────────────
 
-  const [name, setName] = useState('');
-  const create = useMutation({
-    mutationFn: async () => api.post('/menu/categories', { name }),
-    onSuccess: () => { setName(''); toast.success('Category added'); qc.invalidateQueries({ queryKey: ['categories'] }); },
-  });
-  const del = useMutation({
-    mutationFn: async (id: string) => api.delete(`/menu/categories/${id}`),
-    onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['categories'] }); },
-  });
-
-  return (
-    <Card>
-      <CardHeader><CardTitle>Categories</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex gap-2">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category name" />
-          <Button onClick={() => name && create.mutate()} disabled={!name}><Plus className="h-4 w-4 mr-1" />Add</Button>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow><TableHead>Name</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell>{c.name}</TableCell>
-                <TableCell>{c._count?.items ?? 0}</TableCell>
-                <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" onClick={() => del.mutate(c.id)}><Trash2 className="h-4 w-4" /></Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ItemsTab() {
-  const qc = useQueryClient();
-  const { data: items = [] } = useQuery({
-    queryKey: ['items'],
-    queryFn: async () => (await api.get<{ data: Item[] }>('/menu/items')).data.data,
-  });
-  const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: async () => (await api.get<{ data: Category[] }>('/menu/categories')).data.data,
-  });
-
+function RestaurantItemsTab({ items, categories, isLoading, qc }: {
+  items: Item[]; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
+}) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const resetForm = () => setForm({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
+
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('ALL');
+  const [stockFilter, setStockFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+
+  const filtered = useMemo(() => {
+    let rows = items;
+    if (catFilter !== 'ALL') rows = rows.filter((i) => i.categoryId === catFilter);
+    if (stockFilter === 'IN') rows = rows.filter((i) => i.inStock);
+    if (stockFilter === 'OUT') rows = rows.filter((i) => !i.inStock);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      rows = rows.filter((i) => i.name.toLowerCase().includes(q) || i.category?.name.toLowerCase().includes(q));
+    }
+    return rows;
+  }, [items, catFilter, stockFilter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageNumbers: (number | '...')[] = useMemo(() => {
+    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (page <= 3) return [1, 2, 3, '...', totalPages];
+    if (page >= totalPages - 2) return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+    return [1, '...', page, '...', totalPages];
+  }, [page, totalPages]);
 
   const create = useMutation({
     mutationFn: async () => api.post('/menu/items', { ...form, basePrice: parseFloat(form.basePrice) }),
-    onSuccess: () => {
-      setOpen(false);
-      setForm({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
-      toast.success('Item added');
-      qc.invalidateQueries({ queryKey: ['items'] });
-    },
+    onSuccess: () => { setOpen(false); resetForm(); toast.success('Item added'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
   const toggleStock = useMutation({
-    mutationFn: async ({ id, inStock }: { id: string; inStock: boolean }) =>
-      api.patch(`/menu/items/${id}`, { inStock, name: items.find((i) => i.id === id)?.name, basePrice: items.find((i) => i.id === id)?.basePrice }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); },
+    mutationFn: async ({ id, inStock }: { id: string; inStock: boolean }) => {
+      const item = items.find((i) => i.id === id)!;
+      return api.patch(`/menu/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   });
 
   const del = useMutation({
@@ -118,53 +154,519 @@ function ItemsTab() {
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
+  const handleSearch = (v: string) => { setSearch(v); setPage(1); };
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Items</CardTitle>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-1" />Add item</Button></DialogTrigger>
+    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Search items…" className="pl-9 h-9 text-sm" value={search}
+            onChange={(e) => handleSearch(e.target.value)} />
+        </div>
+        <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
+          <SelectTrigger className="h-9 w-40 text-sm"><SelectValue placeholder="All Categories" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={stockFilter} onValueChange={(v) => { setStockFilter(v); setPage(1); }}>
+          <SelectTrigger className="h-9 w-36 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All Status</SelectItem>
+            <SelectItem value="IN">In Stock</SelectItem>
+            <SelectItem value="OUT">Out of Stock</SelectItem>
+          </SelectContent>
+        </Select>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
+          <DialogTrigger asChild>
+            <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700 ml-auto">
+              <Plus className="h-4 w-4" /> Add Item
+            </Button>
+          </DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>New menu item</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Category</Label>
-                <Select value={form.categoryId} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Pick…" /></SelectTrigger>
-                  <SelectContent>
-                    {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
+            <DialogHeader><DialogTitle>New Menu Item</DialogTitle></DialogHeader>
+            <div className="space-y-3 py-1">
+              <div>
+                <Label>Category</Label>
+                <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
+                  <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                  <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
-              <div><Label>Description</Label><Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></div>
-              <div><Label>Base price (₹)</Label><Input type="number" step="0.01" value={form.basePrice} onChange={(e) => setForm((f) => ({ ...f, basePrice: e.target.value }))} /></div>
-              <Button onClick={() => create.mutate()} disabled={!form.categoryId || !form.name || !form.basePrice}>Create</Button>
+              <div><Label>Name</Label>
+                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Chicken Biryani" />
+              </div>
+              <div><Label>Description</Label>
+                <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
+              </div>
+              <div><Label>Price (₹)</Label>
+                <Input type="number" step="0.01" value={form.basePrice} onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
+                <Label>In Stock</Label>
+              </div>
+              <Button className="w-full" onClick={() => create.mutate()}
+                disabled={!form.categoryId || !form.name || !form.basePrice || create.isPending}>
+                {create.isPending ? 'Adding…' : 'Add Item'}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
-      </CardHeader>
-      <CardContent>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">No items found</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/60">
+                  <TableHead>Item</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>In Stock</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-slate-100">
+                {paginated.map((i) => (
+                  <TableRow key={i.id} className="hover:bg-slate-50/50">
+                    <TableCell className="font-medium">{i.name}
+                      {i.description && <p className="text-xs text-muted-foreground font-normal truncate max-w-[200px]">{i.description}</p>}
+                    </TableCell>
+                    <TableCell>{i.category?.name || '—'}</TableCell>
+                    <TableCell className="font-medium">{formatCurrency(i.basePrice as number)}</TableCell>
+                    <TableCell>
+                      <Switch checked={i.inStock} onCheckedChange={(v) => toggleStock.mutate({ id: i.id, inStock: v })} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button size="sm" variant="ghost" onClick={() => del.mutate(i.id)}>
+                        <Trash2 className="h-4 w-4 text-red-400" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {/* Pagination */}
+          <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
+            <p className="text-xs text-slate-500">
+              Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
+              {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} items
+            </p>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="w-7 h-7"
+                disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              {pageNumbers.map((n, i) =>
+                n === '...' ? (
+                  <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
+                ) : (
+                  <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
+                    className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
+                    onClick={() => setPage(n as number)}>
+                    {n}
+                  </Button>
+                )
+              )}
+              <Button variant="outline" size="icon" className="w-7 h-7"
+                disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Grocery items tab ─────────────────────────────────────────────────────────
+
+type GroceryForm = {
+  categoryId: string; name: string; brand: string; sku: string;
+  unit: string; basePrice: string; stockQty: string; description: string; inStock: boolean;
+};
+
+const EMPTY_GROCERY: GroceryForm = {
+  categoryId: '', name: '', brand: '', sku: '',
+  unit: 'piece', basePrice: '', stockQty: '', description: '', inStock: true,
+};
+
+function GroceryItemsTab({ items, categories, isLoading, qc }: {
+  items: Item[]; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<GroceryForm>(EMPTY_GROCERY);
+  const set = <K extends keyof GroceryForm>(k: K, v: GroceryForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const resetForm = () => setForm(EMPTY_GROCERY);
+
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('ALL');
+  const [stockFilter, setStockFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+
+  const filtered = useMemo(() => {
+    let rows = items;
+    if (catFilter !== 'ALL') rows = rows.filter((i) => i.categoryId === catFilter);
+    if (stockFilter === 'IN') rows = rows.filter((i) => i.inStock);
+    if (stockFilter === 'OUT') rows = rows.filter((i) => !i.inStock);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      rows = rows.filter((i) => {
+        const attr = (i.attributes ?? {}) as GroceryAttributes;
+        return (
+          i.name.toLowerCase().includes(q) ||
+          i.category?.name.toLowerCase().includes(q) ||
+          attr.brand?.toLowerCase().includes(q) ||
+          attr.sku?.toLowerCase().includes(q)
+        );
+      });
+    }
+    return rows;
+  }, [items, catFilter, stockFilter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageNumbers: (number | '...')[] = useMemo(() => {
+    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (page <= 3) return [1, 2, 3, '...', totalPages];
+    if (page >= totalPages - 2) return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+    return [1, '...', page, '...', totalPages];
+  }, [page, totalPages]);
+
+  const create = useMutation({
+    mutationFn: async () => api.post('/menu/items', {
+      categoryId: form.categoryId,
+      name: form.name,
+      description: form.description || undefined,
+      basePrice: parseFloat(form.basePrice),
+      inStock: form.inStock,
+      attributes: {
+        sku: form.sku || undefined,
+        brand: form.brand || undefined,
+        unit: form.unit,
+        stockQty: form.stockQty ? parseInt(form.stockQty) : null,
+      },
+    }),
+    onSuccess: () => { setOpen(false); resetForm(); toast.success('Product added'); qc.invalidateQueries({ queryKey: ['items'] }); },
+  });
+
+  const toggleStock = useMutation({
+    mutationFn: async ({ id, inStock }: { id: string; inStock: boolean }) => {
+      const item = items.find((i) => i.id === id)!;
+      return api.patch(`/menu/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  });
+
+  const del = useMutation({
+    mutationFn: async (id: string) => api.delete(`/menu/items/${id}`),
+    onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
+  });
+
+  const handleSearch = (v: string) => { setSearch(v); setPage(1); };
+
+  return (
+    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Search by name, brand or SKU…" className="pl-9 h-9 text-sm" value={search}
+            onChange={(e) => handleSearch(e.target.value)} />
+        </div>
+        <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
+          <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="All Categories" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={stockFilter} onValueChange={(v) => { setStockFilter(v); setPage(1); }}>
+          <SelectTrigger className="h-9 w-36 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All Status</SelectItem>
+            <SelectItem value="IN">Available</SelectItem>
+            <SelectItem value="OUT">Unavailable</SelectItem>
+          </SelectContent>
+        </Select>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
+          <DialogTrigger asChild>
+            <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700 ml-auto">
+              <Plus className="h-4 w-4" /> Add Product
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg">
+            <DialogHeader><DialogTitle>New Product</DialogTitle></DialogHeader>
+            <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
+              <div>
+                <Label>Category <span className="text-red-500">*</span></Label>
+                <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
+                  <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                  <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Product Name <span className="text-red-500">*</span></Label>
+                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Basmati Rice" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Brand</Label>
+                  <Input value={form.brand} onChange={(e) => set('brand', e.target.value)} placeholder="e.g. India Gate" />
+                </div>
+                <div><Label>SKU</Label>
+                  <Input value={form.sku} onChange={(e) => set('sku', e.target.value)} placeholder="e.g. RICE-001" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Unit <span className="text-red-500">*</span></Label>
+                  <Select value={form.unit} onValueChange={(v) => set('unit', v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
+                  <Input type="number" step="0.01" value={form.basePrice}
+                    onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Stock Quantity</Label>
+                  <Input type="number" min={0} value={form.stockQty}
+                    onChange={(e) => set('stockQty', e.target.value)} placeholder="0" />
+                </div>
+                <div className="flex items-end pb-1">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
+                    <Label>Available</Label>
+                  </div>
+                </div>
+              </div>
+              <div><Label>Description</Label>
+                <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
+              </div>
+              <Button className="w-full" onClick={() => create.mutate()}
+                disabled={!form.categoryId || !form.name || !form.basePrice || !form.unit || create.isPending}>
+                {create.isPending ? 'Adding…' : 'Add Product'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">No products found</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/60">
+                  <TableHead>Product</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Brand</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead>Available</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-slate-100">
+                {paginated.map((i) => {
+                  const attr = (i.attributes ?? {}) as GroceryAttributes;
+                  return (
+                    <TableRow key={i.id} className="hover:bg-slate-50/50">
+                      <TableCell className="font-medium">{i.name}
+                        {i.description && <p className="text-xs text-muted-foreground font-normal truncate max-w-[180px]">{i.description}</p>}
+                      </TableCell>
+                      <TableCell>{i.category?.name || '—'}</TableCell>
+                      <TableCell>{attr.brand || '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{attr.sku || '—'}</TableCell>
+                      <TableCell>
+                        {attr.unit ? <Badge variant="outline" className="text-xs">{attr.unit}</Badge> : '—'}
+                      </TableCell>
+                      <TableCell className="font-medium">{formatCurrency(i.basePrice as number)}</TableCell>
+                      <TableCell>
+                        {attr.stockQty != null
+                          ? <span className={attr.stockQty === 0 ? 'text-red-500 font-semibold' : attr.stockQty <= 5 ? 'text-amber-500 font-medium' : ''}>{attr.stockQty}</span>
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Switch checked={i.inStock} onCheckedChange={(v) => toggleStock.mutate({ id: i.id, inStock: v })} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost" onClick={() => del.mutate(i.id)}>
+                          <Trash2 className="h-4 w-4 text-red-400" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          {/* Pagination */}
+          <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
+            <p className="text-xs text-slate-500">
+              Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
+              {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} products
+            </p>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="w-7 h-7"
+                disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              {pageNumbers.map((n, i) =>
+                n === '...' ? (
+                  <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
+                ) : (
+                  <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
+                    className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
+                    onClick={() => setPage(n as number)}>
+                    {n}
+                  </Button>
+                )
+              )}
+              <Button variant="outline" size="icon" className="w-7 h-7"
+                disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Categories tab ────────────────────────────────────────────────────────────
+
+function CategoriesTab({ label, categories, isLoading, qc }: {
+  label: string; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
+}) {
+  const [name, setName] = useState('');
+  const create = useMutation({
+    mutationFn: async () => api.post('/menu/categories', { name }),
+    onSuccess: () => { setName(''); toast.success(`${label} added`); qc.invalidateQueries({ queryKey: ['categories'] }); },
+  });
+  const del = useMutation({
+    mutationFn: async (id: string) => api.delete(`/menu/categories/${id}`),
+    onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['categories'] }); },
+  });
+
+  return (
+    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-4 border-b">
+        <Input value={name} onChange={(e) => setName(e.target.value)}
+          placeholder={`New ${label.toLowerCase()} name`} className="max-w-xs h-9 text-sm"
+          onKeyDown={(e) => e.key === 'Enter' && name && create.mutate()} />
+        <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700"
+          onClick={() => name && create.mutate()} disabled={!name || create.isPending}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+      </div>
+      {isLoading ? (
+        <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : (
         <Table>
           <TableHeader>
-            <TableRow><TableHead>Item</TableHead><TableHead>Category</TableHead><TableHead>Price</TableHead><TableHead>In stock</TableHead><TableHead></TableHead></TableRow>
+            <TableRow className="bg-slate-50/60">
+              <TableHead>Name</TableHead>
+              <TableHead>{label === 'Menu Category' ? 'Items' : 'Products'}</TableHead>
+              <TableHead />
+            </TableRow>
           </TableHeader>
-          <TableBody>
-            {items.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell>{i.name}</TableCell>
-                <TableCell>{i.category?.name || '—'}</TableCell>
-                <TableCell>{formatCurrency(i.basePrice as number)}</TableCell>
-                <TableCell>
-                  <Switch checked={i.inStock} onCheckedChange={(v) => toggleStock.mutate({ id: i.id, inStock: v })} />
-                </TableCell>
+          <TableBody className="divide-y divide-slate-100">
+            {categories.map((c) => (
+              <TableRow key={c.id} className="hover:bg-slate-50/50">
+                <TableCell className="font-medium">{c.name}</TableCell>
+                <TableCell>{c._count?.items ?? 0}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" onClick={() => del.mutate(i.id)}><Trash2 className="h-4 w-4" /></Button>
+                  <Button size="sm" variant="ghost" onClick={() => del.mutate(c.id)}>
+                    <Trash2 className="h-4 w-4 text-red-400" />
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </CardContent>
-    </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function MenuPage() {
+  const tenant = useAuthStore((s) => s.tenant);
+  const businessCategory = tenant?.category ?? 'RESTAURANT';
+  const grocery = isGrocery(businessCategory);
+  const qc = useQueryClient();
+
+  const { data: items = [], isLoading: loadingItems } = useQuery({
+    queryKey: ['items'],
+    queryFn: async () => (await api.get<{ data: Item[] }>('/menu/items')).data.data,
+  });
+  const { data: categories = [], isLoading: loadingCats } = useQuery({
+    queryKey: ['categories'],
+    queryFn: async () => (await api.get<{ data: Category[] }>('/menu/categories')).data.data,
+  });
+
+  const pageTitle = grocery ? 'Products' : 'Menu';
+  const pageDesc = grocery
+    ? 'Manage your product catalog, categories, and inventory.'
+    : 'Manage categories, items and add-on groups.';
+  const categoryLabel = grocery ? 'Product Category' : 'Menu Category';
+  const Icon = grocery ? ShoppingBag : UtensilsCrossed;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${grocery ? 'bg-emerald-100' : 'bg-orange-100'}`}>
+          <Icon className={`w-5 h-5 ${grocery ? 'text-emerald-600' : 'text-orange-500'}`} />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold">{pageTitle}</h1>
+          <p className="text-sm text-muted-foreground">{pageDesc}</p>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <StatsCards items={items} categories={categories} grocery={grocery} />
+
+      {/* Tabs */}
+      <Tabs defaultValue="items">
+        <TabsList>
+          <TabsTrigger value="items">{grocery ? 'Products' : 'Items'}</TabsTrigger>
+          <TabsTrigger value="categories">{grocery ? 'Product Categories' : 'Categories'}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="items" className="mt-4">
+          {grocery
+            ? <GroceryItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} />
+            : <RestaurantItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} />}
+        </TabsContent>
+        <TabsContent value="categories" className="mt-4">
+          <CategoriesTab label={categoryLabel} categories={categories} isLoading={loadingCats} qc={qc} />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

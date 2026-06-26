@@ -48,7 +48,11 @@ export const listItems = asyncHandler(async (req, res) => {
 });
 
 export const createItem = asyncHandler(async (req, res) => {
-  const { categoryId, name, description, basePrice, imageUrl, inStock = true, sortOrder = 0, addonGroupIds = [] } = req.body;
+  const {
+    categoryId, name, description, basePrice, imageUrl,
+    inStock = true, sortOrder = 0, addonGroupIds = [],
+    attributes,           // arbitrary JSON shaped by frontend per category
+  } = req.body;
   const category = await prisma.menuCategory.findFirst({ where: { id: categoryId, tenantId: req.tenantId } });
   if (!category) throw ApiError.badRequest('Invalid category');
   const item = await prisma.menuItem.create({
@@ -61,6 +65,7 @@ export const createItem = asyncHandler(async (req, res) => {
       imageUrl,
       inStock,
       sortOrder,
+      attributes: attributes ?? undefined,
       addonGroups: { create: addonGroupIds.map((groupId) => ({ groupId })) },
     },
   });

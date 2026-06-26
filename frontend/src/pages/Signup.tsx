@@ -15,7 +15,12 @@ import {
   validatePhone, validateUrl, validateRequired, validateMaxLength,
 } from '@/lib/validators';
 
-const CATEGORIES = ['RESTAURANT', 'SALON', 'RETAIL', 'CLINIC', 'OTHER'] as const;
+const CATEGORIES = [
+  { value: 'RESTAURANT',        label: 'Restaurant' },
+  { value: 'ECOMMERCE_GROCERY', label: 'E-commerce (Grocery)' },
+] as const;
+
+type CategoryValue = (typeof CATEGORIES)[number]['value'];
 
 type Errors = Partial<Record<
   'businessName' | 'category' | 'contactNumber' | 'address' |
@@ -26,7 +31,7 @@ type Errors = Partial<Record<
 export default function Signup() {
   const [form, setForm] = useState({
     email: '', password: '', fullName: '',
-    businessName: '', category: 'RESTAURANT' as (typeof CATEGORIES)[number],
+    businessName: '', category: 'RESTAURANT' as CategoryValue,
     contactNumber: '', address: '', website: '',
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -140,7 +145,7 @@ export default function Signup() {
               <Select value={form.category} onValueChange={(v) => set('category', v)}>
                 <SelectTrigger className={inputCls(errors.category)}><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </FieldGroup>
