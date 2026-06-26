@@ -10,13 +10,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/utils';
 import {
   Plus, Trash2, ShoppingBag, UtensilsCrossed, Search,
-  ChevronLeft, ChevronRight, LayoutGrid, PackageX, PackageCheck, Tag,
+  ChevronLeft, ChevronRight, LayoutGrid, PackageX, PackageCheck, Tag, Eye, Pencil,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -61,9 +61,9 @@ function StatsCards({ items, categories, grocery }: { items: Item[]; categories:
     const outOfStock = items.filter((i) => !i.inStock).length;
     const lowStock = grocery
       ? items.filter((i) => {
-          const qty = ((i.attributes ?? {}) as GroceryAttributes).stockQty;
-          return qty != null && qty > 0 && qty <= 5;
-        }).length
+        const qty = ((i.attributes ?? {}) as GroceryAttributes).stockQty;
+        return qty != null && qty > 0 && qty <= 5;
+      }).length
       : 0;
 
     return { total: items.length, cats: categories.length, inStock, outOfStock, lowStock };
@@ -71,17 +71,17 @@ function StatsCards({ items, categories, grocery }: { items: Item[]; categories:
 
   const cards = grocery
     ? [
-        { label: 'Total Products', value: stats.total, icon: ShoppingBag, iconBg: 'bg-violet-100', iconColor: 'text-violet-600' },
-        { label: 'Categories', value: stats.cats, icon: LayoutGrid, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
-        { label: 'In Stock', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
-        { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
-      ]
+      { label: 'Total Products', value: stats.total, icon: ShoppingBag, iconBg: 'bg-violet-100', iconColor: 'text-violet-600' },
+      { label: 'Categories', value: stats.cats, icon: LayoutGrid, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
+      { label: 'In Stock', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+    ]
     : [
-        { label: 'Total Items', value: stats.total, icon: UtensilsCrossed, iconBg: 'bg-orange-100', iconColor: 'text-orange-500' },
-        { label: 'Categories', value: stats.cats, icon: Tag, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
-        { label: 'Available', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
-        { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
-      ];
+      { label: 'Total Items', value: stats.total, icon: UtensilsCrossed, iconBg: 'bg-orange-100', iconColor: 'text-orange-500' },
+      { label: 'Categories', value: stats.cats, icon: Tag, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
+      { label: 'Available', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+    ];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -102,13 +102,24 @@ function StatsCards({ items, categories, grocery }: { items: Item[]; categories:
 
 // ── Restaurant items tab ──────────────────────────────────────────────────────
 
-function RestaurantItemsTab({ items, categories, isLoading, qc }: {
+function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenChange }: {
   items: Item[]; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
+  addOpen: boolean; onAddOpenChange: (v: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const open = addOpen;
+  const setOpen = onAddOpenChange;
   const [form, setForm] = useState({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   const resetForm = () => setForm({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
+
+  const [viewItem, setViewItem] = useState<Item | null>(null);
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editForm, setEditForm] = useState({ categoryId: '', name: '', description: '', basePrice: '', inStock: true });
+  const setEdit = <K extends keyof typeof editForm>(k: K, v: (typeof editForm)[K]) => setEditForm((f) => ({ ...f, [k]: v }));
+  const openEdit = (item: Item) => {
+    setEditItem(item);
+    setEditForm({ categoryId: item.categoryId, name: item.name, description: item.description ?? '', basePrice: String(item.basePrice), inStock: item.inStock });
+  };
 
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('ALL');
@@ -154,6 +165,11 @@ function RestaurantItemsTab({ items, categories, isLoading, qc }: {
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
+  const update = useMutation({
+    mutationFn: async () => api.patch(`/menu/items/${editItem!.id}`, { ...editForm, basePrice: parseFloat(editForm.basePrice) }),
+    onSuccess: () => { setEditItem(null); toast.success('Item updated'); qc.invalidateQueries({ queryKey: ['items'] }); },
+  });
+
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
 
   return (
@@ -180,43 +196,38 @@ function RestaurantItemsTab({ items, categories, isLoading, qc }: {
             <SelectItem value="OUT">Out of Stock</SelectItem>
           </SelectContent>
         </Select>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700 ml-auto">
-              <Plus className="h-4 w-4" /> Add Item
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>New Menu Item</DialogTitle></DialogHeader>
-            <div className="space-y-3 py-1">
-              <div>
-                <Label>Category</Label>
-                <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
-                  <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
-                  <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Name</Label>
-                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Chicken Biryani" />
-              </div>
-              <div><Label>Description</Label>
-                <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
-              </div>
-              <div><Label>Price (₹)</Label>
-                <Input type="number" step="0.01" value={form.basePrice} onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
-                <Label>In Stock</Label>
-              </div>
-              <Button className="w-full" onClick={() => create.mutate()}
-                disabled={!form.categoryId || !form.name || !form.basePrice || create.isPending}>
-                {create.isPending ? 'Adding…' : 'Add Item'}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>New Menu Item</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <Label>Category</Label>
+              <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
+                <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Name</Label>
+              <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Chicken Biryani" />
+            </div>
+            <div><Label>Description</Label>
+              <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
+            </div>
+            <div><Label>Price (₹)</Label>
+              <Input type="number" step="0.01" value={form.basePrice} onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
+              <Label>In Stock</Label>
+            </div>
+            <Button className="w-full" onClick={() => create.mutate()}
+              disabled={!form.categoryId || !form.name || !form.basePrice || create.isPending}>
+              {create.isPending ? 'Adding…' : 'Add Item'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Table */}
       {isLoading ? (
@@ -248,9 +259,17 @@ function RestaurantItemsTab({ items, categories, isLoading, qc }: {
                       <Switch checked={i.inStock} onCheckedChange={(v) => toggleStock.mutate({ id: i.id, inStock: v })} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" onClick={() => del.mutate(i.id)}>
-                        <Trash2 className="h-4 w-4 text-red-400" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button size="sm" variant="ghost" title="View" onClick={() => setViewItem(i)}>
+                          <Eye className="h-4 w-4 text-slate-400" />
+                        </Button>
+                        <Button size="sm" variant="ghost" title="Edit" onClick={() => openEdit(i)}>
+                          <Pencil className="h-4 w-4 text-slate-400" />
+                        </Button>
+                        <Button size="sm" variant="ghost" title="Delete" onClick={() => del.mutate(i.id)}>
+                          <Trash2 className="h-4 w-4 text-red-400" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -287,6 +306,63 @@ function RestaurantItemsTab({ items, categories, isLoading, qc }: {
           </div>
         </>
       )}
+
+      {/* View Dialog */}
+      <Dialog open={!!viewItem} onOpenChange={(v) => !v && setViewItem(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>View Item</DialogTitle></DialogHeader>
+          {viewItem && (
+            <div className="space-y-3 py-1">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><p className="text-xs text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
+                <div><p className="text-xs text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
+                <div><p className="text-xs text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
+                <div><p className="text-xs text-muted-foreground mb-1">Status</p>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${viewItem.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                    {viewItem.inStock ? 'In Stock' : 'Out of Stock'}
+                  </span>
+                </div>
+                {viewItem.description && (
+                  <div className="col-span-2"><p className="text-xs text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editItem} onOpenChange={(v) => !v && setEditItem(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <Label>Category</Label>
+              <Select value={editForm.categoryId} onValueChange={(v) => setEdit('categoryId', v)}>
+                <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Name</Label>
+              <Input value={editForm.name} onChange={(e) => setEdit('name', e.target.value)} />
+            </div>
+            <div><Label>Description</Label>
+              <Textarea value={editForm.description} onChange={(e) => setEdit('description', e.target.value)} rows={2} />
+            </div>
+            <div><Label>Price (₹)</Label>
+              <Input type="number" step="0.01" value={editForm.basePrice} onChange={(e) => setEdit('basePrice', e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={editForm.inStock} onCheckedChange={(v) => setEdit('inStock', v)} />
+              <Label>In Stock</Label>
+            </div>
+            <Button className="w-full" onClick={() => update.mutate()}
+              disabled={!editForm.categoryId || !editForm.name || !editForm.basePrice || update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -303,13 +379,30 @@ const EMPTY_GROCERY: GroceryForm = {
   unit: 'piece', basePrice: '', stockQty: '', description: '', inStock: true,
 };
 
-function GroceryItemsTab({ items, categories, isLoading, qc }: {
+function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenChange }: {
   items: Item[]; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
+  addOpen: boolean; onAddOpenChange: (v: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const open = addOpen;
+  const setOpen = onAddOpenChange;
   const [form, setForm] = useState<GroceryForm>(EMPTY_GROCERY);
   const set = <K extends keyof GroceryForm>(k: K, v: GroceryForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const resetForm = () => setForm(EMPTY_GROCERY);
+
+  const [viewItem, setViewItem] = useState<Item | null>(null);
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editForm, setEditForm] = useState<GroceryForm>(EMPTY_GROCERY);
+  const setEditF = <K extends keyof GroceryForm>(k: K, v: GroceryForm[K]) => setEditForm((f) => ({ ...f, [k]: v }));
+  const openEdit = (item: Item) => {
+    const attr = (item.attributes ?? {}) as GroceryAttributes;
+    setEditItem(item);
+    setEditForm({
+      categoryId: item.categoryId, name: item.name,
+      description: item.description ?? '', basePrice: String(item.basePrice),
+      inStock: item.inStock, brand: attr.brand ?? '', sku: attr.sku ?? '',
+      unit: attr.unit ?? 'piece', stockQty: attr.stockQty != null ? String(attr.stockQty) : '',
+    });
+  };
 
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('ALL');
@@ -375,6 +468,23 @@ function GroceryItemsTab({ items, categories, isLoading, qc }: {
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
+  const updateGrocery = useMutation({
+    mutationFn: async () => api.patch(`/menu/items/${editItem!.id}`, {
+      categoryId: editForm.categoryId,
+      name: editForm.name,
+      description: editForm.description || undefined,
+      basePrice: parseFloat(editForm.basePrice),
+      inStock: editForm.inStock,
+      attributes: {
+        sku: editForm.sku || undefined,
+        brand: editForm.brand || undefined,
+        unit: editForm.unit,
+        stockQty: editForm.stockQty ? parseInt(editForm.stockQty) : null,
+      },
+    }),
+    onSuccess: () => { setEditItem(null); toast.success('Product updated'); qc.invalidateQueries({ queryKey: ['items'] }); },
+  });
+
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
 
   return (
@@ -401,70 +511,65 @@ function GroceryItemsTab({ items, categories, isLoading, qc }: {
             <SelectItem value="OUT">Unavailable</SelectItem>
           </SelectContent>
         </Select>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700 ml-auto">
-              <Plus className="h-4 w-4" /> Add Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>New Product</DialogTitle></DialogHeader>
-            <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
+      </div>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>New Product</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
+            <div>
+              <Label>Category <span className="text-red-500">*</span></Label>
+              <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
+                <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Product Name <span className="text-red-500">*</span></Label>
+              <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Basmati Rice" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Brand</Label>
+                <Input value={form.brand} onChange={(e) => set('brand', e.target.value)} placeholder="e.g. India Gate" />
+              </div>
+              <div><Label>SKU</Label>
+                <Input value={form.sku} onChange={(e) => set('sku', e.target.value)} placeholder="e.g. RICE-001" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Category <span className="text-red-500">*</span></Label>
-                <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
-                  <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
-                  <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                <Label>Unit <span className="text-red-500">*</span></Label>
+                <Select value={form.unit} onValueChange={(v) => set('unit', v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>Product Name <span className="text-red-500">*</span></Label>
-                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Basmati Rice" />
+              <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
+                <Input type="number" step="0.01" value={form.basePrice}
+                  onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Brand</Label>
-                  <Input value={form.brand} onChange={(e) => set('brand', e.target.value)} placeholder="e.g. India Gate" />
-                </div>
-                <div><Label>SKU</Label>
-                  <Input value={form.sku} onChange={(e) => set('sku', e.target.value)} placeholder="e.g. RICE-001" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Unit <span className="text-red-500">*</span></Label>
-                  <Select value={form.unit} onValueChange={(v) => set('unit', v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
-                  <Input type="number" step="0.01" value={form.basePrice}
-                    onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Stock Quantity</Label>
-                  <Input type="number" min={0} value={form.stockQty}
-                    onChange={(e) => set('stockQty', e.target.value)} placeholder="0" />
-                </div>
-                <div className="flex items-end pb-1">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
-                    <Label>Available</Label>
-                  </div>
-                </div>
-              </div>
-              <div><Label>Description</Label>
-                <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
-              </div>
-              <Button className="w-full" onClick={() => create.mutate()}
-                disabled={!form.categoryId || !form.name || !form.basePrice || !form.unit || create.isPending}>
-                {create.isPending ? 'Adding…' : 'Add Product'}
-              </Button>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Stock Quantity</Label>
+                <Input type="number" min={0} value={form.stockQty}
+                  onChange={(e) => set('stockQty', e.target.value)} placeholder="0" />
+              </div>
+              <div className="flex items-end pb-1">
+                <div className="flex items-center gap-2">
+                  <Switch checked={form.inStock} onCheckedChange={(v) => set('inStock', v)} />
+                  <Label>Available</Label>
+                </div>
+              </div>
+            </div>
+            <div><Label>Description</Label>
+              <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional" />
+            </div>
+            <Button className="w-full" onClick={() => create.mutate()}
+              disabled={!form.categoryId || !form.name || !form.basePrice || !form.unit || create.isPending}>
+              {create.isPending ? 'Adding…' : 'Add Product'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Table */}
       {isLoading ? (
@@ -512,9 +617,17 @@ function GroceryItemsTab({ items, categories, isLoading, qc }: {
                         <Switch checked={i.inStock} onCheckedChange={(v) => toggleStock.mutate({ id: i.id, inStock: v })} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="ghost" onClick={() => del.mutate(i.id)}>
-                          <Trash2 className="h-4 w-4 text-red-400" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                            <Button size="sm" variant="ghost" title="View" onClick={() => setViewItem(i)}>
+                              <Eye className="h-4 w-4 text-slate-400" />
+                            </Button>
+                            <Button size="sm" variant="ghost" title="Edit" onClick={() => openEdit(i)}>
+                              <Pencil className="h-4 w-4 text-slate-400" />
+                            </Button>
+                            <Button size="sm" variant="ghost" title="Delete" onClick={() => del.mutate(i.id)}>
+                              <Trash2 className="h-4 w-4 text-red-400" />
+                            </Button>
+                          </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -552,6 +665,95 @@ function GroceryItemsTab({ items, categories, isLoading, qc }: {
           </div>
         </>
       )}
+
+      {/* View Dialog */}
+      <Dialog open={!!viewItem} onOpenChange={(v) => !v && setViewItem(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>View Product</DialogTitle></DialogHeader>
+          {viewItem && (() => {
+            const a = (viewItem.attributes ?? {}) as GroceryAttributes;
+            return (
+              <div className="space-y-3 py-1">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><p className="text-xs text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Brand</p><p>{a.brand || '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">SKU</p><p className="font-mono text-xs">{a.sku || '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Unit</p><p>{a.unit || '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Stock Qty</p><p>{a.stockQty != null ? a.stockQty : '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
+                  <div><p className="text-xs text-muted-foreground mb-1">Status</p>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${viewItem.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                      {viewItem.inStock ? 'Available' : 'Unavailable'}
+                    </span>
+                  </div>
+                  {viewItem.description && (
+                    <div className="col-span-2"><p className="text-xs text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editItem} onOpenChange={(v) => !v && setEditItem(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
+            <div>
+              <Label>Category <span className="text-red-500">*</span></Label>
+              <Select value={editForm.categoryId} onValueChange={(v) => setEditF('categoryId', v)}>
+                <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
+                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Product Name <span className="text-red-500">*</span></Label>
+              <Input value={editForm.name} onChange={(e) => setEditF('name', e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Brand</Label>
+                <Input value={editForm.brand} onChange={(e) => setEditF('brand', e.target.value)} />
+              </div>
+              <div><Label>SKU</Label>
+                <Input value={editForm.sku} onChange={(e) => setEditF('sku', e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Unit <span className="text-red-500">*</span></Label>
+                <Select value={editForm.unit} onValueChange={(v) => setEditF('unit', v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
+                <Input type="number" step="0.01" value={editForm.basePrice} onChange={(e) => setEditF('basePrice', e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Stock Quantity</Label>
+                <Input type="number" min={0} value={editForm.stockQty} onChange={(e) => setEditF('stockQty', e.target.value)} />
+              </div>
+              <div className="flex items-end pb-1">
+                <div className="flex items-center gap-2">
+                  <Switch checked={editForm.inStock} onCheckedChange={(v) => setEditF('inStock', v)} />
+                  <Label>Available</Label>
+                </div>
+              </div>
+            </div>
+            <div><Label>Description</Label>
+              <Textarea value={editForm.description} onChange={(e) => setEditF('description', e.target.value)} rows={2} />
+            </div>
+            <Button className="w-full" onClick={() => updateGrocery.mutate()}
+              disabled={!editForm.categoryId || !editForm.name || !editForm.basePrice || !editForm.unit || updateGrocery.isPending}>
+              {updateGrocery.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -619,6 +821,8 @@ export default function MenuPage() {
   const businessCategory = tenant?.category ?? 'RESTAURANT';
   const grocery = isGrocery(businessCategory);
   const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState('items');
+  const [addOpen, setAddOpen] = useState(false);
 
   const { data: items = [], isLoading: loadingItems } = useQuery({
     queryKey: ['items'],
@@ -634,34 +838,42 @@ export default function MenuPage() {
     ? 'Manage your product catalog, categories, and inventory.'
     : 'Manage categories, items and add-on groups.';
   const categoryLabel = grocery ? 'Product Category' : 'Menu Category';
+  const addLabel = grocery ? 'Add Product' : 'Add Item';
   const Icon = grocery ? ShoppingBag : UtensilsCrossed;
 
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${grocery ? 'bg-emerald-100' : 'bg-orange-100'}`}>
-          <Icon className={`w-5 h-5 ${grocery ? 'text-emerald-600' : 'text-orange-500'}`} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          {/* <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${grocery ? 'bg-emerald-100' : 'bg-orange-100'}`}>
+            <Icon className={`w-5 h-5 ${grocery ? 'text-emerald-600' : 'text-orange-500'}`} />
+          </div> */}
+          <div>
+            <h1 className="text-2xl font-bold">{pageTitle}</h1>
+            <p className="text-sm text-muted-foreground">{pageDesc}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold">{pageTitle}</h1>
-          <p className="text-sm text-muted-foreground">{pageDesc}</p>
-        </div>
+        {activeTab === 'items' && (
+          <Button className="gap-1.5 bg-violet-600 hover:bg-violet-700" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" /> {addLabel}
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
       <StatsCards items={items} categories={categories} grocery={grocery} />
 
       {/* Tabs */}
-      <Tabs defaultValue="items">
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setAddOpen(false); }}>
         <TabsList>
           <TabsTrigger value="items">{grocery ? 'Products' : 'Items'}</TabsTrigger>
           <TabsTrigger value="categories">{grocery ? 'Product Categories' : 'Categories'}</TabsTrigger>
         </TabsList>
         <TabsContent value="items" className="mt-4">
           {grocery
-            ? <GroceryItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} />
-            : <RestaurantItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} />}
+            ? <GroceryItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} addOpen={addOpen} onAddOpenChange={setAddOpen} />
+            : <RestaurantItemsTab items={items} categories={categories} isLoading={loadingItems} qc={qc} addOpen={addOpen} onAddOpenChange={setAddOpen} />}
         </TabsContent>
         <TabsContent value="categories" className="mt-4">
           <CategoriesTab label={categoryLabel} categories={categories} isLoading={loadingCats} qc={qc} />

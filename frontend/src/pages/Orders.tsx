@@ -401,51 +401,10 @@ export default function Orders() {
           <h1 className="text-2xl font-bold">Orders</h1>
           <p className="text-sm text-muted-foreground">Manage incoming orders and track their status.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Date dropdown */}
-          <Select value={dateFilter} onValueChange={handleDateFilter}>
-            <SelectTrigger className="h-9 w-36 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DATE_OPTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-            </SelectContent>
-          </Select>
-
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search order ID, customer or phone..."
-              className="pl-9 h-9 w-64 text-sm"
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-            />
-          </div>
-
-          {/* Status filter */}
-          <Select value={statusFilter} onValueChange={(v) => handleStatusFilter(v as OrderStatus | 'ALL')}>
-            <SelectTrigger className="h-9 w-40 text-sm">
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Statuses</SelectItem>
-              {(Object.keys(STATUS_LABEL) as OrderStatus[]).map((s) => (
-                <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Refresh */}
+        <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} /> Refresh
           </Button>
-
-          {/* Export */}
-          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={exportCSV}>
-            <Download className="w-3.5 h-3.5" /> Export
-          </Button>
-
           <CreateOrderDialog onCreated={() => {}} />
         </div>
       </div>
@@ -492,8 +451,35 @@ export default function Orders() {
 
       {/* Table */}
       <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b">
-          <h2 className="font-semibold text-base">All Orders</h2>
+        {/* Filters toolbar */}
+        <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search order ID, customer or phone..."
+              className="pl-9 h-9 text-sm"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+            />
+          </div>
+          <Select value={dateFilter} onValueChange={handleDateFilter}>
+            <SelectTrigger className="h-9 w-36 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {DATE_OPTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(v) => handleStatusFilter(v as OrderStatus | 'ALL')}>
+            <SelectTrigger className="h-9 w-40 text-sm"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Statuses</SelectItem>
+              {(Object.keys(STATUS_LABEL) as OrderStatus[]).map((s) => (
+                <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={exportCSV}>
+            <Download className="w-3.5 h-3.5" /> Export
+          </Button>
         </div>
 
         {isLoading ? (

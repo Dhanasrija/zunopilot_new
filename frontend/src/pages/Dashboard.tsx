@@ -1,14 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   MessageSquare, ShoppingCart, CheckCircle2, IndianRupee,
   TrendingUp, TrendingDown, Users, Zap, BookOpen, Shield,
-  HeadphonesIcon, Globe,
+  HeadphonesIcon, Globe, Bell, CalendarDays,
 } from 'lucide-react';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Overview {
   activeConversations: number;
@@ -21,8 +20,6 @@ interface RecentOrder {
   totalAmount: number; placedAt: string;
   customer: { name?: string; phone?: string; waId: string };
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
   NEW: 'bg-violet-100 text-violet-700',
@@ -58,10 +55,29 @@ function Trend({ value, invert = false }: { value: number | null; invert?: boole
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function getCurrentWeekRange() {
+  const now = new Date();
+  const day = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((day + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${fmt(monday)} – ${fmt(sunday)}, ${sunday.getFullYear()}`;
+}
 
 export default function Dashboard() {
   const tenant = useAuthStore((s) => s.tenant);
+  const user = useAuthStore((s) => s.user);
+  const navigate = useNavigate();
+  const firstName = user?.fullName?.split(' ')[0] ?? 'there';
 
   const { data: ov, isLoading } = useQuery<Overview>({
     queryKey: ['analytics.overview'],
@@ -97,9 +113,26 @@ export default function Dashboard() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Real-time WhatsApp business dashboard</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">
+            {getGreeting()}, <span className="text-violet-600">{firstName}</span> ! 👋
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Here&apos;s what&apos;s happening with your business today.</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-accent transition-colors">
+            <CalendarDays className="h-4 w-4 text-slate-400" />
+            {getCurrentWeekRange()}
+          </button>
+          <button
+            onClick={() => navigate('/settings?tab=notifications')}
+            className="h-9 w-9 flex items-center justify-center rounded-lg border hover:bg-accent transition-colors"
+            aria-label="Notifications"
+          >
+            <Bell className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -134,7 +167,6 @@ export default function Dashboard() {
             </span>
           </div>
 
-          {/* Table */}
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-slate-50/60">
@@ -205,7 +237,6 @@ export default function Dashboard() {
           </h2>
 
           <div className="space-y-5 flex-1">
-            {/* Shared Live Inbox */}
             <div className="flex items-start gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
                 <Users className="w-4 h-4 text-slate-600" />
@@ -218,7 +249,6 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Keyword Automation */}
             <div className="flex items-start gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
                 <BookOpen className="w-4 h-4 text-slate-600" />
@@ -226,12 +256,11 @@ export default function Dashboard() {
               <div>
                 <p className="font-semibold text-sm">Keyword Automation</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  Define priority keyword matching rules (e.g. "hours", "address") to instantly reply to common queries without manual intervention.
+                  Define priority keyword matching rules (e.g. &quot;hours&quot;, &quot;address&quot;) to instantly reply to common queries without manual intervention.
                 </p>
               </div>
             </div>
 
-            {/* Trigger Notifications */}
             <div className="flex items-start gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
                 <Zap className="w-4 h-4 text-slate-600" />
@@ -245,13 +274,12 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Stats grid */}
           <div className="mt-5 pt-5 border-t grid grid-cols-2 gap-4">
             {[
-              { icon: Shield,          label: 'UPTIME SLA',           value: '99.9%',   color: 'text-violet-500', bg: 'bg-violet-50' },
-              { icon: HeadphonesIcon,  label: '24/7 PREMIUM SUPPORT', value: '24/7',    color: 'text-blue-500',   bg: 'bg-blue-50' },
-              { icon: Globe,           label: 'BUSINESSES CONNECTED', value: '5,000+',  color: 'text-emerald-500',bg: 'bg-emerald-50' },
-              { icon: MessageSquare,   label: 'MESSAGES SENT',        value: '10M+',    color: 'text-rose-500',   bg: 'bg-rose-50' },
+              { icon: Shield,         label: 'UPTIME SLA',           value: '99.9%',  color: 'text-violet-500', bg: 'bg-violet-50' },
+              { icon: HeadphonesIcon, label: '24/7 PREMIUM SUPPORT', value: '24/7',   color: 'text-blue-500',   bg: 'bg-blue-50' },
+              { icon: Globe,          label: 'BUSINESSES CONNECTED', value: '5,000+', color: 'text-emerald-500',bg: 'bg-emerald-50' },
+              { icon: MessageSquare,  label: 'MESSAGES SENT',        value: '10M+',   color: 'text-rose-500',   bg: 'bg-rose-50' },
             ].map(({ icon: Icon, label, value, color, bg }) => (
               <div key={label} className="flex flex-col items-center gap-1 py-2">
                 <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center`}>

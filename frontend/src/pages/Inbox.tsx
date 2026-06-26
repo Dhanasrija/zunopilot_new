@@ -87,9 +87,18 @@ export default function Inbox() {
   });
 
   return (
-    <div className="grid grid-cols-12 gap-4 h-[calc(100vh-3rem)]">
+    <div className="flex flex-col gap-4 h-[calc(100vh-2rem)]">
+      {/* Page header */}
+      <div className="flex items-center gap-3 shrink-0">
+        <div>
+          <h1 className="text-2xl font-bold">Inbox</h1>
+          <p className="text-sm text-muted-foreground">Manage your WhatsApp conversations in real-time.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
       <Card className="col-span-4 flex flex-col">
-        <CardHeader><CardTitle>Conversations</CardTitle></CardHeader>
+        <CardHeader className="px-3 py-3 border-b shrink-0"><CardTitle className="text-sm font-semibold">Conversations</CardTitle></CardHeader>
         <CardContent className="flex-1 overflow-auto p-0">
           {conversations.data?.map((c) => (
             <button
@@ -150,6 +159,7 @@ export default function Inbox() {
           </>
         )}
       </Card>
+      </div>
     </div>
   );
 }

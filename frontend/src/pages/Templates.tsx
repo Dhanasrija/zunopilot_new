@@ -21,7 +21,7 @@ import {
   Plus, Trash2, AlertCircle, CheckCircle2, Clock, XCircle,
   PlusCircle, MinusCircle, Sparkles, RefreshCw, Pencil, Eye,
   MoreVertical, Settings, ChevronLeft, ChevronRight, Copy,
-  Send, FileText, Wifi, LayoutGrid, Link2,
+  Send, FileText, LayoutGrid, Link2,
 } from 'lucide-react';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -46,14 +46,14 @@ const LANG_LABEL: Record<string, string> = {
 };
 
 const CAT_STYLE: Record<string, { bg: string; text: string; dot: string }> = {
-  UTILITY:        { bg: 'bg-emerald-50',  text: 'text-emerald-700',  dot: 'bg-emerald-500' },
-  MARKETING:      { bg: 'bg-orange-50',   text: 'text-orange-700',   dot: 'bg-orange-500' },
-  AUTHENTICATION: { bg: 'bg-blue-50',     text: 'text-blue-700',     dot: 'bg-blue-500' },
+  UTILITY: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  MARKETING: { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
+  AUTHENTICATION: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
 };
 
 const CAT_ICON_BG: Record<string, string> = {
-  UTILITY:        'bg-emerald-100 text-emerald-600',
-  MARKETING:      'bg-orange-100  text-orange-600',
+  UTILITY: 'bg-emerald-100 text-emerald-600',
+  MARKETING: 'bg-orange-100  text-orange-600',
   AUTHENTICATION: 'bg-blue-100    text-blue-600',
 };
 
@@ -117,7 +117,7 @@ function CatIcon({ category }: { category: string }) {
 function StatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase();
   if (s === 'APPROVED') return <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><span className="w-2 h-2 rounded-full bg-emerald-500" />Approved</span>;
-  if (s === 'PENDING')  return <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600"><span className="w-2 h-2 rounded-full bg-amber-500" />Pending</span>;
+  if (s === 'PENDING') return <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600"><span className="w-2 h-2 rounded-full bg-amber-500" />Pending</span>;
   if (s === 'REJECTED') return <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600"><span className="w-2 h-2 rounded-full bg-red-500" />Rejected</span>;
   return <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2 h-2 rounded-full bg-slate-400" />{status}</span>;
 }
@@ -125,7 +125,7 @@ function StatusBadge({ status }: { status: string }) {
 function StatusBadgeFull({ status }: { status: string }) {
   const s = status.toUpperCase();
   if (s === 'APPROVED') return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 gap-1"><CheckCircle2 className="w-3 h-3" />Approved</Badge>;
-  if (s === 'PENDING')  return <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1"><Clock className="w-3 h-3" />Pending</Badge>;
+  if (s === 'PENDING') return <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1"><Clock className="w-3 h-3" />Pending</Badge>;
   if (s === 'REJECTED') return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejected</Badge>;
   return <Badge variant="outline">{status}</Badge>;
 }
@@ -134,9 +134,9 @@ function StatusBadgeFull({ status }: { status: string }) {
 
 function WhatsappPreview({ template }: { template: MetaTemplate }) {
   const header = getCompText(template, 'HEADER');
-  const body   = getCompText(template, 'BODY');
+  const body = getCompText(template, 'BODY');
   const footer = getCompText(template, 'FOOTER');
-  const btns   = getButtons(template);
+  const btns = getButtons(template);
 
   return (
     <div className="flex flex-col h-full">
@@ -190,10 +190,10 @@ function ViewTemplateDialog({ template, open, onOpenChange, onEdit }: {
   const [tab, setTab] = useState('content');
   if (!template) return null;
 
-  const header  = getCompText(template, 'HEADER');
-  const body    = getCompText(template, 'BODY');
-  const footer  = getCompText(template, 'FOOTER');
-  const vars    = extractVars(body);
+  const header = getCompText(template, 'HEADER');
+  const body = getCompText(template, 'BODY');
+  const footer = getCompText(template, 'FOOTER');
+  const vars = extractVars(body);
   const catStyle = CAT_STYLE[template.category] || CAT_STYLE.UTILITY;
 
   return (
@@ -460,12 +460,14 @@ function TemplateFormDialog({ open, onOpenChange, editingTemplate, metaTemplates
     if (form.hasFooter && form.footerText.trim())
       comps.push({ type: 'FOOTER', text: form.footerText.trim() });
     if (form.hasButtons && form.buttons.length > 0)
-      comps.push({ type: 'BUTTONS', buttons: form.buttons.map((b) => {
-        const btn: any = { type: b.type, text: b.text };
-        if (b.type === 'URL') btn.url = b.url;
-        if (b.type === 'PHONE_NUMBER') btn.phone_number = b.phone_number;
-        return btn;
-      })});
+      comps.push({
+        type: 'BUTTONS', buttons: form.buttons.map((b) => {
+          const btn: any = { type: b.type, text: b.text };
+          if (b.type === 'URL') btn.url = b.url;
+          if (b.type === 'PHONE_NUMBER') btn.phone_number = b.phone_number;
+          return btn;
+        })
+      });
     return comps;
   }
 
@@ -666,17 +668,17 @@ export default function Templates() {
   const qc = useQueryClient();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab]           = useState('meta-templates');
-  const [searchQuery, setSearchQuery]       = useState('');
-  const [catFilter, setCatFilter]           = useState('ALL');
-  const [statusFilter, setStatusFilter]     = useState('ALL');
-  const [langFilter, setLangFilter]         = useState('ALL');
-  const [page, setPage]                     = useState(1);
-  const PAGE_SIZE                           = 10;
+  const [activeTab, setActiveTab] = useState('meta-templates');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [catFilter, setCatFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [langFilter, setLangFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
-  const [formOpen, setFormOpen]             = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
 
-  const [deleteConfirm, setDeleteConfirm]   = useState<{ open: boolean; type: 'meta' | 'mapping' | null; targetIdOrName: string; displayName: string }>({
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; type: 'meta' | 'mapping' | null; targetIdOrName: string; displayName: string }>({
     open: false, type: null, targetIdOrName: '', displayName: '',
   });
 
@@ -701,8 +703,8 @@ export default function Templates() {
   });
 
   // While loading show neither "not connected" nor data — just a spinner
-  const isConnected   = isLoadingMeta ? true : (metaData?.connected ?? false);
-  const isTokenExp    = metaData?.tokenExpired ?? false;
+  const isConnected = isLoadingMeta ? true : (metaData?.connected ?? false);
+  const isTokenExp = metaData?.tokenExpired ?? false;
   const metaTemplates = metaData?.data ?? [];
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -729,7 +731,7 @@ export default function Templates() {
   // ── Derived stats ──────────────────────────────────────────────────────────
 
   const approvedCount = metaTemplates.filter((t) => t.status.toUpperCase() === 'APPROVED').length;
-  const pendingCount  = metaTemplates.filter((t) => t.status.toUpperCase() === 'PENDING').length;
+  const pendingCount = metaTemplates.filter((t) => t.status.toUpperCase() === 'PENDING').length;
   const activeMappings = mappings.filter((m) => m.isActive).length;
 
   // ── Filtered + paginated ───────────────────────────────────────────────────
@@ -745,7 +747,7 @@ export default function Templates() {
   }, [metaTemplates, catFilter, statusFilter, langFilter, searchQuery]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const uniqueLangs = [...new Set(metaTemplates.map((t) => t.language))];
 
@@ -763,8 +765,10 @@ export default function Templates() {
     const t = metaTemplates.find((x) => x.id === id);
     if (!t) return;
     const body = getCompText(t, 'BODY');
-    setMappingForm({ ...mappingForm, metaTemplate: t.name, language: t.language, body,
-      name: t.name.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') });
+    setMappingForm({
+      ...mappingForm, metaTemplate: t.name, language: t.language, body,
+      name: t.name.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    });
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -799,74 +803,54 @@ export default function Templates() {
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Meta Connection</p>
-            {isConnected ? (
-              <div className="flex items-center gap-2 mt-2">
-                <span className="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
-                  <Wifi className="w-4 h-4 text-emerald-600" />
-                </span>
-                <div>
-                  <p className="font-bold text-emerald-600 leading-none">Connected</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">WABA connected</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 mt-2">
-                <span className="w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center shrink-0">
-                  <Wifi className="w-4 h-4 text-red-500" />
-                </span>
-                <p className="font-bold text-red-500 leading-none">Disconnected</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isConnected ? 'bg-emerald-100' : 'bg-red-100'}`}>
+            <svg viewBox="0 0 24 24" className={`w-5 h-5 ${isConnected ? 'fill-emerald-600' : 'fill-red-500'}`}>
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Meta Connection</p>
+            <p className={`text-2xl font-bold mt-0.5 ${isConnected ? 'text-emerald-600' : 'text-red-500'}`}>
+              {isConnected ? 'Live' : 'Off'}
+            </p>
+            <p className="text-xs text-muted-foreground">{isConnected ? 'WABA connected' : 'Not connected'}</p>
+          </div>
+        </div>
 
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Total Templates</p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                <FileText className="w-4 h-4 text-blue-600" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold leading-none">{metaTemplates.length}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">{approvedCount} Approved</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+            <FileText className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Total Templates</p>
+            <p className="text-2xl font-bold mt-0.5">{metaTemplates.length}</p>
+            <p className="text-xs text-muted-foreground">{approvedCount} Approved</p>
+          </div>
+        </div>
 
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Pending Review</p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="w-7 h-7 bg-amber-100 rounded-lg flex items-center justify-center shrink-0">
-                <Clock className="w-4 h-4 text-amber-500" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold leading-none">{pendingCount}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Awaiting Meta approval</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5 text-amber-500" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Pending Review</p>
+            <p className="text-2xl font-bold mt-0.5">{pendingCount}</p>
+            <p className="text-xs text-muted-foreground">Awaiting Meta approval</p>
+          </div>
+        </div>
 
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Active Mappings</p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="w-7 h-7 bg-violet-100 rounded-lg flex items-center justify-center shrink-0">
-                <Link2 className="w-4 h-4 text-violet-600" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold leading-none">{activeMappings}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Business triggers connected</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+            <Link2 className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Active Mappings</p>
+            <p className="text-2xl font-bold mt-0.5">{activeMappings}</p>
+            <p className="text-xs text-muted-foreground">Business triggers connected</p>
+          </div>
+        </div>
       </div>
 
       {/* Main content */}
@@ -906,8 +890,7 @@ export default function Templates() {
             <div className="flex gap-5">
               {/* Table column */}
               <div className="flex-1 min-w-0">
-                <Card className="border-0 shadow-sm">
-                  <CardContent className="p-0">
+                <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
                     {/* Search + filters bar */}
                     <div className="flex items-center gap-2 p-4 border-b flex-wrap">
                       <div className="relative flex-1 min-w-48">
@@ -1032,13 +1015,12 @@ export default function Templates() {
                         </div>
                       </div>
                     )}
-                  </CardContent>
-                </Card>
+                </div>
               </div>
 
               {/* Quick Actions sidebar */}
               <div className="w-60 shrink-0 hidden xl:block">
-                <Card className="border-0 shadow-sm">
+                <Card className="shadow-sm">
                   <CardHeader className="pb-2 pt-4 px-4">
                     <CardTitle className="text-sm">Quick Actions</CardTitle>
                   </CardHeader>
@@ -1070,7 +1052,7 @@ export default function Templates() {
         {/* ── Trigger Mapping Tab ────────────────────────────────────────── */}
         <TabsContent value="trigger-mapping" className="mt-4">
           <div className="grid gap-6 md:grid-cols-3">
-            <Card className="md:col-span-1 h-fit border-0 shadow-sm">
+            <Card className="md:col-span-1 h-fit shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">Map Order Trigger</CardTitle>
                 <CardDescription>Assign Meta-approved templates to order status changes.</CardDescription>
@@ -1129,7 +1111,7 @@ export default function Templates() {
               </CardContent>
             </Card>
 
-            <Card className="md:col-span-2 border-0 shadow-sm">
+            <Card className="md:col-span-2 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">Configured Triggers</CardTitle>
                 <CardDescription>Notifications that fire automatically when order statuses change.</CardDescription>
