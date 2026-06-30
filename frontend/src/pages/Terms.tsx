@@ -6,20 +6,13 @@ export default function Terms() {
       title="ZunoPilot Terms and Conditions"
       highlight="Terms"
       intro="These Terms and Conditions govern your access to and use of the websites, browser extensions, dashboards, APIs, and related services provided under the ZunoPilot brand, operated by mTouch Labs Private Limited."
-      lastUpdated="[Insert Date]"
+      lastUpdated="10-05-2026"
     >
       <p className="text-slate-700 leading-relaxed">
-        These Terms and Conditions (“Terms”) govern your access to and use of the
-        websites, browser extensions, dashboards, APIs, and related services provided
-        under the ZunoPilot brand (collectively, the “Services”), operated by
-        <b> mTouch Labs Private Limited</b>, a company incorporated under the laws of
-        India (“mTouch Labs”, “ZunoPilot”, “we”, “our”, or “us”).
+        These Terms and Conditions (“Terms”) govern your access to and use of the websites, browser extensions, dashboards, APIs, and related services provided under the ZunoPilot brand (collectively, the “Services”), operated by <b>mTouch Labs Private Limited</b>, a company incorporated under the laws of India (“ZunoPilot”, “we”, “our”, or “us”).
       </p>
       <p className="mt-3 text-slate-700 leading-relaxed">
-        By creating an account, linking a WhatsApp Business Account, accessing the
-        Services, or clicking “Accept” where prompted, you agree to be bound by these
-        Terms. If you do not agree to these Terms, you must not access or use the
-        Services.
+        By creating an account, linking a WhatsApp Business Account, accessing the Services, or clicking “Accept” where prompted, you agree to be bound by these Terms. If you do not agree to these Terms, you must not access or use the Services.
       </p>
 
       <Section title="1. Acceptance of Terms">

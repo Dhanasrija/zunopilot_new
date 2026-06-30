@@ -5,19 +5,14 @@ export default function Privacy() {
     <LegalLayout
       title="Privacy Policy"
       highlight="Privacy"
-      intro={`This Privacy Policy explains how ZunoPilot collects, uses, discloses, and protects your information when you use our WhatsApp Business platform, dashboards, and associated services.`}
-      lastUpdated="[Insert Date]"
+      intro={`This Privacy Policy explains how ZunoPilot, operated by mTouch Labs Private Limited, collects, uses, discloses, and protects your information when you use our WhatsApp Business platform, dashboards, and associated services.`}
+      lastUpdated="10-05-2026"
     >
       <p className="text-slate-700 leading-relaxed">
-        This Privacy Policy explains how ZunoPilot ("we", "us", or "our") collects,
-        uses, discloses, and protects your information when you use our WhatsApp
-        Business platform, dashboards, and associated services (collectively, the
-        "Services").
+        This Privacy Policy explains how ZunoPilot, operated by <b>mTouch Labs Private Limited</b> ("mTouch Labs", "ZunoPilot", "we", "us", or "our"), collects, uses, discloses, and protects your information when you use our WhatsApp Business platform, dashboards, and associated services (collectively, the "Services").
       </p>
       <p className="mt-3 text-slate-700 leading-relaxed">
-        By accessing or using our Services, you consent to the collection, transfer,
-        manipulation, storage, disclosure, and other uses of your information as
-        described in this Privacy Policy.
+        By accessing or using our Services, you consent to the collection, transfer, manipulation, storage, disclosure, and other uses of your information as described in this Privacy Policy.
       </p>
 
       <Section title="1. Information We Collect">

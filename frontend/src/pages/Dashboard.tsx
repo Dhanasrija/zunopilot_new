@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import {
   MessageSquare, ShoppingCart, CheckCircle2, IndianRupee,
   TrendingUp, TrendingDown, Users, Zap, BookOpen, Shield,
-  HeadphonesIcon, Globe, Bell, CalendarDays,
+  HeadphonesIcon, Globe, Bell, CalendarDays, Search, HelpCircle,
 } from 'lucide-react';
 
 interface Overview {
@@ -78,6 +78,9 @@ export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
   const firstName = user?.fullName?.split(' ')[0] ?? 'there';
+  const initials = user?.fullName
+    ? user.fullName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+    : 'U';
 
   const { data: ov, isLoading } = useQuery<Overview>({
     queryKey: ['analytics.overview'],
@@ -112,7 +115,46 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Top bar — dashboard only */}
+      <div className="-mx-6 -mt-6 mb-2 px-6 py-3 border-b bg-white flex items-center gap-4">
+        {/* Search */}
+        <div className="relative w-64">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <input
+            className="w-full h-9 pl-9 pr-3 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 placeholder:text-muted-foreground"
+            placeholder="Search anything..."
+          />
+        </div>
+
+        {/* Right actions */}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => navigate('/settings?tab=notifications')}
+            className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-accent transition-colors"
+            aria-label="Notifications"
+          >
+            <Bell className="h-4 w-4 text-slate-500" />
+          </button>
+          <button className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-accent transition-colors" aria-label="Help">
+            <HelpCircle className="h-4 w-4 text-slate-500" />
+          </button>
+          {/* Profile chip */}
+          <button
+            onClick={() => navigate('/settings?tab=profile')}
+            className="flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-lg hover:bg-accent transition-colors"
+          >
+            <div className="h-8 w-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-semibold shrink-0">
+              {initials}
+            </div>
+            <div className="text-left hidden sm:block">
+              <p className="text-sm font-medium leading-tight">{user?.fullName}</p>
+              <p className="text-[11px] text-muted-foreground leading-tight capitalize">{user?.role?.toLowerCase()}</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Greeting header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">
@@ -120,19 +162,10 @@ export default function Dashboard() {
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">Here&apos;s what&apos;s happening with your business today.</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-accent transition-colors">
-            <CalendarDays className="h-4 w-4 text-slate-400" />
-            {getCurrentWeekRange()}
-          </button>
-          <button
-            onClick={() => navigate('/settings?tab=notifications')}
-            className="h-9 w-9 flex items-center justify-center rounded-lg border hover:bg-accent transition-colors"
-            aria-label="Notifications"
-          >
-            <Bell className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
+        <button className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-accent transition-colors shrink-0">
+          <CalendarDays className="h-4 w-4 text-slate-400" />
+          {getCurrentWeekRange()}
+        </button>
       </div>
 
       {/* Stats */}
