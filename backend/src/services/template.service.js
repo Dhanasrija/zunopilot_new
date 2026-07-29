@@ -38,8 +38,9 @@ export const dispatchOrderTemplate = async (orderId, newStatus) => {
         {
           type: 'body',
           parameters: [
-            { type: 'text', text: String(order.orderNumber) },
             { type: 'text', text: order.customerName },
+            { type: 'text', text: String(order.orderNumber) },
+
           ],
         },
       ],

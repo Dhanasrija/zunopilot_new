@@ -10,5 +10,6 @@ export const validate = (req, _res, next) => {
     message: e.msg,
     value: e.value,
   }));
-  return next(ApiError.badRequest('Validation failed', details));
+  const errorMessage = 'Validation failed: ' + details.map((d) => `${d.field} ${d.message}`).join(', ');
+  return next(ApiError.badRequest(errorMessage, details));
 };

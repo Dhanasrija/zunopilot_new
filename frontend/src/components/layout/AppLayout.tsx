@@ -32,8 +32,8 @@ export default function AppLayout() {
     : 'U';
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <aside className="w-60 border-r bg-background flex flex-col sticky top-0 h-screen">
+    <div className="h-screen flex bg-background overflow-hidden">
+      <aside className="w-60 border-r bg-background flex flex-col h-screen shrink-0">
         <div className="h-16 px-5 flex items-center border-b">
           <Link to="/" className="flex items-center gap-2">
             <img src="/app-logo.png" alt="ZunoPilot" className="h-8 w-auto" />
@@ -88,7 +88,7 @@ export default function AppLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 overflow-y-auto h-screen">
         <div className="p-6 max-w-7xl mx-auto"><Outlet /></div>
       </main>
     </div>

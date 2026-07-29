@@ -269,8 +269,8 @@ export default function TemplateView() {
                     key={value}
                     onClick={() => setTab(value)}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === value
-                        ? 'border-violet-600 text-violet-600'
-                        : 'border-transparent text-slate-500 hover:text-slate-700'
+                      ? 'border-violet-600 text-violet-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
                       }`}
                   >
                     {label}

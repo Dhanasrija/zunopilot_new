@@ -87,7 +87,7 @@ export default function Inbox() {
   });
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-2rem)]">
+    <div className="flex flex-col gap-4 h-[calc(100vh-48px)]">
       {/* Page header */}
       <div className="flex items-center gap-3 shrink-0">
         <div>
@@ -97,7 +97,7 @@ export default function Inbox() {
       </div>
 
       <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
-      <Card className="col-span-4 flex flex-col">
+      <Card className="col-span-4 flex flex-col min-h-0">
         <CardHeader className="px-3 py-3 border-b shrink-0"><CardTitle className="text-sm font-semibold">Conversations</CardTitle></CardHeader>
         <CardContent className="flex-1 overflow-auto p-0">
           {conversations.data?.map((c) => (
@@ -119,12 +119,12 @@ export default function Inbox() {
         </CardContent>
       </Card>
 
-      <Card className="col-span-8 flex flex-col">
+      <Card className="col-span-8 flex flex-col min-h-0">
         {!conv ? (
           <CardContent className="flex-1 grid place-items-center text-muted-foreground">Select a conversation</CardContent>
         ) : (
           <>
-            <CardHeader className="border-b flex flex-row items-center justify-between">
+            <CardHeader className="border-b flex flex-row items-center justify-between shrink-0">
               <div>
                 <CardTitle>{conv.customer.name || conv.customer.waId}</CardTitle>
                 <div className="text-xs text-muted-foreground">{conv.customer.waId}</div>
@@ -137,7 +137,7 @@ export default function Inbox() {
                 />
               </div> */}
             </CardHeader>
-            <CardContent className="flex-1 overflow-auto space-y-2 py-4 bg-muted/20">
+            <CardContent className="flex-1 overflow-y-auto min-h-0 space-y-2 py-4 bg-muted/20">
               {messages.data?.map((m) => (
                 <div key={m.id} className={cn('max-w-[70%] rounded-lg p-2 px-3 text-sm', m.direction === 'OUTBOUND' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-background border')}>
                   <div>{m.body || `[${m.type}]`}</div>
@@ -147,7 +147,7 @@ export default function Inbox() {
                 </div>
               )) || <div className="text-sm text-muted-foreground">Loading…</div>}
             </CardContent>
-            <div className="border-t p-3 flex gap-2">
+            <div className="border-t p-3 flex gap-2 shrink-0">
               <Input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}

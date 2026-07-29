@@ -15,10 +15,6 @@ import { User, Bell, CreditCard, CheckCircle2, ShieldCheck, Save, RotateCcw, Loc
 const CATEGORIES = [
   { value: 'RESTAURANT', label: 'Restaurant' },
   { value: 'ECOMMERCE_GROCERY', label: 'E-commerce (Grocery)' },
-  { value: 'SALON', label: 'Salon' },
-  { value: 'RETAIL', label: 'Retail' },
-  { value: 'CLINIC', label: 'Clinic' },
-  { value: 'OTHER', label: 'Other' },
 ];
 
 export default function Settings() {
