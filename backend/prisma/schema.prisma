@@ -123,6 +123,9 @@ model Tenant {
   // Module 22: marketing
   campaignTemplates CampaignTemplate[]
   campaigns         Campaign[]
+
+  // Module 24: curated customer lists
+  customerLists CustomerList[]
 }
 
 model User {
@@ -261,8 +264,78 @@ model Customer {
   tickets           Ticket[]
   campaignRecipient CampaignRecipient[]
 
+  /// Which curated lists this person is on. See `CustomerList`.
+  listMemberships CustomerListMember[]
+
+  /// Free-form labels — "vip", "wholesale", "pricing".
+  ///
+  /// **A `String[]` and not a join table, deliberately.** `tagsOf` in
+  /// `routing/deterministic.ts` already reads `contact.tags` as an array and carries a
+  /// comment saying the column does not exist yet, so every `CUSTOMER_TAG` routing rule
+  /// has been silently inert since it shipped. This shape makes those rules work with no
+  /// change to the routing code at all.
+  ///
+  /// Stored lowercased by the controller: `VIP` and `vip` as two tags is how a routing
+  /// rule quietly stops matching.
+  tags String[] @default([])
+
   @@unique([tenantId, waId])
   @@index([tenantId, lastSeenAt])
+}
+
+/// A named, curated group of customers — "Regulars", "Diwali 2026".
+///
+/// **Static membership, on purpose.** A list changes only when somebody changes it, so
+/// what was reviewed before a campaign is what the campaign sends to. That pairs with
+/// `startCampaign`, which materialises recipients once precisely so the audience cannot
+/// shift under a running send. A saved *filter* that re-evaluated on read would undo
+/// that guarantee.
+///
+/// Core rather than part of the Marketing module: organising customers is useful to a
+/// workspace that never sends a campaign, so this sits under `customers:read` /
+/// `customers:write` and is not gated by `requireModule`.
+model CustomerList {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  /// Who made it. A plain id and not a relation, for the same reason as
+  /// `Enquiry.handledByAdminId`: who curated a list stays worth knowing after the person
+  /// who did it has gone.
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members CustomerListMember[]
+
+  /// One meaning per name in a workspace. Two lists called "VIPs" is how the wrong group
+  /// gets messaged.
+  @@unique([tenantId, name])
+  @@index([tenantId, name])
+}
+
+/// One customer's place on one list.
+model CustomerListMember {
+  id     String       @id @default(uuid())
+  listId String
+  list   CustomerList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  addedByUserId String?
+  addedAt       DateTime @default(now())
+
+  /// Makes adding somebody twice a no-op, so a bulk add can use `skipDuplicates` and be
+  /// retried safely rather than accumulating duplicates.
+  @@unique([listId, customerId])
+  /// The reverse question — "which lists is this person on" — asked by the customer
+  /// detail panel.
+  @@index([customerId])
 }
 
 enum ConversationStatus {

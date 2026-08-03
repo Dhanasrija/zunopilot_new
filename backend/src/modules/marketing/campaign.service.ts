@@ -32,7 +32,30 @@ export interface AudienceFilter {
   lastSeenAfter?: string | null;
   /** Only customers who have placed at least one order. */
   hasOrdered?: boolean;
+  /**
+   * Only customers on at least one of these curated lists.
+   *
+   * Membership is static, which is what makes a list safe to name here: `startCampaign`
+   * freezes recipients once, and a list does not change on its own, so the group somebody
+   * reviewed is the group that receives.
+   */
+  listIds?: string[] | null;
 }
+
+/**
+ * The clauses shared by the reachable and the excluded counts.
+ *
+ * Factored out because the two used to be written twice, and a filter added to one and
+ * not the other makes `excludedNoConsent` describe a different population than the number
+ * beside it — which is worse than no denominator at all.
+ */
+const audienceScope = (filter: AudienceFilter): Prisma.CustomerWhereInput => ({
+  ...(filter.lastSeenAfter ? { lastSeenAt: { gte: new Date(filter.lastSeenAfter) } } : {}),
+  ...(filter.hasOrdered ? { orders: { some: {} } } : {}),
+  ...(filter.listIds?.length
+    ? { listMemberships: { some: { listId: { in: filter.listIds } } } }
+    : {}),
+});
 
 /**
  * Who a filter currently matches.
@@ -43,10 +66,13 @@ export interface AudienceFilter {
  */
 export const audienceWhere = (tenantId: string, filter: AudienceFilter): Prisma.CustomerWhereInput => ({
   tenantId,
+  // Outside `audienceScope` on purpose. Consent is not one of the filters — no
+  // combination of inputs, a curated list included, reaches somebody who opted out.
+  // Putting a person on a list is a statement about your marketing, not about their
+  // consent.
   marketingOptIn: true,
   optedOutAt: null,
-  ...(filter.lastSeenAfter ? { lastSeenAt: { gte: new Date(filter.lastSeenAfter) } } : {}),
-  ...(filter.hasOrdered ? { orders: { some: {} } } : {}),
+  ...audienceScope(filter),
 });
 
 export interface AudiencePreview {
@@ -69,8 +95,9 @@ export const previewAudience = async (
   const consentless: Prisma.CustomerWhereInput = {
     tenantId,
     OR: [{ marketingOptIn: false }, { optedOutAt: { not: null } }],
-    ...(filter.lastSeenAfter ? { lastSeenAt: { gte: new Date(filter.lastSeenAfter) } } : {}),
-    ...(filter.hasOrdered ? { orders: { some: {} } } : {}),
+    // The same scope as the reachable count, so "412 reachable, 88 excluded" describes
+    // 500 people who match the filter rather than two unrelated numbers.
+    ...audienceScope(filter),
   };
 
   const [reachable, excludedNoConsent] = await Promise.all([

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
+import { useCustomerLists } from '@/lib/customer-lists';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -121,23 +122,40 @@ function NewTemplateDialog({ open, onOpenChange, onSaved }: {
   );
 }
 
-function NewCampaignDialog({ templates, open, onOpenChange, onSaved }: {
+function NewCampaignDialog({ templates, open, onOpenChange, onSaved, initialListId }: {
   templates: CampaignTemplate[];
   open: boolean; onOpenChange: (v: boolean) => void; onSaved: () => void;
+  /** Preselected when arriving from a list's Broadcast button. */
+  initialListId?: string | null;
 }) {
   const [name, setName] = useState('');
   const [templateId, setTemplateId] = useState('');
 
-  // Live, so the reachable and excluded counts are visible before anyone commits.
+  /**
+   * Which curated lists this campaign goes to. Empty means everyone who has consented,
+   * which is what this dialog did unconditionally before there was any way to narrow it.
+   */
+  const [listIds, setListIds] = useState<string[]>(initialListId ? [initialListId] : []);
+
+  // Re-seed when the dialog opens, so arriving from Broadcast a second time for a
+  // different list does not keep the first one ticked.
+  useEffect(() => {
+    if (open) setListIds(initialListId ? [initialListId] : []);
+  }, [open, initialListId]);
+  const lists = useCustomerLists();
+  const audienceFilter = listIds.length ? { listIds } : {};
+
+  // Live, so the reachable and excluded counts are visible before anyone commits. The
+  // filter is in the query key, so the numbers move as lists are ticked.
   const audience = useQuery({
-    queryKey: ['audience-preview'],
+    queryKey: ['audience-preview', listIds],
     queryFn: async () => (await api.post<{ data: { reachable: number; excludedNoConsent: number } }>(
-      '/campaigns/audience-preview', {})).data.data,
+      '/campaigns/audience-preview', audienceFilter)).data.data,
     enabled: open,
   });
 
   const save = useMutation({
-    mutationFn: () => api.post('/campaigns', { name, templateId }),
+    mutationFn: () => api.post('/campaigns', { name, templateId, audienceFilter }),
     onSuccess: () => {
       toast.success('Campaign created as a draft');
       setName(''); setTemplateId('');
@@ -172,6 +190,40 @@ function NewCampaignDialog({ templates, open, onOpenChange, onSaved }: {
             </select>
           </div>
 
+          <div className="grid gap-1">
+            <Label>Send to</Label>
+            {(lists.data ?? []).length === 0 ? (
+              <p className="text-caption text-muted-foreground">
+                Everyone who has opted in. Build a list under Customers → Lists to send to
+                a group you choose.
+              </p>
+            ) : (
+              <div className="space-y-1 rounded-md border p-2">
+                {(lists.data ?? []).map((list) => (
+                  <label key={list.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-ink-400 text-accent-600"
+                      checked={listIds.includes(list.id)}
+                      onChange={(e) => setListIds((current) => (e.target.checked
+                        ? [...current, list.id]
+                        : current.filter((id) => id !== list.id)))}
+                    />
+                    <span>{list.name}</span>
+                    <span className="text-caption text-muted-foreground">
+                      {list._count.members} on it
+                    </span>
+                  </label>
+                ))}
+                <p className="pt-1 text-caption text-muted-foreground">
+                  {listIds.length === 0
+                    ? 'No list picked — this goes to everyone who has opted in.'
+                    : 'Anyone on a ticked list who has opted in. Membership is fixed, so this is the group you see.'}
+                </p>
+              </div>
+            )}
+          </div>
+
           {audience.data && (
             <div className="rounded-md border bg-muted/40 p-3 text-caption">
               <p className="flex items-center gap-1 font-medium">
@@ -204,6 +256,27 @@ export default function Campaigns() {
 
   const [newTemplate, setNewTemplate] = useState(false);
   const [newCampaign, setNewCampaign] = useState(false);
+
+  /**
+   * `?listId=` from a list's Broadcast button.
+   *
+   * Opens the dialog with that list already the audience, and clears the parameter so a
+   * refresh or a Back does not reopen it — the URL should describe where you are, not
+   * replay an action.
+   */
+  const [params, setParams] = useSearchParams();
+  // Held in state, not read from the URL where it is needed: the effect below strips the
+  // parameter, so anything reading `params.get('listId')` at render time would find it
+  // already gone by the time the dialog mounted.
+  const [broadcastListId, setBroadcastListId] = useState<string | null>(null);
+  useEffect(() => {
+    const fromUrl = params.get('listId');
+    if (!fromUrl) return;
+    setBroadcastListId(fromUrl);
+    setNewCampaign(true);
+    params.delete('listId');
+    setParams(params, { replace: true });
+  }, [params, setParams]);
 
   const campaigns = useQuery({
     queryKey: ['campaigns'],
@@ -418,6 +491,7 @@ export default function Campaigns() {
         open={newCampaign}
         onOpenChange={setNewCampaign}
         onSaved={() => qc.invalidateQueries({ queryKey: ['campaigns'] })}
+        initialListId={broadcastListId}
       />
     </div>
   );

@@ -2,26 +2,73 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
+import { ListRail } from '@/components/customers/ListRail';
+import { StatusPill, STATUS_OPTIONS, statusLabel, type ContactStatus } from '@/components/customers/ContactStatus';
+import { TagEditor } from '@/components/customers/TagEditor';
+import {
+  useAddToList, useCustomerLists, useRemoveFromList,
+} from '@/lib/customer-lists';
+import { splitNumber } from '@/lib/countries';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
+import { cn, formatCurrency, formatDateTime, initialsOf, timeAgo } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
-import { MessageSquarePlus, UserPlus, Pencil, Info } from 'lucide-react';
+import {
+  MessageSquarePlus, UserPlus, Pencil, Info, MoreHorizontal, Search, Filter, Send, Tag, Check,
+} from 'lucide-react';
 import { toast } from 'sonner';
+
+// Customers, as lists of contacts.
+//
+// **This replaced a flat table**, and the risk of replacing a page is quietly losing what
+// it did. Everything the old one carried is still here: Add customer, Edit, Start chat, the
+// detail dialog with order history, search and pagination. Edit and Start chat moved into
+// the per-row menu; the rest is where it was.
+//
+// The rail's first entry, "All customers", is what makes that safe — it is the old view,
+// still one click away, with lists added around it rather than in front of it.
 
 interface Customer {
   id: string; name?: string; waId: string; phone?: string; lifetimeSpend: number | string;
   lastSeenAt?: string; _count?: { orders: number; messages: number };
+  /** Free-form labels. Lowercased by the server. */
+  tags?: string[];
+  /** Newest conversation's `lastMessageAt`, flattened by the API. Null if never messaged. */
+  lastMessageAt?: string | null;
+  marketingOptIn?: boolean;
+  optedOutAt?: string | null;
 }
 interface CustomerDetail extends Customer {
   orders: { id: string; orderNumber: number; status: string; totalAmount: number; placedAt: string }[];
 }
+
+/**
+ * "+91 98450 22831 · India" from the stored `waId`.
+ *
+ * The country is derived, not a column: `splitNumber` runs the number through
+ * libphonenumber and returns null when it cannot be attributed to one country — a `+1`
+ * number, say, which twenty-odd territories share. In that case the label is simply left
+ * off rather than guessed at.
+ */
+const phoneLabel = (customer: Customer): string => {
+  const raw = customer.phone || customer.waId;
+  const parts = splitNumber(raw);
+  // No single country — a `+1` number, which twenty-odd territories share, or a number
+  // libphonenumber cannot parse. Still shown with a leading `+` so it reads as an
+  // international number rather than a bare run of digits.
+  if (!parts) return raw.startsWith('+') ? raw : `+${raw}`;
+  return `${parts.country.dialCode} ${parts.national} · ${parts.country.name}`;
+};
 
 // ── Add / edit dialog ─────────────────────────────────────────────────────────
 // One component for both modes. In edit mode the WhatsApp number is shown but not
@@ -139,11 +186,25 @@ const PAGE_SIZE = 10;
 export default function Customers() {
   const qc = useQueryClient();
   const nav = useNavigate();
+
+  /** `null` is the "All customers" pseudo-list — no `listId` sent. */
+  const [listId, setListId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<ContactStatus | ''>('');
+  const [tag, setTag] = useState('');
   const [page, setPage] = useState(1);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [editing, setEditing] = useState<Customer | null>(null);
+  const [taggingId, setTaggingId] = useState<string | null>(null);
+
+  /**
+   * Ticked rows, by id, kept across page changes so people can be gathered from several
+   * pages into one list. The count is always on screen because of that — a selection you
+   * cannot see is one you will act on by mistake.
+   */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const openAdd = () => { setEditing(null); setFormMode('create'); };
   const openEdit = (c: Customer) => { setEditing(c); setFormMode('edit'); };
@@ -152,14 +213,17 @@ export default function Customers() {
     if (selected) qc.invalidateQueries({ queryKey: ['customer', selected] });
   };
 
-  // One page at a time. `take: 200` with no offset meant a workspace past 200 customers
-  // never saw the rest, and nothing on the page admitted it.
-  const { data } = useQuery({
-    queryKey: ['customers', search, page],
+  // Every filter is in the key, so changing one refetches rather than reusing the previous
+  // answer. Leaving any of them out is the bug where picking a list changes nothing.
+  const { data, isLoading } = useQuery({
+    queryKey: ['customers', { listId, search, status, tag, page }],
     queryFn: async () => {
       const response = await api.get<{ data: Customer[]; meta: { total: number } }>('/customers', {
         params: {
+          listId: listId ?? undefined,
           search: search || undefined,
+          status: status || undefined,
+          tag: tag || undefined,
           take: PAGE_SIZE,
           skip: (page - 1) * PAGE_SIZE,
         },
@@ -169,6 +233,26 @@ export default function Customers() {
   });
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
+
+  /** The workspace total, for the rail. Unfiltered, so it does not move as filters change. */
+  const workspaceTotal = useQuery({
+    queryKey: ['customers-total'],
+    queryFn: async () => (await api.get<{ meta: { total: number } }>('/customers', {
+      params: { take: 1 },
+    })).data.meta.total,
+  });
+
+  const tags = useQuery({
+    queryKey: ['customer-tags'],
+    queryFn: async () => (await api.get<{ data: Array<{ tag: string; count: number }> }>(
+      '/customers/tags',
+    )).data.data,
+  });
+
+  const lists = useCustomerLists();
+  const addToList = useAddToList();
+  const removeFromList = useRemoveFromList();
+  const selectedList = lists.data?.find((l) => l.id === listId) ?? null;
 
   const detail = useQuery({
     queryKey: ['customer', selected],
@@ -187,101 +271,323 @@ export default function Customers() {
     },
   });
 
+  /** Any filter change returns to page 1, or a narrower result shows an empty table. */
+  const resetTo = <T,>(setter: (v: T) => void) => (value: T) => { setter(value); setPage(1); };
+
+  const pageIds = rows.map((c) => c.id);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const togglePage = () => setSelectedIds((current) => {
+    const next = new Set(current);
+    // Page-only, and the label says so. A control that quietly ticked all 265 is how the
+    // whole database ends up on a list meant for forty people.
+    if (allOnPageSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    return next;
+  });
+  const toggleRow = (id: string) => setSelectedIds((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const taggingCustomer = rows.find((c) => c.id === taggingId) ?? null;
+
   return (
-    <div className="space-y-6">
+    <div className="flex h-[calc(100vh-48px)] flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-h2 font-semibold">Customers</h1>
-          <p className="text-sm text-muted-foreground">Localized customer database with order history.</p>
+          <p className="text-sm text-muted-foreground">
+            Everyone who has messaged you, and the lists you have grouped them into.
+          </p>
         </div>
         <Button onClick={openAdd} className="gap-1">
           <UserPlus className="h-4 w-4" /> Add customer
         </Button>
       </div>
-      <Card>
-        <CardHeader><CardTitle>Customer list</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {/* Back to page 1 on every keystroke: the result set changes, so staying on
-              page 7 would show an empty table for a search that has matches. */}
-          <Input
-            placeholder="Search by name or phone…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12">
+        {/* Stacks below `lg`, where two panes side by side would crush both. */}
+        <div className="lg:col-span-4 lg:min-h-0">
+          <ListRail
+            selectedListId={listId}
+            onSelect={(next) => { setListId(next); setPage(1); }}
+            totalCustomers={workspaceTotal.data ?? 0}
           />
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead><TableHead>Phone</TableHead><TableHead>Orders</TableHead>
-                <TableHead>Lifetime spend</TableHead><TableHead>Last seen</TableHead><TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((c) => (
-                <TableRow key={c.id} className="cursor-pointer" onClick={() => setSelected(c.id)}>
-                  <TableCell>{c.name || '—'}</TableCell>
-                  <TableCell>{c.phone || c.waId}</TableCell>
-                  <TableCell>{c._count?.orders ?? 0}</TableCell>
-                  <TableCell>{formatCurrency(c.lifetimeSpend as number)}</TableCell>
-                  <TableCell>{c.lastSeenAt ? formatDateTime(c.lastSeenAt) : '—'}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); openEdit(c); }}
-                      >
-                        <Pencil className="h-3.5 w-3.5 mr-1" />Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); startConversation.mutate(c.id); }}
-                        disabled={startConversation.isPending}
-                      >
-                        <MessageSquarePlus className="h-4 w-4 mr-1" />Start chat
-                      </Button>
-                    </div>
-                  </TableCell>
+        </div>
+
+        <Card className="flex min-h-0 flex-col lg:col-span-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-body font-semibold text-ink-900">
+                {selectedList?.name ?? 'All customers'}
+              </h2>
+              <p className="truncate text-caption text-muted-foreground">
+                {selectedList?.description
+                  ?? 'Filter by status or tag, or pick a list on the left.'}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
+                <Input
+                  className="w-56 pl-8"
+                  placeholder="Search name, phone, tag"
+                  value={search}
+                  onChange={(e) => resetTo(setSearch)(e.target.value)}
+                />
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" aria-label="Filter contacts">
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => { resetTo(setStatus)(''); resetTo(setTag)(''); }}>
+                    Clear filters
+                  </DropdownMenuItem>
+                  {STATUS_OPTIONS.map((option) => (
+                    <DropdownMenuItem key={option} onClick={() => resetTo(setStatus)(option)}>
+                      {/* An icon rather than a tick character — §8 keeps glyphs like that
+                          out of UI chrome, and a fixed-width slot stops the labels shifting
+                          as the selection moves. */}
+                      <span className="mr-2 w-3.5">
+                        {status === option && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      {statusLabel(option)}
+                    </DropdownMenuItem>
+                  ))}
+                  {(tags.data ?? []).slice(0, 10).map((row) => (
+                    <DropdownMenuItem key={row.tag} onClick={() => resetTo(setTag)(row.tag)}>
+                      <span className="mr-2 w-3.5">
+                        {tag === row.tag && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      {row.tag} ({row.count})
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Carries the list through, so the campaign opens with this audience already
+                  chosen. Consent still applies, so the preview may honestly show fewer
+                  reachable than the list has members. */}
+              <Button
+                className="gap-1"
+                onClick={() => nav(listId ? `/campaigns?listId=${listId}` : '/campaigns')}
+              >
+                <Send className="h-4 w-4" /> Broadcast
+              </Button>
+            </div>
+          </div>
+
+          {(status || tag) && (
+            <div className="flex flex-wrap items-center gap-2 border-b bg-surface-0/40 px-4 py-2">
+              <span className="text-caption text-ink-500">Filtered by</span>
+              {status && <Badge variant="secondary">{statusLabel(status)}</Badge>}
+              {tag && <Badge variant="secondary">{tag}</Badge>}
+              <Button variant="outline" size="sm"
+                onClick={() => { resetTo(setStatus)(''); resetTo(setTag)(''); }}>
+                Clear
+              </Button>
+            </div>
+          )}
+
+          {selectedIds.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-accent-100 bg-accent-100/40 px-4 py-2">
+              <span className="text-sm font-medium text-ink-900">{selectedIds.size} selected</span>
+              <select
+                aria-label="Add selected to list"
+                className="h-9 rounded-md border border-ink-400 bg-surface-1 px-2 text-sm text-ink-900"
+                value=""
+                disabled={addToList.isPending || (lists.data ?? []).length === 0}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  addToList.mutate(
+                    { listId: e.target.value, customerIds: [...selectedIds] },
+                    { onSuccess: () => setSelectedIds(new Set()) },
+                  );
+                }}
+              >
+                <option value="">Add to list…</option>
+                {(lists.data ?? []).map((list) => (
+                  <option key={list.id} value={list.id}>{list.name}</option>
+                ))}
+              </select>
+              {/* Only offered while a real list is open — "remove from list" has no meaning
+                  under All customers, and would read as "delete". */}
+              {listId && (
+                <Button variant="outline" size="sm" disabled={removeFromList.isPending}
+                  onClick={() => removeFromList.mutate(
+                    { listId, customerIds: [...selectedIds] },
+                    { onSuccess: () => setSelectedIds(new Set()) },
+                  )}
+                >
+                  Remove from this list
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>
+                Clear
+              </Button>
+            </div>
+          )}
+
+          <CardContent className="min-h-0 flex-1 overflow-auto p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select every contact on this page"
+                      className="h-4 w-4 rounded border-ink-400 text-accent-600"
+                      checked={allOnPageSelected}
+                      onChange={togglePage}
+                    />
+                  </TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Tags</TableHead>
+                  <TableHead>Last message</TableHead>
+                  <TableHead />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-        <Pagination
-          page={page}
-          onPageChange={setPage}
-          pageSize={PAGE_SIZE}
-          total={total}
-          noun="customers"
-        />
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow><TableCell colSpan={6}>
+                    <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+                  </TableCell></TableRow>
+                ) : total === 0 ? (
+                  <TableRow><TableCell colSpan={6}>
+                    <p className="py-8 text-center text-sm text-muted-foreground">
+                      {listId
+                        ? 'Nobody on this list yet — select contacts under All customers and use “Add to list”.'
+                        : 'No contacts match.'}
+                    </p>
+                  </TableCell></TableRow>
+                ) : rows.map((c) => (
+                  <TableRow key={c.id} className="cursor-pointer" onClick={() => setSelected(c.id)}>
+                    {/* `stopPropagation`, or ticking a box also opens the detail dialog. */}
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${c.name || c.waId}`}
+                        className="h-4 w-4 rounded border-ink-400 text-accent-600"
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => toggleRow(c.id)}
+                      />
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <span
+                          aria-hidden
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-100 text-caption font-semibold text-accent-700"
+                        >
+                          {initialsOf(c.name, c.waId)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink-900">
+                            {c.name || '—'}
+                          </p>
+                          <p className="truncate text-caption text-ink-500">{phoneLabel(c)}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+
+                    <TableCell><StatusPill customer={c} /></TableCell>
+
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {(c.tags ?? []).length === 0
+                          ? <span className="text-caption text-ink-500">—</span>
+                          : c.tags!.map((t) => (
+                            <Badge key={t} variant="secondary">{t}</Badge>
+                          ))}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-caption text-ink-500">
+                      {timeAgo(c.lastMessageAt)}
+                    </TableCell>
+
+                    <TableCell onClick={(e) => e.stopPropagation()} className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="icon" aria-label={`Actions for ${c.name || c.waId}`}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(c)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" /> Edit details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => startConversation.mutate(c.id)}
+                            disabled={startConversation.isPending}
+                          >
+                            <MessageSquarePlus className="mr-2 h-3.5 w-3.5" /> Start chat
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setTaggingId(c.id)}>
+                            <Tag className="mr-2 h-3.5 w-3.5" /> Manage tags
+                          </DropdownMenuItem>
+                          {listId && (
+                            <DropdownMenuItem
+                              onClick={() => removeFromList.mutate({ listId, customerIds: [c.id] })}
+                            >
+                              Remove from this list
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-2">
+            <span className="text-caption text-ink-500">
+              {rows.length} of {total} contact{total === 1 ? '' : 's'}
+            </span>
+            <span className="text-caption text-ink-500">{selectedIds.size} selected</span>
+          </div>
+          <Pagination
+            page={page}
+            onPageChange={setPage}
+            pageSize={PAGE_SIZE}
+            total={total}
+            noun="contacts"
+          />
+        </Card>
+      </div>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>{detail.data?.name || detail.data?.waId || 'Customer'}</DialogTitle></DialogHeader>
           {detail.data && (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 text-sm gap-2">
+              <div className="grid grid-cols-3 gap-2 text-sm">
                 <div><div className="text-muted-foreground">Phone</div><div>{detail.data.phone || detail.data.waId}</div></div>
                 <div><div className="text-muted-foreground">Orders</div><div>{detail.data.orders.length}</div></div>
                 <div><div className="text-muted-foreground">Lifetime</div><div>{formatCurrency(detail.data.lifetimeSpend as number)}</div></div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => detail.data && openEdit(detail.data)}
-                >
-                  <Pencil className="h-3.5 w-3.5 mr-1" />Edit details
+                <Button variant="outline" onClick={() => detail.data && openEdit(detail.data)}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" />Edit details
                 </Button>
                 <Button
                   onClick={() => detail.data && startConversation.mutate(detail.data.id)}
                   disabled={startConversation.isPending}
                 >
-                  <MessageSquarePlus className="h-4 w-4 mr-1" />Start conversation
+                  <MessageSquarePlus className="mr-1 h-4 w-4" />Start conversation
                 </Button>
               </div>
               <div className="border-t pt-3">
-                <div className="text-sm font-medium mb-2">Recent orders</div>
+                <div className="mb-2 text-sm font-medium">Recent orders</div>
                 <Table>
                   <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Status</TableHead><TableHead>Total</TableHead><TableHead>Date</TableHead></TableRow></TableHeader>
                   <TableBody>
@@ -295,6 +601,12 @@ export default function Customers() {
           )}
         </DialogContent>
       </Dialog>
+
+      <TagEditor
+        customer={taggingCustomer}
+        open={taggingId !== null}
+        onOpenChange={(v) => { if (!v) setTaggingId(null); }}
+      />
 
       <CustomerFormDialog
         mode={formMode ?? 'create'}

@@ -19,6 +19,10 @@ const requireId = (value: string | undefined, what: string): string => {
 const audienceSchema = z.object({
   lastSeenAfter: z.string().datetime().nullish(),
   hasOrdered: z.boolean().optional(),
+  // Curated lists. Bounded because this is stored on the campaign as JSON and read back
+  // on every preview; there is no reason to name twenty lists and every reason not to
+  // accept an unbounded array from a client.
+  listIds: z.array(z.string().uuid()).max(20).nullish(),
 });
 
 // ── Templates ─────────────────────────────────────────────────────────────────

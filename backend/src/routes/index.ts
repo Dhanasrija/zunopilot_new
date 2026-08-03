@@ -14,6 +14,7 @@ import roles from './role.routes.js';
 import leads from '../modules/leads/lead.routes.js';
 import tickets from '../modules/support/ticket.routes.js';
 import campaigns from '../modules/marketing/campaign.routes.js';
+import customerLists from '../modules/customer-lists/list.routes.js';
 import { contactRoutes } from '../modules/enquiries/enquiry.routes.js';
 import {
   billingRoutes, publicPricingRoutes, razorpayWebhookRoutes,
@@ -38,6 +39,9 @@ routes.use('/menu', menu);
 routes.use('/orders', order);
 routes.use('/templates', template);
 routes.use('/customers', customer);
+// A sibling of /customers rather than /customers/lists, so the list routes are not
+// shadowed by customer.routes' own `/:id`.
+routes.use('/customer-lists', customerLists);
 routes.use('/team', team);
 // Module 18: the workspace's own roles and what each may do.
 routes.use('/roles', roles);

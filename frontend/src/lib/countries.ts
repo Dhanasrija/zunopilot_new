@@ -202,6 +202,12 @@ export const splitNumber = (
   try {
     const parsed = parsePhoneNumberFromString(`+${digits}`);
     if (!parsed?.country) return null;
+    // **Valid, not merely parseable.** A number stored without its country code still
+    // parses: `7702000350` — an Indian mobile saved as ten bare digits — comes back as
+    // Kazakhstan, because `+7` is Russia and Kazakhstan. Labelling an Indian customer as
+    // Kazakh is worse than showing no country at all, and `isValid()` is what tells the
+    // two apart: a real `+91…` number passes, that misread one does not.
+    if (!parsed.isValid()) return null;
     const country = countryByIso(parsed.country);
     return country ? { country, national: parsed.nationalNumber } : null;
   } catch {

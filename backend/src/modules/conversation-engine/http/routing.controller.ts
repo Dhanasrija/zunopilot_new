@@ -27,6 +27,15 @@ const requireAssistant = async (req: Request) => {
 const dryRoute = async (
   assistant: Awaited<ReturnType<typeof requireAssistant>>,
   message: string,
+  /**
+   * Tags to put on the stub contact.
+   *
+   * Worth being able to set: `CUSTOMER_TAG` rules match on these, and until `Customer`
+   * gained a `tags` column they could not fire at all. Without this the route tester would
+   * report "no match" for a rule that is now perfectly correct, and the tester would be
+   * lying about the one rule type that just started working.
+   */
+  tags: string[] = [],
 ) => {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: assistant.tenantId } });
 
@@ -40,6 +49,9 @@ const dryRoute = async (
     // immaterial — but "opted out" is the honest default for a contact that does
     // not exist.
     marketingOptIn: false, optedOutAt: null, optInSource: null,
+    // Lowercased to match how the customer controller stores them, so a rule written
+    // against "vip" is not tested against "VIP".
+    tags: tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean),
   };
 
   const deterministic = await matchDeterministicRule({
@@ -126,7 +138,11 @@ const dryRoute = async (
 
 export const routeTest = asyncHandler(async (req: Request, res: Response) => {
   const assistant = await requireAssistant(req);
-  const result = await dryRoute(assistant, req.body.message);
+  const result = await dryRoute(
+    assistant,
+    req.body.message,
+    Array.isArray(req.body.tags) ? req.body.tags.filter((t: unknown) => typeof t === 'string') : [],
+  );
   res.json({ success: true, data: result });
 });
 
