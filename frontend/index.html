@@ -5,12 +5,15 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/png" href="/app-logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
-    rel="stylesheet"
-  />
+  <!--
+    Fonts are self-hosted and imported in src/index.css.
+
+    §3.1 forbids the Google Fonts CDN on latency and privacy grounds, and the
+    request that used to sit here also asked for weights 300 and 700–900, none of
+    which §3.2 permits — so it was downloading four faces the system is not
+    allowed to use. Removing it drops two preconnects and a render-blocking
+    stylesheet from every page load, which §10's LCP budget cares about.
+  -->
   <title>ZunoPilot</title>
 </head>
 

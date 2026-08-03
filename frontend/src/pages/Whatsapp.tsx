@@ -28,10 +28,10 @@ function CopyButton({ value }: { value: string }) {
   return (
     <button
       onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="ml-1.5 text-slate-400 hover:text-slate-600 transition-colors"
+      className="ml-1 text-ink-500 hover:text-ink-700 transition-colors"
       title="Copy"
     >
-      {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-wa-green" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
   );
 }
@@ -121,19 +121,19 @@ export default function Whatsapp() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-lg bg-wa-green flex items-center justify-center shrink-0">
             <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
           </div>
           <div>
-            <h1 className="text-2xl font-bold">WhatsApp Setup</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Link your WhatsApp Business Account via Meta Embedded Signup to start receiving orders.</p>
+            <h1 className="text-h2 font-semibold">WhatsApp Setup</h1>
+            <p className="text-sm text-muted-foreground mt-px">Link your WhatsApp Business Account via Meta Embedded Signup to start receiving orders.</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5 shrink-0"
+        <Button variant="outline" size="sm" className="gap-1 shrink-0"
           onClick={() => window.open('https://developers.facebook.com/docs/whatsapp/embedded-signup', '_blank')}>
           <Info className="w-3.5 h-3.5" /> How it works?
         </Button>
@@ -141,9 +141,9 @@ export default function Whatsapp() {
 
       {/* Loading */}
       {isLoading && (
-        <div className="rounded-xl border bg-white shadow-sm p-12 flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-7 h-7 animate-spin text-emerald-500" />
-          <p className="text-sm text-slate-500">Checking WhatsApp account status…</p>
+        <div className="rounded-lg border bg-surface-1 shadow-none p-12 flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="w-7 h-7 animate-spin text-wa-green" />
+          <p className="text-sm text-ink-500">Checking WhatsApp account status…</p>
         </div>
       )}
 
@@ -151,13 +151,13 @@ export default function Whatsapp() {
       {!isLoading && account && (
         <div className="space-y-4">
           {/* Connection card */}
-          <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+          <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
             {/* Top bar: View in Meta */}
-            <div className="flex justify-end px-5 pt-4 pb-0">
+            <div className="flex justify-end px-4 pt-4 pb-0">
               <a
                 href={`https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${account.wabaId}`}
                 target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 border rounded-lg px-3 py-1.5 hover:bg-accent transition-colors"
+                className="inline-flex items-center gap-1 text-caption font-medium text-ink-700 border rounded-lg px-3 py-1 hover:bg-accent transition-colors"
               >
                 View in Meta <ExternalLink className="w-3.5 h-3.5" />
               </a>
@@ -171,46 +171,46 @@ export default function Whatsapp() {
                   <img
                     src="/whatsapp_connect.png"
                     alt="WhatsApp Connected"
-                    className="w-20 h-20 rounded-full object-cover border-4 border-emerald-100"
+                    className="w-20 h-20 rounded-full object-cover border-4 border-wa-green/30"
                   />
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-wa-green border-2 border-surface-1 flex items-center justify-center">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-on-accent" />
                   </div>
                 </div>
 
                 {/* Status text + disconnect */}
                 <div className="flex flex-col gap-2">
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Connection Status</p>
-                    <p className="text-3xl font-bold text-slate-900 mt-0.5">Connected</p>
+                    <p className="text-caption uppercase tracking-widest text-ink-500 font-semibold">Connection Status</p>
+                    <p className="text-h2 font-semibold text-ink-900 mt-px">Connected</p>
                     {account.tokenExpired && (
-                      <Badge className="mt-1.5 bg-amber-100 text-amber-700 border-amber-300 font-semibold">
+                      <Badge className="mt-1 bg-warning/15 text-ink-900 border-warning/40 font-semibold">
                         Token Expired
                       </Badge>
                     )}
                     {account.tokenExpired && (
-                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed max-w-[200px]">
+                      <p className="text-caption text-ink-500 mt-1 leading-relaxed max-w-[200px]">
                         Your WhatsApp Business account is connected, but{' '}
-                        <span className="text-red-500 font-medium">the access token has expired.</span>
+                        <span className="text-danger font-medium">the access token has expired.</span>
                       </p>
                     )}
                   </div>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="gap-1.5 text-red-500 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-600 w-fit mt-1"
+                    className="gap-1 text-danger border-danger/30 hover:bg-danger/10 hover:border-danger/30 hover:text-danger w-fit mt-1"
                     onClick={() => disconnect.mutate()}
                     disabled={disconnect.isPending}
                   >
                     {disconnect.isPending
                       ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Disconnecting…</>
-                      : <><span className="text-red-400">⏻</span> Disconnect</>}
+                      : <><span className="text-danger">⏻</span> Disconnect</>}
                   </Button>
                 </div>
               </div>
 
               {/* Divider */}
-              <div className="hidden md:block w-px bg-slate-100 self-stretch mx-2" />
+              <div className="hidden md:block w-px bg-surface-0 self-stretch mx-2" />
 
               {/* Right: info grid */}
               <div className="flex-1 grid grid-cols-2 gap-x-8 gap-y-4 content-start">
@@ -223,15 +223,15 @@ export default function Whatsapp() {
                   { label: 'Business Account Status', value: 'ACTIVE', isStatus: true },
                 ].map(({ label, value, copy, isStatus }) => (
                   <div key={label}>
-                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">{label}</p>
+                    <p className="text-caption uppercase tracking-widest text-ink-500 font-semibold">{label}</p>
                     <div className="flex items-center mt-1">
                       {isStatus ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{value}
+                        <span className="inline-flex items-center gap-1 text-caption font-semibold text-wa-green bg-wa-green/10 border border-wa-green/30 px-2 py-px rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-wa-green" />{value}
                         </span>
                       ) : (
                         <>
-                          <span className="text-sm font-medium text-slate-700 font-mono truncate max-w-[180px]">{value}</span>
+                          <span className="text-sm font-medium text-ink-700 font-mono truncate max-w-[180px]">{value}</span>
                           {copy && value !== '—' && <CopyButton value={value} />}
                         </>
                       )}
@@ -245,46 +245,46 @@ export default function Whatsapp() {
           {/* Token expired section */}
           {account.tokenExpired && (
             <>
-              <div className="rounded-xl border border-red-200 bg-red-50/40 shadow-sm overflow-hidden">
+              <div className="rounded-lg border border-danger/30 bg-danger/10/40 shadow-none overflow-hidden">
                 <div className="grid md:grid-cols-2 gap-0">
                   {/* Left: instructions */}
-                  <div className="p-6 border-r border-red-100">
+                  <div className="p-6 border-r border-danger/30">
                     <div className="flex items-start gap-3 mb-4">
-                      <div className="w-9 h-9 rounded-full bg-red-100 border border-red-200 flex items-center justify-center shrink-0 mt-0.5">
-                        <AlertTriangle className="w-4 h-4 text-red-500" />
+                      <div className="w-9 h-9 rounded-full bg-danger/10 border border-danger/30 flex items-center justify-center shrink-0 mt-px">
+                        <AlertTriangle className="w-4 h-4 text-danger" />
                       </div>
                       <div>
-                        <h3 className="font-bold text-slate-900">Meta Access Token Expired</h3>
-                        <p className="text-sm text-slate-500 mt-0.5 leading-relaxed">
+                        <h3 className="font-semibold text-ink-900">Meta Access Token Expired</h3>
+                        <p className="text-sm text-ink-500 mt-px leading-relaxed">
                           Your Meta developer access token is no longer valid. Paste a new token from your Meta Developer Dashboard to resume template operations.
                         </p>
                       </div>
                     </div>
 
                     <div className="space-y-3">
-                      <p className="text-xs font-semibold text-slate-700">How to generate a new token?</p>
+                      <p className="text-caption font-semibold text-ink-700">How to generate a new token?</p>
                       {[
-                        { n: 1, text: <>Go to <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">Meta Developer Portal <ExternalLink className="w-3 h-3 inline" /></a></> },
-                        { n: 2, text: <>Navigate to <span className="font-medium">App Dashboard &gt; WhatsApp &gt; API Setup <ExternalLink className="w-3 h-3 inline text-slate-400" /></span></> },
+                        { n: 1, text: <>Go to <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" className="text-accent-600 hover:underline font-medium">Meta Developer Portal <ExternalLink className="w-3 h-3 inline" /></a></> },
+                        { n: 2, text: <>Navigate to <span className="font-medium">App Dashboard &gt; WhatsApp &gt; API Setup <ExternalLink className="w-3 h-3 inline text-ink-500" /></span></> },
                         { n: 3, text: 'Generate a new access token with required permissions' },
                         { n: 4, text: 'Copy and paste the token below' },
                       ].map(({ n, text }) => (
                         <div key={n} className="flex items-start gap-3">
-                          <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{n}</span>
-                          <p className="text-xs text-slate-600 leading-relaxed">{text}</p>
+                          <span className="w-5 h-5 rounded-full bg-ink-300 text-ink-700 text-caption font-semibold flex items-center justify-center shrink-0 mt-px">{n}</span>
+                          <p className="text-caption text-ink-700 leading-relaxed">{text}</p>
                         </div>
                       ))}
                     </div>
                   </div>
 
                   {/* Right: token input */}
-                  <div className="p-6 bg-white">
-                    <h3 className="font-bold text-slate-900 mb-1">Paste New Meta Access Token</h3>
-                    <p className="text-xs text-slate-500 mb-5">Enter the new access token to reconnect your WhatsApp account.</p>
+                  <div className="p-6 bg-surface-1">
+                    <h3 className="font-semibold text-ink-900 mb-1">Paste New Meta Access Token</h3>
+                    <p className="text-caption text-ink-500 mb-4">Enter the new access token to reconnect your WhatsApp account.</p>
 
                     <div className="space-y-3">
                       <div className="relative">
-                        <div className="absolute left-3 top-2.5 text-slate-400">
+                        <div className="absolute left-3 top-2.5 text-ink-500">
                           <Shield className="w-4 h-4" />
                         </div>
                         <input
@@ -292,19 +292,19 @@ export default function Whatsapp() {
                           placeholder="EAA..."
                           value={newToken}
                           onChange={(e) => setNewToken(e.target.value)}
-                          className="w-full h-10 pl-9 pr-10 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 font-mono"
+                          className="w-full h-10 pl-8 pr-8 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-accent-600/30 focus:border-accent-600 font-mono"
                         />
                         <button
                           type="button"
                           onClick={() => setShowToken((v) => !v)}
-                          className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                          className="absolute right-3 top-2.5 text-ink-500 hover:text-ink-700"
                         >
                           {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
 
                       <Button
-                        className="w-full bg-violet-600 hover:bg-violet-700 text-white font-semibold"
+                        className="w-full bg-accent-600 hover:bg-accent-700 text-on-accent font-semibold"
                         disabled={!newToken || updateToken.isPending}
                         onClick={() => updateToken.mutate()}
                       >
@@ -312,8 +312,8 @@ export default function Whatsapp() {
                       </Button>
 
                       <div className="flex items-start gap-2 pt-1">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                        <CheckCircle2 className="w-4 h-4 text-wa-green shrink-0 mt-px" />
+                        <p className="text-caption text-ink-500 leading-relaxed">
                           We never store your token. It is encrypted and securely used to connect with Meta API.
                         </p>
                       </div>
@@ -323,8 +323,8 @@ export default function Whatsapp() {
               </div>
 
               {/* Bottom note */}
-              <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-slate-50 border text-xs text-slate-500">
-                <Info className="w-4 h-4 shrink-0 text-slate-400" />
+              <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-surface-0 border text-caption text-ink-500">
+                <Info className="w-4 h-4 shrink-0 text-ink-500" />
                 <span><strong>Note:</strong> Some features like sending templates and receiving messages will be paused until the token is updated.</span>
               </div>
             </>
@@ -336,21 +336,21 @@ export default function Whatsapp() {
       {!isLoading && !account && (
         <div className="space-y-4">
           {/* Connect card */}
-          <div className="rounded-xl border bg-white shadow-sm p-8 flex flex-col items-center text-center gap-5">
-            <div className="w-20 h-20 rounded-full bg-emerald-50 border-4 border-emerald-100 flex items-center justify-center">
-              <div className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center">
+          <div className="rounded-lg border bg-surface-1 shadow-none p-8 flex flex-col items-center text-center gap-4">
+            <div className="w-20 h-20 rounded-full bg-wa-green/10 border-4 border-wa-green/30 flex items-center justify-center">
+              <div className="w-14 h-14 rounded-full bg-wa-green flex items-center justify-center">
                 <svg viewBox="0 0 24 24" className="w-8 h-8 fill-white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.854L0 24l6.335-1.52A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.493-5.2-1.357l-.372-.22-3.762.902.937-3.653-.243-.384A9.95 9.95 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
               </div>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Connect WhatsApp Business</h2>
-              <p className="text-sm text-slate-500 mt-1 max-w-sm">
+              <h2 className="text-h3 font-semibold text-ink-900">Connect WhatsApp Business</h2>
+              <p className="text-sm text-ink-500 mt-1 max-w-sm">
                 Link your WhatsApp Business Account using Meta Embedded Signup to start sending messages and receiving orders.
               </p>
             </div>
             <Button
               size="lg"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 px-8 font-semibold"
+              className="bg-wa-green hover:bg-wa-green text-on-accent gap-2 px-8 font-semibold"
               onClick={launchEmbeddedSignup}
               disabled={!sdkReady || !config?.configId || submit.isPending}
             >
@@ -361,15 +361,15 @@ export default function Whatsapp() {
                   : <><Smartphone className="w-4 h-4" /> Connect with Meta</>}
             </Button>
             {config?.appId && (
-              <p className="text-[11px] text-slate-400">App ID: {config.appId}</p>
+              <p className="text-caption text-ink-500">App ID: {config.appId}</p>
             )}
           </div>
 
           {/* Manual connect (dev) */}
-          <div className="rounded-xl border bg-white shadow-sm p-6">
+          <div className="rounded-lg border bg-surface-1 shadow-none p-6">
             <div className="mb-4">
-              <h3 className="font-semibold text-sm">Manual Connect <span className="text-[10px] font-normal text-slate-400 ml-1">(development only)</span></h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Paste credentials directly from Meta dashboard for local testing.</p>
+              <h3 className="font-semibold text-sm">Manual Connect <span className="text-caption font-normal text-ink-500 ml-1">(development only)</span></h3>
+              <p className="text-caption text-muted-foreground mt-px">Paste credentials directly from Meta dashboard for local testing.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {[
@@ -378,8 +378,8 @@ export default function Whatsapp() {
                 { label: 'Display Phone', key: 'displayPhone', placeholder: '+15550292978' },
                 { label: 'Access Token', key: 'accessToken', placeholder: 'EAA...' },
               ].map(({ label, key, placeholder }) => (
-                <div key={key} className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-600">{label}</label>
+                <div key={key} className="space-y-1">
+                  <label className="text-caption font-medium text-ink-700">{label}</label>
                   <Input
                     placeholder={placeholder}
                     value={(manual as any)[key]}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +22,7 @@ import { toast } from 'sonner';
 import {
   Plus, Trash2, ShoppingBag, ChefHat, CheckCircle, IndianRupee,
   RefreshCw, Search, Download, MoreVertical, TrendingUp, TrendingDown,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Eye,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -39,13 +40,13 @@ const NEXT: Record<OrderStatus, OrderStatus[]> = {
 };
 
 const STATUS_STYLE: Record<OrderStatus, string> = {
-  NEW: 'bg-violet-100 text-violet-700 border-violet-200',
-  ACCEPTED: 'bg-blue-100 text-blue-700 border-blue-200',
-  PREPARING: 'bg-amber-100 text-amber-700 border-amber-200',
-  READY: 'bg-sky-100 text-sky-700 border-sky-200',
-  OUT_FOR_DELIVERY: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-  DELIVERED: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  CANCELLED: 'bg-red-100 text-red-700 border-red-200',
+  NEW: 'bg-accent-100 text-accent-700 border-accent-100',
+  ACCEPTED: 'bg-accent-100 text-accent-700 border-accent-100',
+  PREPARING: 'bg-warning/15 text-ink-900 border-warning/40',
+  READY: 'bg-accent-100 text-accent-700 border-accent-100',
+  OUT_FOR_DELIVERY: 'bg-accent-100 text-accent-700 border-accent-100',
+  DELIVERED: 'bg-success/10 text-success border-success/30',
+  CANCELLED: 'bg-danger/10 text-danger border-danger/30',
 };
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -202,7 +203,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} className="gap-1.5 bg-violet-600 hover:bg-violet-700">
+      <Button onClick={() => setOpen(true)} className="gap-1 bg-accent-600 hover:bg-accent-700">
         <Plus className="w-4 h-4" /> Create Order
       </Button>
 
@@ -211,7 +212,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
           <DialogHeader>
             <DialogTitle>Create New Order</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-2">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Customer</Label>
               <Input placeholder="Search by name or phone…" value={customerSearch}
@@ -296,7 +297,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
 function StatusBadge({ status }: { status: OrderStatus }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${STATUS_STYLE[status]}`}>
+    <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold border ${STATUS_STYLE[status]}`}>
       {STATUS_LABEL[status]}
     </span>
   );
@@ -309,6 +310,7 @@ const PAGE_SIZE = 10;
 
 export default function Orders() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dateFilter, setDateFilter] = useState('Today');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
@@ -367,6 +369,11 @@ export default function Orders() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  // What period the numbers above actually cover. Stating it beats the invented
+  // "vs yesterday" that used to sit there — and it is true, because it is the
+  // filter the stats were computed from.
+  const rangeLabel = dateFilter === 'All' ? 'All time' : dateFilter;
+
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
   const handleDateFilter = (v: string) => { setDateFilter(v); setPage(1); };
   const handleStatusFilter = (v: OrderStatus | 'ALL') => { setStatusFilter(v); setPage(1); };
@@ -394,70 +401,72 @@ export default function Orders() {
   }, [page, totalPages]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Orders</h1>
+          <h1 className="text-h2 font-semibold">Orders</h1>
           <p className="text-sm text-muted-foreground">Manage incoming orders and track their status.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => refetch()} disabled={isFetching}>
+          <Button variant="outline" size="sm" className="gap-1 h-9" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} /> Refresh
           </Button>
           <CreateOrderDialog onCreated={() => {}} />
         </div>
       </div>
 
-      {/* Stats Cards */}
+{/*
+        Stats cards.
+
+        These carried hardcoded trend percentages — "+20% vs yesterday" and so on —
+        which were shown regardless of the numbers above them. On a workspace with
+        no orders it read "New Orders 0, +20% vs yesterday", which is a fabricated
+        metric presented as a real one. Removed rather than faked differently: the
+        API has no yesterday comparison to serve, and the Analytics page is where
+        real trends live.
+      */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
             label: 'New Orders', value: stats.newOrders, icon: ShoppingBag,
-            iconBg: 'bg-violet-100', iconColor: 'text-violet-600',
-            trend: '+20%', up: true,
+            iconBg: 'bg-accent-100', iconColor: 'text-accent-600',
           },
           {
             label: 'Preparing', value: stats.preparing, icon: ChefHat,
-            iconBg: 'bg-orange-100', iconColor: 'text-orange-500',
-            trend: '-8%', up: false,
+            iconBg: 'bg-warning/15', iconColor: 'text-warning',
           },
           {
             label: 'Delivered', value: stats.delivered, icon: CheckCircle,
-            iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600',
-            trend: '+15%', up: true,
+            iconBg: 'bg-success/10', iconColor: 'text-success',
           },
           {
             label: 'Revenue', value: formatCurrency(stats.revenue), icon: IndianRupee,
-            iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600',
-            trend: '+18%', up: true, large: true,
+            iconBg: 'bg-warning/15', iconColor: 'text-ink-900',
           },
-        ].map(({ label, value, icon: Icon, iconBg, iconColor, trend, up }) => (
-          <div key={label} className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
+        ].map(({ label, value, icon: Icon, iconBg, iconColor }) => (
+          <div key={label} className="rounded-lg border bg-surface-1 shadow-none p-4 flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
               <Icon className={`w-6 h-6 ${iconColor}`} />
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="text-2xl font-bold mt-0.5">{value}</p>
-              <div className={`flex items-center gap-0.5 text-xs mt-0.5 ${up ? 'text-emerald-600' : 'text-red-500'}`}>
-                {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                {trend} vs yesterday
-              </div>
+            <div className="min-w-0">
+              <p className="text-caption text-muted-foreground">{label}</p>
+              <p className="text-h2 font-semibold mt-px">{value}</p>
+              <p className="text-caption text-muted-foreground mt-px">{rangeLabel}</p>
             </div>
           </div>
         ))}
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+      <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
         {/* Filters toolbar */}
-        <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-4 border-b">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search order ID, customer or phone..."
-              className="pl-9 h-9 text-sm"
+              className="pl-8 h-9 text-sm"
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
             />
@@ -477,7 +486,7 @@ export default function Orders() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={exportCSV}>
+          <Button variant="outline" size="sm" className="gap-1 h-9" onClick={exportCSV}>
             <Download className="w-3.5 h-3.5" /> Export
           </Button>
         </div>
@@ -488,7 +497,7 @@ export default function Orders() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
-            <ShoppingBag className="w-8 h-8 text-slate-300" />
+            <ShoppingBag className="w-8 h-8 text-ink-300" />
             <p>No orders found</p>
           </div>
         ) : (
@@ -496,36 +505,41 @@ export default function Orders() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-slate-50/60">
+                  <tr className="border-b bg-surface-0/60">
                     {['Order ID', 'Customer', 'Phone', 'Items', 'Amount', 'Status', 'Order Time', 'Actions'].map((h) => (
-                      <th key={h} className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">
+                      <th key={h} className="text-left text-caption font-semibold text-ink-500 px-4 py-3 whitespace-nowrap">
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-ink-300">
                   {paginated.map((o) => (
-                    <tr key={o.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700 whitespace-nowrap">
-                        #ORD-{o.orderNumber}
+                    <tr key={o.id} className="hover:bg-surface-0/50 transition-colors">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <button
+                          onClick={() => navigate(`/orders/${o.id}`)}
+                          className="font-medium text-accent-600 hover:text-accent-700 hover:underline"
+                        >
+                          #ORD-{o.orderNumber}
+                        </button>
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                      <td className="px-4 py-3 font-medium text-ink-700 whitespace-nowrap">
                         {o.customerName}
                       </td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                      <td className="px-4 py-3 text-ink-500 whitespace-nowrap">
                         {o.contactPhone ?? '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">
+                      <td className="px-4 py-3 text-ink-700 max-w-[220px] truncate">
                         {o.items.map((i) => `${i.itemName} x ${i.quantity}`).join(', ')}
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                      <td className="px-4 py-3 font-medium text-ink-700 whitespace-nowrap">
                         {formatCurrency(o.totalAmount)}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <StatusBadge status={o.status} />
                       </td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                      <td className="px-4 py-3 text-ink-500 whitespace-nowrap">
                         {timeAgo(o.placedAt)}
                       </td>
                       <td className="px-4 py-3">
@@ -536,13 +550,16 @@ export default function Orders() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem className="gap-2" onClick={() => navigate(`/orders/${o.id}`)}>
+                              <Eye className="w-3.5 h-3.5" /> View details
+                            </DropdownMenuItem>
                             {NEXT[o.status].length === 0 ? (
                               <DropdownMenuItem disabled>No actions</DropdownMenuItem>
                             ) : (
                               NEXT[o.status].map((next) => (
                                 <DropdownMenuItem
                                   key={next}
-                                  className={next === 'CANCELLED' ? 'text-red-500 focus:text-red-500' : ''}
+                                  className={next === 'CANCELLED' ? 'text-danger focus:text-danger' : ''}
                                   onClick={() => updateStatus.mutate({ id: o.id, status: next })}
                                 >
                                   Mark {STATUS_LABEL[next]}
@@ -559,8 +576,8 @@ export default function Orders() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
-              <p className="text-xs text-slate-500">
+            <div className="flex items-center justify-between px-4 py-3 border-t bg-surface-0/40">
+              <p className="text-caption text-ink-500">
                 Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
                 {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} orders
               </p>
@@ -571,10 +588,10 @@ export default function Orders() {
                 </Button>
                 {pageNumbers.map((n, i) =>
                   n === '...' ? (
-                    <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
+                    <span key={`dots-${i}`} className="w-7 text-center text-caption text-ink-500">…</span>
                   ) : (
                     <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
-                      className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
+                      className={`w-7 h-7 text-caption ${page === n ? 'bg-accent-600 hover:bg-accent-700 border-accent-600' : ''}`}
                       onClick={() => setPage(n as number)}>
                       {n}
                     </Button>

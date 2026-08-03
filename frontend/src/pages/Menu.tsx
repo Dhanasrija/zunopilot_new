@@ -71,28 +71,28 @@ function StatsCards({ items, categories, grocery }: { items: Item[]; categories:
 
   const cards = grocery
     ? [
-      { label: 'Total Products', value: stats.total, icon: ShoppingBag, iconBg: 'bg-violet-100', iconColor: 'text-violet-600' },
-      { label: 'Categories', value: stats.cats, icon: LayoutGrid, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
-      { label: 'In Stock', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
-      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+      { label: 'Total Products', value: stats.total, icon: ShoppingBag, iconBg: 'bg-accent-100', iconColor: 'text-accent-600' },
+      { label: 'Categories', value: stats.cats, icon: LayoutGrid, iconBg: 'bg-accent-100', iconColor: 'text-accent-600' },
+      { label: 'In Stock', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-success/10', iconColor: 'text-success' },
+      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-danger/10', iconColor: 'text-danger' },
     ]
     : [
-      { label: 'Total Items', value: stats.total, icon: UtensilsCrossed, iconBg: 'bg-orange-100', iconColor: 'text-orange-500' },
-      { label: 'Categories', value: stats.cats, icon: Tag, iconBg: 'bg-blue-100', iconColor: 'text-blue-600' },
-      { label: 'Available', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
-      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-red-100', iconColor: 'text-red-500' },
+      { label: 'Total Items', value: stats.total, icon: UtensilsCrossed, iconBg: 'bg-warning/15', iconColor: 'text-warning' },
+      { label: 'Categories', value: stats.cats, icon: Tag, iconBg: 'bg-accent-100', iconColor: 'text-accent-600' },
+      { label: 'Available', value: stats.inStock, icon: PackageCheck, iconBg: 'bg-success/10', iconColor: 'text-success' },
+      { label: 'Out of Stock', value: stats.outOfStock, icon: PackageX, iconBg: 'bg-danger/10', iconColor: 'text-danger' },
     ];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {cards.map(({ label, value, icon: Icon, iconBg, iconColor }) => (
-        <div key={label} className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
-          <div className={`w-11 h-11 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
+        <div key={label} className="rounded-lg border bg-surface-1 shadow-none p-4 flex items-center gap-4">
+          <div className={`w-11 h-11 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
             <Icon className={`w-5 h-5 ${iconColor}`} />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold mt-0.5">{value}</p>
+            <p className="text-caption text-muted-foreground">{label}</p>
+            <p className="text-h2 font-semibold mt-px">{value}</p>
           </div>
         </div>
       ))}
@@ -173,12 +173,12 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
 
   return (
-    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+    <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-4 border-b">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search items…" className="pl-9 h-9 text-sm" value={search}
+          <Input placeholder="Search items…" className="pl-8 h-9 text-sm" value={search}
             onChange={(e) => handleSearch(e.target.value)} />
         </div>
         <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
@@ -239,7 +239,7 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-slate-50/60">
+                <TableRow className="bg-surface-0/60">
                   <TableHead>Item</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Price</TableHead>
@@ -247,11 +247,11 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
                   <TableHead />
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-slate-100">
+              <TableBody className="divide-y divide-ink-300">
                 {paginated.map((i) => (
-                  <TableRow key={i.id} className="hover:bg-slate-50/50">
+                  <TableRow key={i.id} className="hover:bg-surface-0/50">
                     <TableCell className="font-medium">{i.name}
-                      {i.description && <p className="text-xs text-muted-foreground font-normal truncate max-w-[200px]">{i.description}</p>}
+                      {i.description && <p className="text-caption text-muted-foreground font-normal truncate max-w-[200px]">{i.description}</p>}
                     </TableCell>
                     <TableCell>{i.category?.name || '—'}</TableCell>
                     <TableCell className="font-medium">{formatCurrency(i.basePrice as number)}</TableCell>
@@ -261,13 +261,13 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button size="sm" variant="ghost" title="View" onClick={() => setViewItem(i)}>
-                          <Eye className="h-4 w-4 text-slate-400" />
+                          <Eye className="h-4 w-4 text-ink-500" />
                         </Button>
                         <Button size="sm" variant="ghost" title="Edit" onClick={() => openEdit(i)}>
-                          <Pencil className="h-4 w-4 text-slate-400" />
+                          <Pencil className="h-4 w-4 text-ink-500" />
                         </Button>
                         <Button size="sm" variant="ghost" title="Delete" onClick={() => del.mutate(i.id)}>
-                          <Trash2 className="h-4 w-4 text-red-400" />
+                          <Trash2 className="h-4 w-4 text-danger" />
                         </Button>
                       </div>
                     </TableCell>
@@ -277,8 +277,8 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
             </Table>
           </div>
           {/* Pagination */}
-          <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-3 border-t bg-surface-0/40">
+            <p className="text-caption text-ink-500">
               Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
               {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} items
             </p>
@@ -289,10 +289,10 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
               </Button>
               {pageNumbers.map((n, i) =>
                 n === '...' ? (
-                  <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
+                  <span key={`dots-${i}`} className="w-7 text-center text-caption text-ink-500">…</span>
                 ) : (
                   <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
-                    className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
+                    className={`w-7 h-7 text-caption ${page === n ? 'bg-accent-600 hover:bg-accent-700 border-accent-600' : ''}`}
                     onClick={() => setPage(n as number)}>
                     {n}
                   </Button>
@@ -314,16 +314,16 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
           {viewItem && (
             <div className="space-y-3 py-1">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-xs text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
-                <div><p className="text-xs text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
-                <div><p className="text-xs text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
-                <div><p className="text-xs text-muted-foreground mb-1">Status</p>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${viewItem.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                <div><p className="text-caption text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
+                <div><p className="text-caption text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
+                <div><p className="text-caption text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
+                <div><p className="text-caption text-muted-foreground mb-1">Status</p>
+                  <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold ${viewItem.inStock ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
                     {viewItem.inStock ? 'In Stock' : 'Out of Stock'}
                   </span>
                 </div>
                 {viewItem.description && (
-                  <div className="col-span-2"><p className="text-xs text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
+                  <div className="col-span-2"><p className="text-caption text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
                 )}
               </div>
             </div>
@@ -488,12 +488,12 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
 
   return (
-    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+    <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-4 border-b">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search by name, brand or SKU…" className="pl-9 h-9 text-sm" value={search}
+          <Input placeholder="Search by name, brand or SKU…" className="pl-8 h-9 text-sm" value={search}
             onChange={(e) => handleSearch(e.target.value)} />
         </div>
         <Select value={catFilter} onValueChange={(v) => { setCatFilter(v); setPage(1); }}>
@@ -517,14 +517,14 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
           <DialogHeader><DialogTitle>New Product</DialogTitle></DialogHeader>
           <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
             <div>
-              <Label>Category <span className="text-red-500">*</span></Label>
+              <Label>Category <span className="text-danger">*</span></Label>
               <Select value={form.categoryId} onValueChange={(v) => set('categoryId', v)}>
                 <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
                 <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Product Name <span className="text-red-500">*</span></Label>
+              <Label>Product Name <span className="text-danger">*</span></Label>
               <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Basmati Rice" />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -537,13 +537,13 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Unit <span className="text-red-500">*</span></Label>
+                <Label>Unit <span className="text-danger">*</span></Label>
                 <Select value={form.unit} onValueChange={(v) => set('unit', v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
+              <div><Label>Price (₹) <span className="text-danger">*</span></Label>
                 <Input type="number" step="0.01" value={form.basePrice}
                   onChange={(e) => set('basePrice', e.target.value)} placeholder="0.00" />
               </div>
@@ -581,7 +581,7 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-slate-50/60">
+                <TableRow className="bg-surface-0/60">
                   <TableHead>Product</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Brand</TableHead>
@@ -593,24 +593,24 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
                   <TableHead />
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-slate-100">
+              <TableBody className="divide-y divide-ink-300">
                 {paginated.map((i) => {
                   const attr = (i.attributes ?? {}) as GroceryAttributes;
                   return (
-                    <TableRow key={i.id} className="hover:bg-slate-50/50">
+                    <TableRow key={i.id} className="hover:bg-surface-0/50">
                       <TableCell className="font-medium">{i.name}
-                        {i.description && <p className="text-xs text-muted-foreground font-normal truncate max-w-[180px]">{i.description}</p>}
+                        {i.description && <p className="text-caption text-muted-foreground font-normal truncate max-w-[180px]">{i.description}</p>}
                       </TableCell>
                       <TableCell>{i.category?.name || '—'}</TableCell>
                       <TableCell>{attr.brand || '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{attr.sku || '—'}</TableCell>
+                      <TableCell className="font-mono text-caption">{attr.sku || '—'}</TableCell>
                       <TableCell>
-                        {attr.unit ? <Badge variant="outline" className="text-xs">{attr.unit}</Badge> : '—'}
+                        {attr.unit ? <Badge variant="outline" className="text-caption">{attr.unit}</Badge> : '—'}
                       </TableCell>
                       <TableCell className="font-medium">{formatCurrency(i.basePrice as number)}</TableCell>
                       <TableCell>
                         {attr.stockQty != null
-                          ? <span className={attr.stockQty === 0 ? 'text-red-500 font-semibold' : attr.stockQty <= 5 ? 'text-amber-500 font-medium' : ''}>{attr.stockQty}</span>
+                          ? <span className={attr.stockQty === 0 ? 'text-danger font-semibold' : attr.stockQty <= 5 ? 'text-warning font-medium' : ''}>{attr.stockQty}</span>
                           : '—'}
                       </TableCell>
                       <TableCell>
@@ -619,13 +619,13 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                             <Button size="sm" variant="ghost" title="View" onClick={() => setViewItem(i)}>
-                              <Eye className="h-4 w-4 text-slate-400" />
+                              <Eye className="h-4 w-4 text-ink-500" />
                             </Button>
                             <Button size="sm" variant="ghost" title="Edit" onClick={() => openEdit(i)}>
-                              <Pencil className="h-4 w-4 text-slate-400" />
+                              <Pencil className="h-4 w-4 text-ink-500" />
                             </Button>
                             <Button size="sm" variant="ghost" title="Delete" onClick={() => del.mutate(i.id)}>
-                              <Trash2 className="h-4 w-4 text-red-400" />
+                              <Trash2 className="h-4 w-4 text-danger" />
                             </Button>
                           </div>
                       </TableCell>
@@ -636,8 +636,8 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
             </Table>
           </div>
           {/* Pagination */}
-          <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-3 border-t bg-surface-0/40">
+            <p className="text-caption text-ink-500">
               Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
               {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} products
             </p>
@@ -648,10 +648,10 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
               </Button>
               {pageNumbers.map((n, i) =>
                 n === '...' ? (
-                  <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
+                  <span key={`dots-${i}`} className="w-7 text-center text-caption text-ink-500">…</span>
                 ) : (
                   <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
-                    className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
+                    className={`w-7 h-7 text-caption ${page === n ? 'bg-accent-600 hover:bg-accent-700 border-accent-600' : ''}`}
                     onClick={() => setPage(n as number)}>
                     {n}
                   </Button>
@@ -675,20 +675,20 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
             return (
               <div className="space-y-3 py-1">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><p className="text-xs text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Brand</p><p>{a.brand || '—'}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">SKU</p><p className="font-mono text-xs">{a.sku || '—'}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Unit</p><p>{a.unit || '—'}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Stock Qty</p><p>{a.stockQty != null ? a.stockQty : '—'}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
-                  <div><p className="text-xs text-muted-foreground mb-1">Status</p>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${viewItem.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                  <div><p className="text-caption text-muted-foreground mb-1">Name</p><p className="font-medium">{viewItem.name}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Category</p><p>{viewItem.category?.name || '—'}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Brand</p><p>{a.brand || '—'}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">SKU</p><p className="font-mono text-caption">{a.sku || '—'}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Unit</p><p>{a.unit || '—'}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Stock Qty</p><p>{a.stockQty != null ? a.stockQty : '—'}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Price</p><p className="font-medium">{formatCurrency(viewItem.basePrice as number)}</p></div>
+                  <div><p className="text-caption text-muted-foreground mb-1">Status</p>
+                    <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold ${viewItem.inStock ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
                       {viewItem.inStock ? 'Available' : 'Unavailable'}
                     </span>
                   </div>
                   {viewItem.description && (
-                    <div className="col-span-2"><p className="text-xs text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
+                    <div className="col-span-2"><p className="text-caption text-muted-foreground mb-1">Description</p><p>{viewItem.description}</p></div>
                   )}
                 </div>
               </div>
@@ -703,14 +703,14 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
           <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
           <div className="space-y-3 py-1 max-h-[70vh] overflow-y-auto pr-1">
             <div>
-              <Label>Category <span className="text-red-500">*</span></Label>
+              <Label>Category <span className="text-danger">*</span></Label>
               <Select value={editForm.categoryId} onValueChange={(v) => setEditF('categoryId', v)}>
                 <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
                 <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Product Name <span className="text-red-500">*</span></Label>
+              <Label>Product Name <span className="text-danger">*</span></Label>
               <Input value={editForm.name} onChange={(e) => setEditF('name', e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -723,13 +723,13 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Unit <span className="text-red-500">*</span></Label>
+                <Label>Unit <span className="text-danger">*</span></Label>
                 <Select value={editForm.unit} onValueChange={(v) => setEditF('unit', v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{GROCERY_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div><Label>Price (₹) <span className="text-red-500">*</span></Label>
+              <div><Label>Price (₹) <span className="text-danger">*</span></Label>
                 <Input type="number" step="0.01" value={editForm.basePrice} onChange={(e) => setEditF('basePrice', e.target.value)} />
               </div>
             </div>
@@ -774,35 +774,35 @@ function CategoriesTab({ label, categories, isLoading, qc }: {
   });
 
   return (
-    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-4 border-b">
+    <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-4 border-b">
         <Input value={name} onChange={(e) => setName(e.target.value)}
           placeholder={`New ${label.toLowerCase()} name`} className="max-w-xs h-9 text-sm"
           onKeyDown={(e) => e.key === 'Enter' && name && create.mutate()} />
-        <Button className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-700"
+        <Button className="h-9 gap-1 bg-accent-600 hover:bg-accent-700"
           onClick={() => name && create.mutate()} disabled={!name || create.isPending}>
           <Plus className="h-4 w-4" /> Add
         </Button>
       </div>
       {isLoading ? (
-        <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+        <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
         <Table>
           <TableHeader>
-            <TableRow className="bg-slate-50/60">
+            <TableRow className="bg-surface-0/60">
               <TableHead>Name</TableHead>
               <TableHead>{label === 'Menu Category' ? 'Items' : 'Products'}</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
-          <TableBody className="divide-y divide-slate-100">
+          <TableBody className="divide-y divide-ink-300">
             {categories.map((c) => (
-              <TableRow key={c.id} className="hover:bg-slate-50/50">
+              <TableRow key={c.id} className="hover:bg-surface-0/50">
                 <TableCell className="font-medium">{c.name}</TableCell>
                 <TableCell>{c._count?.items ?? 0}</TableCell>
                 <TableCell className="text-right">
                   <Button size="sm" variant="ghost" onClick={() => del.mutate(c.id)}>
-                    <Trash2 className="h-4 w-4 text-red-400" />
+                    <Trash2 className="h-4 w-4 text-danger" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -842,20 +842,20 @@ export default function MenuPage() {
   const Icon = grocery ? ShoppingBag : UtensilsCrossed;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          {/* <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${grocery ? 'bg-emerald-100' : 'bg-orange-100'}`}>
-            <Icon className={`w-5 h-5 ${grocery ? 'text-emerald-600' : 'text-orange-500'}`} />
+          {/* <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${grocery ? 'bg-success/10' : 'bg-warning/15'}`}>
+            <Icon className={`w-5 h-5 ${grocery ? 'text-success' : 'text-warning'}`} />
           </div> */}
           <div>
-            <h1 className="text-2xl font-bold">{pageTitle}</h1>
+            <h1 className="text-h2 font-semibold">{pageTitle}</h1>
             <p className="text-sm text-muted-foreground">{pageDesc}</p>
           </div>
         </div>
         {activeTab === 'items' && (
-          <Button className="gap-1.5 bg-violet-600 hover:bg-violet-700" onClick={() => setAddOpen(true)}>
+          <Button className="gap-1 bg-accent-600 hover:bg-accent-700" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" /> {addLabel}
           </Button>
         )}

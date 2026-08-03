@@ -59,7 +59,7 @@ export default function Automation() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Automation</h1>
+        <h1 className="text-h2 font-semibold">Automation</h1>
         <p className="text-sm text-muted-foreground">Keyword rules and fallback message.</p>
       </div>
 
@@ -82,7 +82,7 @@ export default function Automation() {
             <TableBody>
               {rules.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-xs">{r.keywords.join(', ')}</TableCell>
+                  <TableCell className="font-mono text-caption">{r.keywords.join(', ')}</TableCell>
                   <TableCell className="max-w-md truncate">{r.response}</TableCell>
                   <TableCell><Switch checked={r.isActive} onCheckedChange={(v) => toggleRule.mutate({ id: r.id, isActive: v })} /></TableCell>
                   <TableCell className="text-right"><Button size="sm" variant="ghost" onClick={() => deleteRule.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button></TableCell>

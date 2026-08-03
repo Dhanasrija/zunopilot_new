@@ -5,6 +5,7 @@ import {
   User, Mail, Phone, MessageSquare, Lock, ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   digitsOnly, lettersOnly,
@@ -69,18 +70,50 @@ export default function Contact() {
     return !Object.values(next).some(Boolean);
   };
 
-  const submit = (e: React.FormEvent) => {
+  /**
+   * Send the enquiry.
+   *
+   * This used to be a one-second `setTimeout` followed by "Enquiry sent!" — it
+   * never called anything, so every submission was discarded while the visitor was
+   * told someone would be in touch. It now POSTs to `/contact`, which stores the
+   * enquiry for the operator console.
+   *
+   * Two details that matter:
+   *
+   *   • **The form is cleared only after a confirmed success.** The old code cleared
+   *     unconditionally, so a failure also destroyed what the person had typed and
+   *     left them nothing to retry with.
+   *   • **No error toast here.** `lib/api`'s response interceptor already surfaces
+   *     any 4xx/5xx with the server's own message, so adding one would show two —
+   *     and the rate-limiter's message comes through for free.
+   */
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) {
       toast.error('Please fix the highlighted fields.');
       return;
     }
+
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
-      toast.success('Enquiry sent! We will be in touch shortly.');
+    try {
+      await api.post('/contact', {
+        fullName: form.fullName,
+        email: form.email,
+        // The dial code lives outside `form`, so it has to be sent explicitly —
+        // the old fake submit would have dropped it entirely.
+        dialCode: country.code,
+        phone: form.phone,
+        interest: form.interest,
+        message: form.message,
+      });
+
+      toast.success('Enquiry sent. We will be in touch shortly.');
       setForm({ fullName: '', email: '', phone: '', interest: '', message: '', agree: false });
-    }, 1000);
+    } catch {
+      // Already reported by the interceptor. Swallowed so the fields survive.
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

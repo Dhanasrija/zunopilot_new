@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Menu as MenuIcon, X, Plus, Check, Star,
+  Menu as MenuIcon, X, Plus, Check, Star, ArrowRight,
   Facebook, Instagram, Linkedin,
 } from 'lucide-react';
 import {
@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useCountUp } from '@/hooks/useCountUp';
 import { useAuthStore } from '@/stores/auth.store';
+import { formatRupees, useCatalogue } from '@/lib/pricing';
 
 /* -------------------------------------------------------------------------- */
 /*                          Shared animation variants                          */
@@ -160,7 +161,7 @@ function AnimatedHeading({
 const NAV = [
   { label: 'Home', href: '#home' },
   { label: 'Features', href: '#features' },
-  { label: 'Pricing', href: '#pricing' },
+  { label: 'Pricing', href: '/pricing', route: true },
   { label: 'Testimonial', href: '#testimonial' },
   { label: 'FAQ', href: '#faq' },
   { label: 'Contact Us', href: '/contact', route: true },
@@ -177,7 +178,7 @@ export default function Landing() {
       <Features />
       <Stats />
       <Testimonials />
-      <Pricing />
+      <PricingTeaser />
       <FAQ />
       <ContactCTA />
       <Footer />
@@ -896,179 +897,70 @@ function TestimonialImage({ src, alt, className = '' }: { src: string; alt: stri
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                  Pricing                                   */
+/*                               Pricing teaser                                */
 /* -------------------------------------------------------------------------- */
 
-const PRICING_PLANS = [
-  {
-    name: 'Starter Plan',
-    description: 'Perfect for local retail and test environments.',
-    priceMonthly: 29, priceYearly: 290, popular: false,
-    features: [
-      '1 WhatsApp Number', 'Shared Team Inbox', '2 Agent Seats',
-      'Keyword-Based Automation', '1,000 Free Messages/mo',
-      'Customer Labels & Tags', 'Basic Auto-replies', 'Conversation History & Logs',
-    ],
-  },
-  {
-    name: 'Growth Pro',
-    description: 'For active shops, salons and digital menus.',
-    priceMonthly: 79, priceYearly: 790, popular: true,
-    features: [
-      '2 WhatsApp Numbers', 'WhatsApp Catalog Sync', '5 Agent Seats',
-      'Everything in Starter', '5,000 Free Messages / Month',
-      'Smart Chat Assignment', 'Advanced Trigger Campaigns', 'Customer Segmentation',
-    ],
-  },
-];
+/**
+ * A pointer to /pricing, not a second copy of it.
+ *
+ * The plans used to be listed here with their own hardcoded numbers — in US
+ * dollars, while checkout charges rupees. Two places holding the same
+ * commercial facts is how a visitor gets quoted one price and billed another,
+ * so the only number on this page is read from the same catalogue the checkout
+ * charges from, and everything else lives on the pricing page.
+ */
+function PricingTeaser() {
+  const { data } = useCatalogue();
 
-function Pricing() {
-  const [yearly, setYearly] = useState(false);
+  // The cheapest self-serve entry point, whatever the catalogue currently says.
+  const from = data?.plans
+    .filter((plan) => plan.selfServe && plan.prices.MONTHLY)
+    .map((plan) => plan.prices.MONTHLY!.amountPaise)
+    .sort((a, b) => a - b)[0];
 
   return (
     <section id="pricing" className="py-16 sm:py-20 lg:py-24 bg-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-2xl mx-auto">
-          <AnimatedHeading
-            text="Simple, transparent Pricing"
-            className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900"
-          />
-          <motion.p
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={viewport}
-            transition={{ duration: 0.6, ease: EASE_OUT }}
-            className="mt-4 text-base sm:text-lg text-slate-500"
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <AnimatedHeading
+          text="Simple, transparent Pricing"
+          className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900"
+        />
+        <p className="mt-4 text-slate-600 max-w-2xl mx-auto">
+          Every plan includes the assistant, the shared inbox and the workflow builder.
+          Pay for the size of your team and how much AI you use.
+        </p>
+
+        {from !== undefined && (
+          <p className="mt-8 text-slate-900">
+            <span className="text-5xl font-extrabold tracking-tight">{formatRupees(from)}</span>
+            {' '}
+            <span className="text-slate-500">per month, billed monthly</span>
+          </p>
+        )}
+
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link
+            to="/pricing"
+            className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-7 py-3 text-white font-semibold hover:bg-violet-700 transition-colors"
           >
-            No hidden platform fees. Choose a plan that suits your messaging volume.
-          </motion.p>
+            See all plans <ArrowRight className="h-4 w-4" />
+          </Link>
+          <Link
+            to="/signup"
+            className="inline-flex items-center rounded-full border border-slate-300 px-7 py-3 font-semibold text-slate-700 hover:border-slate-400 transition-colors"
+          >
+            Start free trial
+          </Link>
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={viewport}
-          transition={{ duration: 0.6, ease: EASE_OUT }}
-          className="mt-8 flex justify-center"
-        >
-          <div className="relative inline-flex items-center rounded-lg bg-white p-1 ring-1 ring-slate-200">
-            {/* Animated background that slides between buttons */}
-            <motion.span
-              aria-hidden
-              layout
-              transition={SPRING}
-              className="absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-md bg-violet-600 shadow-sm"
-              style={{ left: yearly ? 'calc(50% + 0px)' : '4px' }}
-            />
-            <button
-              type="button"
-              onClick={() => setYearly(false)}
-              className={`relative z-10 px-6 py-2 text-sm font-semibold rounded-md transition-colors ${!yearly ? 'text-white' : 'text-slate-700'}`}
-            >
-              Monthly
-            </button>
-            <button
-              type="button"
-              onClick={() => setYearly(true)}
-              className={`relative z-10 px-6 py-2 text-sm font-semibold rounded-md transition-colors ${yearly ? 'text-white' : 'text-slate-700'}`}
-            >
-              Yearly
-            </button>
-          </div>
-        </motion.div>
-
-        <motion.div
-          className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 max-w-5xl mx-auto"
-          initial="hidden"
-          whileInView="show"
-          viewport={viewport}
-          variants={stagger(0, 0.1)}
-        >
-          {PRICING_PLANS.map((plan) => (
-            <motion.div
-              key={plan.name}
-              variants={item}
-              whileHover={{
-                y: -10,
-                boxShadow: plan.popular
-                  ? '0 28px 60px -16px rgb(96 73 231 / 0.32)'
-                  : '0 24px 50px -16px rgb(15 23 42 / 0.18)',
-              }}
-              whileTap={{ scale: 0.995 }}
-              transition={CARD_SPRING}
-              className="rounded-3xl"
-            >
-              <PricingCard plan={plan} yearly={yearly} />
-            </motion.div>
-          ))}
-        </motion.div>
+        <p className="mt-6 text-xs text-slate-500">
+          Quarterly and yearly billing work out cheaper. Prices exclude GST.
+        </p>
       </div>
     </section>
   );
 }
 
-function PricingCard({ plan, yearly }: { plan: (typeof PRICING_PLANS)[number]; yearly: boolean }) {
-  const price = yearly ? plan.priceYearly : plan.priceMonthly;
-  const unit = yearly ? '/ Per Year' : '/ Per Month';
-  return (
-    <div className="rounded-3xl bg-slate-50 ring-1 ring-slate-200/80 p-6 sm:p-8 h-full">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900">{plan.name}</h3>
-            {plan.popular && (
-              <motion.span
-                className="rounded-full bg-violet-600 text-white text-[11px] font-semibold px-2.5 py-1 shadow shadow-violet-300"
-                animate={{ scale: [1, 1.06, 1] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                Most Popular
-              </motion.span>
-            )}
-          </div>
-          <p className="mt-1 text-sm text-slate-500 max-w-xs">{plan.description}</p>
-        </div>
-        <div className="sm:text-right">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`${plan.name}-${yearly}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2, ease: EASE_OUT }}
-              className="text-3xl sm:text-4xl font-extrabold text-slate-900"
-            >
-              ${price}
-              <span className="ml-1 text-sm font-medium text-slate-500">{unit}</span>
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl bg-white p-5 sm:p-6 ring-1 ring-slate-200/80">
-        <div className="font-semibold text-slate-900 mb-4">Features Included</div>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm text-slate-700">
-          {plan.features.map((f) => (
-            <li key={f} className="flex items-center gap-2">
-              <span className="grid place-items-center h-5 w-5 rounded-full ring-1 ring-slate-300">
-                <Check className="h-3 w-3 text-slate-700" strokeWidth={3} />
-              </span>
-              {f}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <Link to="/signup" className="block mt-6">
-        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} transition={SPRING}>
-          <Button className="w-full h-12 rounded-full bg-violet-600 hover:bg-violet-700 text-base font-semibold shadow-md shadow-violet-200">
-            Start Free Trial
-          </Button>
-        </motion.div>
-      </Link>
-    </div>
-  );
-}
 
 /* -------------------------------------------------------------------------- */
 /*                                    FAQ                                     */
@@ -1245,7 +1137,7 @@ function ContactCTA() {
 const FOOTER_MENUS = [
   { label: 'Home', href: '#home' },
   { label: 'Features', href: '#features' },
-  { label: 'Pricing', href: '#pricing' },
+  { label: 'Pricing', href: '/pricing', route: true },
   { label: 'Testimonial', href: '#testimonial' },
   { label: 'Contact Us', href: '#contact' },
 ];
@@ -1283,7 +1175,11 @@ function Footer() {
             <ul className="space-y-4">
               {FOOTER_MENUS.map((m) => (
                 <li key={m.label}>
-                  <a href={m.href} className="text-sm text-slate-700 hover:text-slate-900">{m.label}</a>
+                  {'route' in m && m.route ? (
+                    <Link to={m.href} className="text-sm text-slate-700 hover:text-slate-900">{m.label}</Link>
+                  ) : (
+                    <a href={m.href} className="text-sm text-slate-700 hover:text-slate-900">{m.label}</a>
+                  )}
                 </li>
               ))}
             </ul>

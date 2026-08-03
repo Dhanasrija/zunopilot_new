@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+
+    // The codebase is ESM (`"type": "module"`) and already writes `.js`
+    // extensions in its import specifiers — which is exactly what NodeNext
+    // requires — so those specifiers keep resolving unchanged as files are
+    // converted from .js to .ts.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    // allowJs + checkJs:false is what makes this migration incremental: a file
+    // that has not been converted yet is resolvable and importable but is not
+    // type-checked, so `tsc --noEmit` only ever reports on files already moved
+    // to .ts. Delete `allowJs` once src/ has no .js left.
+    "allowJs": true,
+    "checkJs": false,
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"],
+  "exclude": ["node_modules", "dist", "prisma"]
+}

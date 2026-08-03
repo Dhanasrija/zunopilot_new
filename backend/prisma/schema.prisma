@@ -12,7 +12,13 @@ datasource db {
 
 // ---------------- Module 1: Tenant onboarding ----------------
 
-enum BusinessCategory {
+/// The old compiled-in category list.
+///
+/// Superseded by the `BusinessCategory` **table**, which an operator manages. This
+/// enum survives only because `Tenant.category` cannot be dropped in an additive
+/// migration — nothing reads it, and for a workspace on a category added since,
+/// it holds a meaningless default.
+enum BusinessCategoryLegacy {
   RESTAURANT
   ECOMMERCE_GROCERY
 }
@@ -24,84 +30,236 @@ enum UserRole {
 }
 
 model Tenant {
-  id            String           @id @default(uuid())
+  id            String                 @id @default(uuid())
   businessName  String
-  category      BusinessCategory @default(RESTAURANT)
+  /// @deprecated Superseded by the `BusinessCategory` table.
+  category      BusinessCategoryLegacy @default(RESTAURANT)
   contactNumber String?
   address       String?
   website       String?
-  logoUrl       String?
-  isActive      Boolean          @default(true)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  /// Buyer tax details, captured at checkout. `gstStateCode` is the two-digit
+  /// GST state code and decides CGST+SGST vs IGST on their invoices.
+  gstin         String?
+  gstStateCode  String?
 
-  users           User[]
-  whatsappAccount WhatsappAccount?
-  keywords        KeywordRule[]
-  fallback        FallbackRule?
-  customers       Customer[]
-  conversations   Conversation[]
-  messages        Message[]
-  menuCategories  MenuCategory[]
-  menuItems       MenuItem[]
-  addonGroups     AddonGroup[]
-  carts           Cart[]
-  orders          Order[]
-  templates       MessageTemplate[]
+  /// Set the moment the profile page is completed. An explicit flag rather than
+  /// sniffing an empty `businessName`: "has this workspace finished onboarding"
+  /// is a question the login response has to answer on every sign-in, and
+  /// inferring it from placeholder data is how a half-set-up workspace lands on a
+  /// dashboard full of zeroes.
+  onboardingCompletedAt DateTime?
+
+  /// The category, now a row rather than an enum value so it can be managed
+  /// without a deploy. **This is the authority** — see the note on
+  /// `BusinessCategory`.
+  businessCategoryId String?
+  businessCategory   BusinessCategory? @relation(fields: [businessCategoryId], references: [id], onDelete: SetNull)
+
+  /// Billing address, captured on the billing page rather than at signup.
+  ///
+  /// Nobody signing up knows or cares about this yet; it is needed at the moment
+  /// they pay, and asking for it before then is four fields between a person and
+  /// the product. Frozen onto each invoice at issue.
+  billingAddressLine1 String?
+  billingAddressLine2 String?
+  billingCity         String?
+  billingPostalCode   String?
+  /// ISO alpha-2. Defaults from the owner's phone country.
+  billingCountry      String?
+  logoUrl             String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  users            User[]
+  whatsappAccounts WhatsappAccount[]
+  keywords         KeywordRule[]
+  fallback         FallbackRule?
+  customers        Customer[]
+  conversations    Conversation[]
+  messages         Message[]
+  menuCategories   MenuCategory[]
+  menuItems        MenuItem[]
+  addonGroups      AddonGroup[]
+  carts            Cart[]
+  orders           Order[]
+  templates        MessageTemplate[]
+  workflows        Workflow[]
+
+  // Module 18: custom roles
+  roles Role[]
+
+  // Module 16: support access
+  impersonationGrants ImpersonationGrant[]
+
+  // Module 12: conversation engine
+  assistants        Assistant[]
+  workflowInstances WorkflowInstance[]
+  routingDecisions  RoutingDecision[]
+  handoffs          HumanHandoff[]
+  webhookEvents     WebhookEvent[]
+  routingTestCases  RoutingTestCase[]
+
+  // Module 13: connectors
+  connectors Connector[]
+
+  // Module 14: billing
+  subscription  Subscription?
+  payments      Payment[]
+  invoices      Invoice[]
+  usageCounters UsageCounter[]
+
+  // Module 19: optional modules
+  modules TenantModule[]
+
+  // Module 20: leads
+  leads     Lead[]
+  callLogs  CallLog[]
+  reminders Reminder[]
+
+  // Module 21: customer support
+  tickets Ticket[]
+
+  // Module 22: marketing
+  campaignTemplates CampaignTemplate[]
+  campaigns         Campaign[]
 }
 
 model User {
-  id           String   @id @default(uuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  email        String   @unique
-  passwordHash String
-  fullName     String
-  role         UserRole @default(OWNER)
-  isActive     Boolean  @default(true)
-  emailVerified Boolean @default(false)
-  verifyToken  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// The login identifier, E.164 without the plus (e.g. `917702000350`).
+  ///
+  /// Nullable only because existing rows predate it — every account created since
+  /// OTP login has one. Unique, and Postgres permits many NULLs, so the old rows
+  /// coexist without a placeholder.
+  phone String? @unique
+
+  /// Optional, and captured on the profile page rather than at signup.
+  ///
+  /// Went from required to nullable when the phone became the identifier. Still
+  /// unique when present, so two accounts cannot claim one address.
+  email String? @unique
+
+  /// ISO 3166-1 alpha-2, derived from the phone's calling code at signup rather
+  /// than asked for. Kept for future use — tax, pricing and locale all want it.
+  country String?
+
+  /// Null for every account created since OTP login. Retained because deleting a
+  /// column is not an additive migration, and because SUPER ADMINS still use
+  /// passwords — a customer's is simply never set.
+  passwordHash String?
+
+  fullName      String
+  role          UserRole @default(OWNER)
+  isActive      Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  verifyToken   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   assignedConversations Conversation[] @relation("AssignedAgent")
   internalNotes         InternalNote[]
+  sentMessages          Message[]      @relation("SentMessages")
+
+  impersonationResponses ImpersonationGrant[] @relation("ImpersonationResponder")
+  impersonationSubjectOf ImpersonationGrant[] @relation("ImpersonationSubject")
+  /// The workspace's own role. **This is what permissions are read from.**
+  ///
+  /// Nullable only because existing rows predate it; the migration backfills every
+  /// one. When it is somehow null, `requireAuth` falls back to the legacy `role`
+  /// enum rather than granting nothing — a user with no permissions at all cannot
+  /// even see the screen that would fix them.
+  ///
+  /// Named `assignedRole` rather than `role` because the legacy enum already owns
+  /// that name, and rather than `role_` because Prisma renames a trailing
+  /// underscore out from under you.
+  assignedRole           Role?                @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roleId                 String?
+
+  // Module 20: leads
+  ownedLeads       Lead[]        @relation("LeadOwner")
+  // Module 21: customer support
+  assignedTickets  Ticket[]      @relation("TicketAssignee")
+  openedTickets    Ticket[]      @relation("TicketOpener")
+  ticketEvents     TicketEvent[] @relation("TicketEventActor")
+  // Module 22: marketing
+  createdCampaigns Campaign[]    @relation("CampaignCreator")
+  leadEvents       LeadEvent[]   @relation("LeadEventActor")
+  calls            CallLog[]     @relation("CallActor")
+  reminders        Reminder[]    @relation("ReminderAssignee")
 }
 
 // ---------------- Module 2: WhatsApp embedded signup ----------------
 
 model WhatsappAccount {
-  id              String   @id @default(uuid())
-  tenantId        String   @unique
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  wabaId          String
-  phoneNumberId   String
-  displayPhone    String?
-  businessName    String?
-  accessToken     String   // encrypt at rest in production
-  tokenExpiresAt  DateTime?
-  connectedAt     DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(uuid())
+  // Was `@unique`, i.e. one channel per tenant. Relaxed for Module 12, where an
+  // Assistant is bound to a specific channel and a workspace may run more than
+  // one number. The compound unique below replaces it — it still gives the
+  // Embedded Signup upsert an atomic conflict target, so reconnecting the same
+  // number stays a single statement rather than a racy find-then-write.
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  wabaId         String
+  phoneNumberId  String
+  displayPhone   String?
+  businessName   String?
+  accessToken    String // encrypt at rest in production
+  tokenExpiresAt DateTime?
+  connectedAt    DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  assistants Assistant[]
+
+  @@unique([tenantId, phoneNumberId])
+  @@index([tenantId])
 }
 
 // ---------------- Module 3-5: Customers, conversations, messages ----------------
 
 model Customer {
-  id           String   @id @default(uuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  waId         String
-  name         String?
-  phone        String?
-  lastSeenAt   DateTime?
-  lifetimeSpend Decimal  @default(0) @db.Decimal(12, 2)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  waId          String
+  name          String?
+  phone         String?
+  lastSeenAt    DateTime?
+  lifetimeSpend Decimal   @default(0) @db.Decimal(12, 2)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   conversations Conversation[]
   messages      Message[]
   orders        Order[]
   cart          Cart?
+  workflowRuns  WorkflowRun[]
+
+  /// Whether this person may be sent **marketing**.
+  ///
+  /// Service replies inside the 24-hour window are a different thing and are not
+  /// governed by this — it gates campaigns only. Default false: consent is
+  /// something a person gives, not something absent data implies. The migration
+  /// backfills it to true for anyone who has already messaged the business,
+  /// because writing in first *is* the service relationship Meta's policy is
+  /// built around.
+  marketingOptIn Boolean @default(false)
+
+  /// Set the moment they say STOP. **Checked separately from `marketingOptIn`**
+  /// and never cleared by a bulk operation: an explicit refusal must survive any
+  /// later import, re-sync or backfill that happens to set the opt-in flag.
+  optedOutAt DateTime?
+
+  /// How consent was obtained, for the day someone asks.
+  optInSource String?
+
+  /// Set when a lead's number first messages in. At most one lead per customer.
+  lead              Lead?
+  tickets           Ticket[]
+  campaignRecipient CampaignRecipient[]
 
   @@unique([tenantId, waId])
   @@index([tenantId, lastSeenAt])
@@ -128,10 +286,39 @@ model Conversation {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
+  // ── Module 12: conversation engine ─────────────────────────────────────────
+  // Which assistant owns this thread. Null for conversations that predate the
+  // engine, or for a tenant still on the legacy keyword/router path.
+  assistantId String?
+  assistant   Assistant? @relation(fields: [assistantId], references: [id], onDelete: SetNull)
+
+  /// Denormalised pointer to the one running/waiting instance.
+  ///
+  /// The *guarantee* that there is at most one lives in a partial unique index
+  /// on WorkflowInstance (see the migration), not here — this is a cache so the
+  /// inbound hot path can resolve the active workflow without a second query.
+  /// It must only ever be written in the same transaction that moves the
+  /// instance's status, or the two drift and two workflows answer one message.
+  activeWorkflowInstanceId String?           @unique
+  activeWorkflowInstance   WorkflowInstance? @relation("ActiveInstance", fields: [activeWorkflowInstanceId], references: [id], onDelete: SetNull)
+
+  /// Rolling summary handed to the AI router instead of the full transcript.
+  summary String?
+
+  /// Stable key for de-duplicating a thread across reconnects, e.g. `<channelId>:<waId>`.
+  externalConversationKey String?
+
   messages Message[]
   notes    InternalNote[]
 
+  workflowInstances WorkflowInstance[] @relation("ConversationInstances")
+  routingDecisions  RoutingDecision[]
+  handoffs          HumanHandoff[]
+  tickets           Ticket[]
+
   @@index([tenantId, status, lastMessageAt])
+  @@index([assistantId])
+  @@index([tenantId, externalConversationKey])
 }
 
 enum MessageDirection {
@@ -174,9 +361,30 @@ model Message {
   body           String?
   payload        Json?
   mediaUrl       String?
-  createdAt      DateTime         @default(now())
 
+  /// Who sent this, for OUTBOUND messages.
+  ///
+  /// **Null on an OUTBOUND message means the bot sent it** — the workflow
+  /// engine, the assistant's general response, or a template dispatch. That is
+  /// the distinction the shared inbox needs: an operator opening a thread has
+  /// to be able to tell a colleague's reply from an automated one, and a
+  /// colleague's reply from their own.
+  ///
+  /// SetNull rather than Cascade: a member leaving must not delete the history
+  /// of what they said to customers.
+  sentByUserId String?
+  sentByUser   User?   @relation("SentMessages", fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  // Meta retries webhook deliveries, so the same wamid can arrive several times.
+  // This makes the insert the idempotency gate: a retry hits a unique violation
+  // and is skipped instead of duplicating the message and re-running automation.
+  // Nullable, so outbound rows without a wamid are unaffected (Postgres allows
+  // multiple NULLs in a unique index).
+  @@unique([tenantId, waMessageId])
   @@index([conversationId, createdAt])
+  @@index([sentByUserId])
 }
 
 model InternalNote {
@@ -256,35 +464,35 @@ model MenuItem {
 }
 
 model AddonGroup {
-  id          String       @id @default(uuid())
-  tenantId    String
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String
-  minSelect   Int          @default(0)
-  maxSelect   Int          @default(1)
-  options     AddonOption[]
-  items       MenuItemAddonGroup[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id        String               @id @default(uuid())
+  tenantId  String
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  minSelect Int                  @default(0)
+  maxSelect Int                  @default(1)
+  options   AddonOption[]
+  items     MenuItemAddonGroup[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
 }
 
 model AddonOption {
-  id          String     @id @default(uuid())
-  groupId     String
-  group       AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  name        String
-  priceDelta  Decimal    @default(0) @db.Decimal(10, 2)
-  sortOrder   Int        @default(0)
+  id         String     @id @default(uuid())
+  groupId    String
+  group      AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name       String
+  priceDelta Decimal    @default(0) @db.Decimal(10, 2)
+  sortOrder  Int        @default(0)
 
-  cartItemAddons   CartItemAddon[]
-  orderItemAddons  OrderItemAddon[]
+  cartItemAddons  CartItemAddon[]
+  orderItemAddons OrderItemAddon[]
 }
 
 model MenuItemAddonGroup {
-  itemId   String
-  groupId  String
-  item     MenuItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  group    AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  itemId  String
+  groupId String
+  item    MenuItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  group   AddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@id([itemId, groupId])
 }
@@ -299,44 +507,52 @@ enum CartState {
   REVIEWING_CART
   COLLECTING_NAME
   COLLECTING_ADDRESS
+  // After a location pin is shared: collecting the flat / tower / block so the
+  // driver can find the door, not just the building.
+  COLLECTING_ADDRESS_DETAIL
   CHECKOUT_READY
 }
 
 model Cart {
-  id             String     @id @default(uuid())
-  tenantId       String
-  tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customerId     String     @unique
-  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  state          CartState  @default(IDLE)
-  context        Json?      // current category, item being configured, etc.
-  customerName   String?
-  deliveryAddr   String?
-  updatedAt      DateTime   @updatedAt
-  createdAt      DateTime   @default(now())
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId   String    @unique
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  state        CartState @default(IDLE)
+  context      Json? // current category, item being configured, etc.
+  customerName String?
+  deliveryAddr String?
+  // Set when the customer shares a pin via WhatsApp's native location picker.
+  // Kept alongside the text address rather than replacing it: a pin is what the
+  // driver actually needs, the text is what a human reads.
+  deliveryLat  Float?
+  deliveryLng  Float?
+  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime  @default(now())
 
   items CartItem[]
 }
 
 model CartItem {
-  id        String   @id @default(uuid())
+  id        String          @id @default(uuid())
   cartId    String
-  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   itemId    String
-  item      MenuItem @relation(fields: [itemId], references: [id])
-  quantity  Int      @default(1)
-  unitPrice Decimal  @db.Decimal(10, 2)
+  item      MenuItem        @relation(fields: [itemId], references: [id])
+  quantity  Int             @default(1)
+  unitPrice Decimal         @db.Decimal(10, 2)
   addons    CartItemAddon[]
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
 }
 
 model CartItemAddon {
-  id          String      @id @default(uuid())
-  cartItemId  String
-  cartItem    CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
-  optionId    String
-  option      AddonOption @relation(fields: [optionId], references: [id])
-  priceDelta  Decimal     @db.Decimal(10, 2)
+  id         String      @id @default(uuid())
+  cartItemId String
+  cartItem   CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  optionId   String
+  option     AddonOption @relation(fields: [optionId], references: [id])
+  priceDelta Decimal     @db.Decimal(10, 2)
 }
 
 // ---------------- Module 8: Orders ----------------
@@ -361,6 +577,9 @@ model Order {
   status          OrderStatus @default(NEW)
   customerName    String
   deliveryAddress String
+  // Carried over from the cart when the customer shared a location pin.
+  deliveryLat     Float?
+  deliveryLng     Float?
   contactPhone    String?
   subtotal        Decimal     @db.Decimal(12, 2)
   totalAmount     Decimal     @db.Decimal(12, 2)
@@ -374,15 +593,15 @@ model Order {
 }
 
 model OrderItem {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   orderId   String
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order     Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   itemId    String
-  item      MenuItem @relation(fields: [itemId], references: [id])
+  item      MenuItem         @relation(fields: [itemId], references: [id])
   itemName  String
   quantity  Int
-  unitPrice Decimal  @db.Decimal(10, 2)
-  lineTotal Decimal  @db.Decimal(10, 2)
+  unitPrice Decimal          @db.Decimal(10, 2)
+  lineTotal Decimal          @db.Decimal(10, 2)
   addons    OrderItemAddon[]
 }
 
@@ -394,6 +613,566 @@ model OrderItemAddon {
   option      AddonOption @relation(fields: [optionId], references: [id])
   name        String
   priceDelta  Decimal     @db.Decimal(10, 2)
+}
+
+// ---------------- Module 11: Workflows ----------------
+
+enum WorkflowStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WorkflowTrigger {
+  MESSAGE_RECEIVED
+  ORDER_STATUS_CHANGED
+  MANUAL
+}
+
+model Workflow {
+  id          String          @id @default(uuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  status      WorkflowStatus  @default(DRAFT)
+  trigger     WorkflowTrigger @default(MESSAGE_RECEIVED)
+
+  // The node/edge canvas, stored as a single JSON document rather than
+  // normalised tables. The editor saves the whole graph atomically and nothing
+  // queries *inside* it, so normalising would buy no query power while costing
+  // joins now and a migration every time a node type gains a field.
+  graph Json?
+
+  // Bumped on each publish, so a running execution can be pinned to the version
+  // it started on rather than shifting under an edit.
+  version     Int       @default(1)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  runs WorkflowRun[]
+
+  // ── Module 12: conversation engine ─────────────────────────────────────────
+
+  /// Which assistant may route to this workflow. Null while the workflow is
+  /// still on the legacy `trigger`-based path.
+  assistantId String?
+  assistant   Assistant? @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  /// CONVERSATION workflows are started by the router and must begin with an
+  /// ASSISTANT_ROUTE_ENTRY node. EVENT workflows are started deterministically
+  /// and begin with a webhook/schedule/business-event trigger.
+  category WorkflowCategory @default(CONVERSATION)
+
+  /// Stable identifier the router selects by. The AI is only ever allowed to
+  /// return one of these, never a free-form string — see the router service.
+  slug String?
+
+  /// Tie-break when two workflows are equally plausible. Higher wins.
+  priority Int @default(50)
+
+  /// The immutable version currently serving live traffic. A run pins this at
+  /// start, so editing the draft cannot change a graph mid-conversation.
+  publishedVersionId String?          @unique
+  publishedVersion   WorkflowVersion? @relation("PublishedVersion", fields: [publishedVersionId], references: [id], onDelete: SetNull)
+
+  capability WorkflowCapability?
+  versions   WorkflowVersion[]   @relation("WorkflowVersions")
+  instances  WorkflowInstance[]
+
+  fallbackForAssistants Assistant[]       @relation("AssistantFallback")
+  handoffForAssistants  Assistant[]       @relation("AssistantHandoff")
+  routingRules          RoutingRule[]
+  routingDecisions      RoutingDecision[]
+  routingTestCases      RoutingTestCase[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, status])
+  @@index([assistantId, status, category])
+}
+
+// ---------------- Module 12: AI router + conversation workflow engine ----------------
+
+enum AssistantStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
+enum WorkflowCategory {
+  CONVERSATION
+  EVENT
+}
+
+/// One assistant answers for one WhatsApp channel. It owns the routing policy:
+/// which workflows are candidates, the deterministic rules that pre-empt the
+/// model, and the confidence thresholds.
+model Assistant {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  whatsappChannelId String
+  whatsappChannel   WhatsappAccount @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  /// System prompt for the GENERAL_RESPONSE path only. It never influences
+  /// routing — the router prompt is versioned in code, not editable per tenant,
+  /// so a tenant cannot talk the router into selecting a workflow.
+  generalSystemPrompt    String?
+  generalResponseEnabled Boolean @default(true)
+
+  defaultFallbackWorkflowId String?
+  defaultFallbackWorkflow   Workflow? @relation("AssistantFallback", fields: [defaultFallbackWorkflowId], references: [id], onDelete: SetNull)
+
+  humanHandoffWorkflowId String?
+  humanHandoffWorkflow   Workflow? @relation("AssistantHandoff", fields: [humanHandoffWorkflowId], references: [id], onDelete: SetNull)
+
+  /// At or above this, start the workflow. Between the two, ask a clarifying
+  /// question. Below the lower bound, fall back.
+  highConfidenceThreshold   Float @default(0.80)
+  mediumConfidenceThreshold Float @default(0.55)
+
+  /// How many recent messages are given to the router as context.
+  maxRecentMessages Int @default(8)
+
+  status    AssistantStatus @default(DRAFT)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  workflows        Workflow[]
+  conversations    Conversation[]
+  routingRules     RoutingRule[]
+  routingDecisions RoutingDecision[]
+  routingTestCases RoutingTestCase[]
+
+  // One assistant per channel: two assistants answering one number would race
+  // to reply to the same inbound message.
+  @@unique([whatsappChannelId])
+  @@index([tenantId, status])
+}
+
+/// What the router is told about a workflow. Deliberately separate from the
+/// definition: the model sees only this, never the node graph.
+model WorkflowCapability {
+  id         String   @id @default(uuid())
+  workflowId String   @unique
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  purpose     String
+  description String?
+
+  /// All JSON string arrays. Stored as JSON rather than child tables because
+  /// they are only ever read and written whole, as one document, by the
+  /// capability editor.
+  useWhen          Json @default("[]")
+  doNotUseWhen     Json @default("[]")
+  positiveExamples Json @default("[]")
+  negativeExamples Json @default("[]")
+  preconditions    Json @default("[]")
+  sideEffects      Json @default("[]")
+
+  /// `[{ key, label, type }]`. Inputs the router may extract from the message.
+  requiredInputs Json @default("[]")
+  optionalInputs Json @default("[]")
+
+  /// Set for anything transactional. The engine refuses to publish a workflow
+  /// with a side effect and no confirmation step.
+  requiresConfirmation Boolean @default(false)
+
+  /// Per-workflow override of the assistant's high-confidence threshold. A
+  /// booking flow should need more certainty than an FAQ lookup.
+  minimumConfidence Float @default(0.80)
+
+  /// Whether an unrelated message may abandon this workflow mid-run, or whether
+  /// the user has to be asked first.
+  allowsInterruption Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// An immutable snapshot of a node graph. Publishing creates one; running pins
+/// one. Nothing mutates a version after it is created.
+model WorkflowVersion {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+
+  version Int
+
+  /// `{ schemaVersion, entryNodeId, nodes[], edges[] }` — validated by Zod on
+  /// write. Kept as one document because the editor saves it atomically and
+  /// nothing queries inside it.
+  definition Json
+
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  instances WorkflowInstance[]
+  activeFor Workflow?          @relation("PublishedVersion")
+
+  @@unique([workflowId, version])
+  @@index([workflowId, createdAt])
+}
+
+enum WorkflowInstanceStatus {
+  PENDING
+  RUNNING
+  WAITING_FOR_USER
+  WAITING_FOR_APPROVAL
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+/// One execution of one workflow for one conversation.
+model WorkflowInstance {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  workflowVersionId String
+  workflowVersion   WorkflowVersion @relation(fields: [workflowVersionId], references: [id])
+
+  conversationId String
+  conversation   Conversation @relation("ConversationInstances", fields: [conversationId], references: [id], onDelete: Cascade)
+
+  status WorkflowInstanceStatus @default(PENDING)
+
+  currentNodeId String?
+
+  /// Accumulated context: router-extracted inputs plus anything nodes wrote.
+  /// Addressed from templates as `{{vars.x}}`.
+  variables  Json?
+  inputData  Json?
+  outputData Json?
+
+  /// Set while parked on a DELAY node; the resume worker polls (status, resumeAt).
+  resumeAt DateTime?
+
+  /// Node this instance is waiting on an answer for, and where to store it.
+  /// Read when the next inbound message arrives.
+  waitingNodeId       String?
+  waitingVariableName String?
+  retryCount          Int     @default(0)
+
+  error String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  failedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  executions            NodeExecution[]
+  handoffs              HumanHandoff[]
+  activeForConversation Conversation?   @relation("ActiveInstance")
+
+  @@index([tenantId, status])
+  @@index([conversationId, startedAt])
+  @@index([workflowId, startedAt])
+  @@index([status, resumeAt])
+}
+
+enum NodeExecutionStatus {
+  PENDING
+  RUNNING
+  WAITING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+/// One attempt at one node. The Execution Log reads these directly rather than
+/// reconstructing a run from the instance.
+model NodeExecution {
+  id                 String           @id @default(uuid())
+  workflowInstanceId String
+  workflowInstance   WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  nodeId   String
+  nodeType String
+  status   NodeExecutionStatus @default(PENDING)
+
+  /// 1 for the first try. A retried integration node writes a new row rather
+  /// than overwriting, so the log shows what actually happened.
+  attempt Int @default(1)
+
+  input  Json?
+  output Json?
+  error  Json?
+
+  /// Set for nodes with external side effects. Replaying a node with a key that
+  /// already succeeded returns the stored output instead of acting twice.
+  idempotencyKey String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  durationMs  Int?
+  createdAt   DateTime  @default(now())
+
+  @@unique([workflowInstanceId, nodeId, attempt])
+  @@index([workflowInstanceId, startedAt])
+  @@index([idempotencyKey])
+}
+
+enum RoutingSource {
+  ACTIVE_WORKFLOW
+  DETERMINISTIC
+  AI_ROUTER
+  FALLBACK
+}
+
+enum RoutingDecisionType {
+  START_WORKFLOW
+  RESUME_WORKFLOW
+  ASK_CLARIFICATION
+  GENERAL_RESPONSE
+  HUMAN_HANDOFF
+  NO_MATCH
+}
+
+/// Why one inbound message went where it did. Written for every message,
+/// including deterministic and active-workflow hits, so the debug view can
+/// explain any reply — and so routing quality is measurable.
+model RoutingDecision {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  assistantId String?
+  assistant   Assistant? @relation(fields: [assistantId], references: [id], onDelete: SetNull)
+
+  inboundMessageId String?
+
+  source   RoutingSource
+  decision RoutingDecisionType
+
+  selectedWorkflowId String?
+  selectedWorkflow   Workflow? @relation(fields: [selectedWorkflowId], references: [id], onDelete: SetNull)
+
+  confidence Float?
+
+  /// A short enum-like code, e.g. EXPLICIT_BOOKING_REQUEST. The model's own
+  /// reasoning is never persisted or shown — only this and a one-line summary.
+  reasonCode String
+  summary    String?
+
+  extractedInputs      Json?
+  missingInputs        Json?
+  candidateWorkflowIds Json?
+
+  promptVersion String?
+  model         String?
+  latencyMs     Int?
+  tokenUsage    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId, source, createdAt])
+}
+
+enum RoutingRuleType {
+  BUTTON_PAYLOAD
+  LIST_PAYLOAD
+  KEYWORD
+  CUSTOMER_TAG
+  BUSINESS_HOURS
+  CRM_STATE
+  COMMAND
+}
+
+/// Deterministic routing, evaluated in priority order before the model runs.
+/// A tap on our own button is already unambiguous; paying for a classification
+/// of an enumerated id would be both slower and less reliable.
+model RoutingRule {
+  id          String    @id @default(uuid())
+  assistantId String
+  assistant   Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  name String
+  type RoutingRuleType
+
+  /// Shape depends on `type`, validated by a discriminated Zod union.
+  configuration Json
+
+  workflowId String?
+  workflow   Workflow? @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  priority  Int      @default(50)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assistantId, enabled, priority])
+}
+
+enum HandoffStatus {
+  PENDING
+  ACTIVE
+  RESOLVED
+  CANCELLED
+}
+
+model HumanHandoff {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  workflowInstanceId String?
+  workflowInstance   WorkflowInstance? @relation(fields: [workflowInstanceId], references: [id], onDelete: SetNull)
+
+  reason String
+  status HandoffStatus @default(PENDING)
+
+  assignedTeamId String?
+  assignedUserId String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([tenantId, status, startedAt])
+  @@index([conversationId, startedAt])
+}
+
+enum WebhookProcessingStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+/// The raw inbound event, persisted before anything is interpreted.
+///
+/// Meta must be acked in milliseconds and retries anything it thinks failed, so
+/// the event is stored and queued rather than processed in the request. The
+/// unique key on (source, externalEventId) is the deduplication gate.
+model WebhookEvent {
+  id       String  @id @default(uuid())
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  source          String
+  eventType       String
+  externalEventId String?
+
+  payload Json
+
+  processingStatus WebhookProcessingStatus @default(PENDING)
+  error            String?
+  processedAt      DateTime?
+  createdAt        DateTime                @default(now())
+
+  @@unique([source, externalEventId])
+  @@index([processingStatus, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+/// A saved routing expectation, e.g. "Is Dr Rao available tomorrow?" should
+/// select doctor_availability and not appointment_booking. Run as a suite so a
+/// capability edit cannot silently regress routing.
+model RoutingTestCase {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  assistantId String
+  assistant   Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  message          String
+  expectedDecision RoutingDecisionType
+
+  expectedWorkflowId String?
+  expectedWorkflow   Workflow? @relation(fields: [expectedWorkflowId], references: [id], onDelete: SetNull)
+
+  notes String?
+
+  lastRunAt     DateTime?
+  lastRunPassed Boolean?
+  lastRunActual Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assistantId, createdAt])
+}
+
+enum WorkflowRunStatus {
+  RUNNING
+  WAITING // parked on a Delay node until resumeAt
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model WorkflowRun {
+  id         String   @id @default(uuid())
+  tenantId   String
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversationId String?
+
+  status WorkflowRunStatus @default(RUNNING)
+
+  // The workflow version this run started on. Pinned so an edit mid-run cannot
+  // change the graph under a run that is already walking it.
+  version Int
+
+  // Accumulated context: trigger payload plus anything nodes wrote via their
+  // output variable. Interpolated into later nodes as {{vars.x}}.
+  variables Json?
+
+  currentNodeId String?
+  // Set when parked on a Delay; the resume worker polls on (status, resumeAt).
+  resumeAt      DateTime?
+  error         String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  steps WorkflowRunStep[]
+
+  @@index([tenantId, status])
+  @@index([status, resumeAt])
+  @@index([workflowId, startedAt])
+}
+
+model WorkflowRunStep {
+  id    String      @id @default(uuid())
+  runId String
+  run   WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  nodeId   String
+  nodeType String
+  status   String // ok | error | skipped
+  input    Json?
+  output   Json?
+  error    String?
+
+  startedAt  DateTime @default(now())
+  durationMs Int?
+
+  @@index([runId, startedAt])
 }
 
 // ---------------- Module 9: Templates ----------------
@@ -410,17 +1189,1300 @@ enum TemplateTrigger {
 }
 
 model MessageTemplate {
-  id            String          @id @default(uuid())
-  tenantId      String
-  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name          String
-  trigger       TemplateTrigger
-  metaTemplate  String          // approved Meta template name
-  language      String          @default("en")
-  body          String          // human-readable body for preview
-  isActive      Boolean         @default(true)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id           String          @id @default(uuid())
+  tenantId     String
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  trigger      TemplateTrigger
+  metaTemplate String // approved Meta template name
+  language     String          @default("en")
+  body         String // human-readable body for preview
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   @@unique([tenantId, trigger])
+}
+
+// ---------------- Module 13: Connectors ----------------
+//
+// A connector is a registered, credentialed way to reach one outside system,
+// and an operation is one named thing you can do with it.
+//
+// The load-bearing decision is that a workflow node references
+// `connectorKey + operationKey`, never a URL. Consequences:
+//
+//   • The SSRF surface collapses to a base-URL check when the connector is
+//     saved — one review point, not one per node.
+//   • Credentials never enter the workflow graph, so a definition stays safe to
+//     export, template, and generate with a model.
+//   • A generated workflow can only name operations that actually exist, the
+//     same property that stops the router naming a workflow it was not offered.
+
+enum ConnectorKind {
+  /// Generic REST over the egress guard.
+  HTTP
+  /// In-process fixtures. Demo and test connectors that cannot reach a network.
+  MOCK
+  GOOGLE_SHEETS
+  EMAIL
+}
+
+enum ConnectorAuthType {
+  NONE
+  /// Secret sent in a header whose name is in `authConfig.header`.
+  API_KEY_HEADER
+  /// `Authorization: Bearer <secret>`
+  BEARER
+  /// `Authorization: Basic base64(authConfig.username:secret)`
+  BASIC
+}
+
+enum ConnectorStatus {
+  ACTIVE
+  DISABLED
+}
+
+model Connector {
+  id       String        @id @default(uuid())
+  tenantId String
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  kind     ConnectorKind @default(HTTP)
+
+  /// Stable identifier a workflow node references. Renaming the display name
+  /// must not break every graph pointing at it, so this is what nodes store.
+  key         String
+  name        String
+  description String?
+
+  baseUrl    String?
+  authType   ConnectorAuthType @default(NONE)
+  /// Non-secret auth details only — header name, username, scopes.
+  authConfig Json              @default("{}")
+
+  status    ConnectorStatus @default(ACTIVE)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  secret     ConnectorSecret?
+  operations ConnectorOperation[]
+  calls      ConnectorCall[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, status])
+}
+
+/// The credential, sealed with AES-256-GCM. A separate table so an accidental
+/// `include: { operations: true }` on Connector can never drag it along.
+model ConnectorSecret {
+  connectorId String    @id
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  /// `v1.<iv>.<tag>.<ciphertext>` — never a readable value.
+  ciphertext  String
+  /// Last four characters, for showing which key is configured without
+  /// revealing it. Secrets are write-only through the API.
+  hint        String
+  updatedAt   DateTime  @updatedAt
+}
+
+model ConnectorOperation {
+  id          String    @id @default(uuid())
+  connectorId String
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  key         String
+  name        String
+  description String?
+
+  method String @default("GET")
+  /// Appended to the connector's base URL. May contain `{placeholders}` that
+  /// are filled from inputs declared with `in: "path"`.
+  path   String @default("/")
+
+  /// Declared inputs: [{ key, label, type, required, in }]. An array rather
+  /// than a map so the shape survives strict structured output when a model is
+  /// asked to build a workflow around it.
+  inputs Json @default("[]")
+
+  /// Where the useful data sits in the response: { itemsPath, idField,
+  /// titleField, descriptionField }. Dotted paths, resolved safely.
+  responseMapping Json @default("{}")
+
+  /// True when calling this changes something the customer cannot undo. Drives
+  /// the publish rule that a side-effecting workflow must confirm first.
+  sideEffecting Boolean @default(false)
+  timeoutMs     Int?
+
+  /// A recorded example response. Lets the builder show field names before the
+  /// operation has ever been called for real.
+  sampleResponse Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calls ConnectorCall[]
+
+  @@unique([connectorId, key])
+}
+
+/// One outbound attempt. The audit trail for "what did we call, and what came
+/// back" — deliberately without request or response bodies, which would put
+/// customer data and credentials in a table operators browse.
+model ConnectorCall {
+  id          String              @id @default(uuid())
+  tenantId    String
+  connectorId String
+  connector   Connector           @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  operationId String?
+  operation   ConnectorOperation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  workflowInstanceId String?
+  nodeExecutionId    String?
+
+  status     String
+  httpStatus Int?
+  durationMs Int?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([connectorId, createdAt])
+}
+
+// ---------------- Module 14: Pricing, billing and invoicing ----------------
+//
+// Money rules that run through all of this:
+//
+//   • Every amount is an **integer of paise**. No floats, no Decimal for money
+//     here — paise are indivisible, so an integer is exact and a rounding
+//     surprise is impossible.
+//   • A `Price` is **immutable**. Changing what a plan costs writes a new row
+//     and archives the old one; it never edits the record a customer was
+//     charged against. An invoice therefore always resolves to the exact terms
+//     that applied on the day.
+//   • Nothing about money is ever taken from the client. Checkout names a plan
+//     and an interval; the server resolves the amount from the active price.
+
+enum PlanCode {
+  STARTER
+  GROWTH
+  BUSINESS
+  ENTERPRISE
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  /// No paid plan yet. Entitlements fall back to the free trial allowance.
+  NONE
+  TRIALING
+  ACTIVE
+  /// Payment failed or the period lapsed; access degrades rather than vanishing.
+  PAST_DUE
+  CANCELLED
+  /// Assigned by an administrator — Enterprise, or a negotiated arrangement.
+  MANUAL
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+  REFUNDED
+}
+
+/// An approved price. Never updated in place.
+model Price {
+  id       String          @id @default(uuid())
+  plan     PlanCode
+  interval BillingInterval
+
+  /// Integer paise. ₹2,699 is 269900.
+  amountPaise Int
+  currency    String @default("INR")
+
+  /// "EXCLUSIVE" — quoted before GST. Recorded per price so a later change in
+  /// tax treatment cannot silently reinterpret an old charge.
+  taxTreatment String @default("EXCLUSIVE")
+
+  /// Razorpay's own plan id, when subscriptions rather than one-off orders are
+  /// used. Server-side only: a client may never supply one.
+  razorpayPlanId String?
+
+  /// Null while current. Set when superseded — the row itself is never edited.
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  subscriptions Subscription[]
+  payments      Payment[]
+
+  /// At most one live price per plan and interval, enforced in the database
+  /// rather than by convention, because two active prices means checkout picks
+  /// one arbitrarily.
+  @@index([plan, interval, archivedAt])
+}
+
+model Subscription {
+  id       String @id @default(uuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  plan     PlanCode           @default(STARTER)
+  interval BillingInterval    @default(QUARTERLY)
+  status   SubscriptionStatus @default(NONE)
+
+  priceId String?
+  price   Price?  @relation(fields: [priceId], references: [id])
+
+  /// The paid window. Usage quotas are counted against this period, so it is
+  /// also what "per billing month" is measured from.
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  /// Overrides for a negotiated agreement. Null means "use the plan's own".
+  /// Only an administrator can set these — this is how Enterprise is expressed.
+  seatLimitOverride       Int?
+  numberLimitOverride     Int?
+  automationLimitOverride Int?
+  aiQuotaOverride         Int?
+
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+
+  /// Why an administrator assigned this, for the audit trail.
+  assignedByUserId String?
+  assignedNote     String?
+
+  /// A change the customer has asked for that takes effect at period end.
+  ///
+  /// A downgrade is scheduled rather than applied, because they have paid for
+  /// the current period at the higher tier and taking it away early is taking
+  /// away something already bought. Razorpay holds the same schedule on its
+  /// side (`schedule_change_at: cycle_end`); these columns are what lets the
+  /// product *show* the customer what is coming, and what to fall back to if
+  /// the two ever disagree.
+  pendingPlan        PlanCode?
+  pendingInterval    BillingInterval?
+  pendingPriceId     String?
+  pendingEffectiveAt DateTime?
+
+  /// Most this workspace may accrue in AI overage in one billing period, in
+  /// paise. Null uses the plan's default; 0 means no overage at all — the
+  /// assistant stops using the model at the quota rather than spending.
+  ///
+  /// A cap is what makes usage billing safe to switch on: without one, a loop
+  /// or a viral week turns into a bill nobody agreed to.
+  overageCapPaise Int?
+
+  /// The Razorpay subscription this one replaced, kept for reconciliation.
+  /// Overwriting the id on an upgrade is how a superseded subscription becomes
+  /// invisible and keeps billing.
+  previousRazorpaySubscriptionId String?
+
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  payments Payment[]
+  invoices Invoice[]
+
+  @@index([status, currentPeriodEnd])
+  @@index([pendingEffectiveAt])
+}
+
+/// One attempt to collect money. Kept separate from Invoice so a failed or
+/// retried payment does not consume an invoice number.
+model Payment {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  priceId String?
+  price   Price?  @relation(fields: [priceId], references: [id])
+
+  plan     PlanCode
+  interval BillingInterval
+
+  amountPaise Int
+  currency    String        @default("INR")
+  status      PaymentStatus @default(CREATED)
+
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String? @unique
+  failureReason     String?
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  invoice Invoice?
+
+  @@index([tenantId, createdAt])
+}
+
+model Invoice {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// Human-facing, gapless per tenant: ZP-2026-000001. Allocated inside the
+  /// same transaction that creates the row, because a gap in an invoice
+  /// sequence is a question an accountant has to answer.
+  number   String
+  /// The monotonic counter behind `number`, so the next one is a max() away.
+  sequence Int
+
+  /// What was actually charged, frozen at issue time. Not read through to the
+  /// plan or price later — an invoice must still be true after a price change.
+  planName      String
+  intervalLabel String
+  periodStart   DateTime
+  periodEnd     DateTime
+  subtotalPaise Int
+  /// AI used above the included quota, billed on this invoice.
+  overagePaise  Int      @default(0)
+  taxPaise      Int      @default(0)
+  totalPaise    Int
+  currency      String   @default("INR")
+  taxTreatment  String   @default("EXCLUSIVE")
+
+  /// The tax split, frozen at issue. CGST+SGST for an intra-state supply, IGST
+  /// otherwise — the buyer pays the same either way, but getting the split wrong
+  /// costs them their input credit.
+  cgstPaise      Int     @default(0)
+  sgstPaise      Int     @default(0)
+  igstPaise      Int     @default(0)
+  taxRatePercent Float   @default(0)
+  placeOfSupply  String?
+  sellerGstin    String?
+
+  /// Buyer details as they were at issue, for the same reason.
+  billedToName    String
+  billedToEmail   String?
+  billedToAddress String?
+  billedToGstin   String?
+  billedToState   String?
+
+  /// The commercial statements shown on the document.
+  notes String[]
+
+  issuedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, sequence])
+  @@index([tenantId, issuedAt])
+}
+
+/// AI interactions consumed in one billing period.
+///
+/// A counter row per (tenant, period) rather than counting rows in a log:
+/// the quota check runs on the inbound hot path, and a COUNT over a growing
+/// table there gets slower exactly as a workspace gets busier.
+model UsageCounter {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  aiInteractions Int @default(0)
+
+  /// Interactions past the included quota, and what they cost.
+  ///
+  /// Accrued as it happens rather than computed later from a count, because the
+  /// rate can change between periods and a charge must reflect the rate that
+  /// applied when the interaction happened.
+  overageInteractions Int @default(0)
+  overagePaise        Int @default(0)
+
+  /// Set when the accrued overage has been pushed to Razorpay as an addon on
+  /// the subscription, so it rides the existing mandate onto the next invoice.
+  overageBilledAt  DateTime?
+  overageAddonId   String?
+  /// Set once it has appeared on one of our own invoices.
+  overageInvoiceId String?
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, periodStart])
+  @@index([tenantId, periodEnd])
+  @@index([overageBilledAt])
+}
+
+// ---------------- Module 15: Super admin ----------------
+//
+// The platform operator's surface. Everything else in this schema is
+// `tenantId`-scoped and read through `tenantIdOf(req)`, which throws rather than
+// returning undefined — precisely so a request can never see another workspace.
+// Super admin deliberately inverts that, which is why it does not reuse any of
+// it:
+//
+//   • A super admin is **not a `User` row with a special role.** `User.tenantId`
+//     is required and cascade-deletes with its tenant, so an operator modelled
+//     that way would belong to a workspace and vanish with it. It is also how a
+//     role check one `||` away from wrong becomes a cross-tenant read.
+//   • Its tokens are signed with a **different secret** and served on a
+//     **different port**, so a customer token cannot authenticate here and the
+//     admin surface can be firewalled independently of the public API.
+
+model SuperAdmin {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  fullName     String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditEvents         AuditEvent[]
+  impersonationGrants ImpersonationGrant[]
+}
+
+/// An append-only record of what an operator did.
+///
+/// Only *actions*, never a general activity feed: a tenant's own history is
+/// derived from the authoritative rows it already has (`User.createdAt`,
+/// `WhatsappAccount.createdAt`, messages, payments), which means a timeline
+/// works retroactively instead of starting empty on the day logging was added.
+/// What is genuinely new information is who reached in and changed something.
+model AuditEvent {
+  id           String      @id @default(uuid())
+  superAdminId String?
+  superAdmin   SuperAdmin? @relation(fields: [superAdminId], references: [id], onDelete: SetNull)
+
+  /// Dotted, e.g. `tenant.plan_assigned`. A string rather than an enum so
+  /// recording a new kind of action never needs a migration.
+  action String
+
+  /// Which workspace was affected. Deliberately **not** a relation: a foreign
+  /// key with a cascade would erase the record of what was done to a tenant at
+  /// the exact moment that record matters most.
+  tenantId   String?
+  targetType String?
+  targetId   String?
+
+  /// One operator-readable line. Never a credential, and never a customer's
+  /// message text.
+  summary  String
+  metadata Json    @default("{}")
+  ip       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([createdAt])
+  @@index([superAdminId, createdAt])
+}
+
+// ---------------- Module 16: Support access (impersonation) ----------------
+//
+// A support engineer viewing a workspace as its owner sees it.
+//
+// This is the most invasive capability in the product: it means reading a
+// business's customers' conversations. Four properties make it defensible, and
+// all four are enforced rather than documented:
+//
+//   1. **Consent-gated.** An operator can only *request*. Nothing happens until
+//      an OWNER of that workspace approves, in their own dashboard. There is no
+//      break-glass override — a support tool that can bypass consent is a tool
+//      that will, on a busy afternoon.
+//   2. **Time-boxed twice.** The request expires unanswered; the approval grants
+//      a window the owner chooses; and each minted token is short-lived inside
+//      that window. The narrowest of the three always wins.
+//   3. **Read-only.** The token cannot write. So an operator can reproduce what a
+//      customer sees but can never take an action attributed to them — no
+//      message sent as the business, no order changed, no plan bought.
+//   4. **Loudly audited, to the customer.** Every request, approval, session and
+//      page viewed is recorded and shown to the *tenant*, not only to us. An
+//      audit trail only the watcher can read is not accountability.
+
+enum ImpersonationStatus {
+  /// Requested, awaiting the workspace's answer.
+  PENDING
+  /// Approved and usable until `approvedUntil`.
+  APPROVED
+  DENIED
+  /// Ended early by the workspace, or by the operator finishing.
+  REVOKED
+  /// The request was never answered in time.
+  EXPIRED
+}
+
+model ImpersonationGrant {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestedById String
+  requestedBy   SuperAdmin @relation(fields: [requestedById], references: [id], onDelete: Cascade)
+
+  /// Why access is being asked for. Required, and shown verbatim to the owner —
+  /// consent to "debugging" is not consent.
+  reason String
+
+  status ImpersonationStatus @default(PENDING)
+
+  /// The request lapses if nobody answers. Silence is not consent.
+  requestExpiresAt DateTime
+
+  respondedAt       DateTime?
+  respondedByUserId String?
+  respondedBy       User?     @relation("ImpersonationResponder", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
+  /// The end of the approved window. Null until approved.
+  approvedUntil DateTime?
+
+  revokedAt       DateTime?
+  revokedByUserId String?
+  /// Set when the operator ended it themselves rather than the workspace.
+  revokedBySelf   Boolean   @default(false)
+
+  /// Which user the operator views the workspace as. Always an owner, resolved at
+  /// approval time so a later role change cannot widen what a live grant sees.
+  viewAsUserId String?
+  viewAsUser   User?   @relation("ImpersonationSubject", fields: [viewAsUserId], references: [id], onDelete: SetNull)
+
+  startedAt    DateTime?
+  lastUsedAt   DateTime?
+  /// How many requests were made with this grant. The authoritative volume count.
+  requestCount Int       @default(0)
+
+  createdAt DateTime @default(now())
+
+  accessLog ImpersonationAccessLog[]
+
+  @@index([tenantId, createdAt])
+  @@index([status, requestExpiresAt])
+}
+
+/// What was actually looked at.
+///
+/// Best-effort by design: the grant's own `requestCount` is the authoritative
+/// number, and losing a path row must never fail the request a support engineer
+/// is making on a customer's behalf. Method and path only — never a response
+/// body, which would put the customer data being viewed into a second table.
+model ImpersonationAccessLog {
+  id      String             @id @default(uuid())
+  grantId String
+  grant   ImpersonationGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  method String
+  path   String
+  at     DateTime @default(now())
+
+  @@index([grantId, at])
+}
+
+// ---------------- Module 17: OTP login and managed categories ----------------
+
+/// What kinds of business the product is offered to.
+///
+/// Was a Prisma enum (`BusinessCategory`), which meant adding "Pharmacy" was a
+/// migration and a deploy. Now a table an operator manages.
+///
+/// **`key` is what code matches on** — workflow templates declare `suitedTo:
+/// ['RESTAURANT']` and the router prompt is given the category — so keys are
+/// stable identifiers and the *label* is what changes freely. That split is the
+/// whole reason there is a `key` at all rather than matching on the name.
+///
+/// The legacy enum column `Tenant.category` still exists, because dropping a
+/// column is not an additive migration. It is **never read** after this change:
+/// for a tenant on a category that has no enum value it holds a meaningless
+/// default, so trusting it would be worse than ignoring it.
+model BusinessCategory {
+  id String @id @default(uuid())
+
+  /// SCREAMING_SNAKE, stable forever. Renaming one breaks template matching.
+  key         String  @unique
+  label       String
+  description String?
+
+  /// Where it appears in the picker. Lower first.
+  sortOrder Int @default(100)
+
+  /// Hidden from new signups without orphaning the workspaces already on it —
+  /// which is why categories are deactivated rather than deleted.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenants Tenant[]
+}
+
+/// One outstanding login code.
+///
+/// The code is **hashed**, like a password: a leaked database dump must not be a
+/// list of live login codes. Rows are kept after use as the record of a login
+/// attempt, and swept on a schedule.
+model OtpChallenge {
+  id    String @id @default(uuid())
+  phone String
+
+  /// bcrypt of the code. Never the code itself.
+  codeHash String
+
+  /// Wrong guesses. A challenge is burned after `OTP_MAX_ATTEMPTS`, so a 6-digit
+  /// code cannot be walked through at leisure.
+  attempts Int @default(0)
+
+  consumedAt DateTime?
+  expiresAt  DateTime
+
+  /// Recorded for abuse investigation, never shown to a customer.
+  ip String?
+
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+  @@index([expiresAt])
+}
+
+// ---------------- Module 18: custom roles ----------------
+
+/// A role a workspace defined for itself.
+///
+/// Replaces the fixed `UserRole` enum as the thing permissions are read from. Every
+/// tenant starts with three seeded roles matching the old Owner / Manager / Agent,
+/// and is free to rename them, change what they grant, or add its own — "Kitchen
+/// staff", "Accountant", whatever the business actually has.
+///
+/// Two design points that are load-bearing:
+///
+///   • **`permissions` is a string array, not a join table.** The vocabulary is
+///     closed and defined in `config/permissions.ts`; nothing ever asks "who has
+///     `orders:write`" across tenants, and the whole set is always read together
+///     with the role. A join table would buy referential integrity against a list
+///     that only code can change, at the cost of a second query on every request.
+///
+///   • **The owner role is `isOwner` and holds everything implicitly.** Its
+///     permission list is not consulted, it cannot be deleted, and it cannot be
+///     edited. Without that floor a workspace can remove `team:manage` and
+///     `roles:manage` from every role it has and lock itself out permanently, with
+///     no way back in that does not involve us editing their database.
+model Role {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  /// Permission keys from `config/permissions.ts`. Ignored when `isOwner`.
+  permissions String[]
+
+  /// The workspace's own administrator role. Exactly one per tenant, implicitly
+  /// all-permissions, undeletable and uneditable.
+  isOwner Boolean @default(false)
+
+  /// Seeded rather than created by hand. Editable and deletable like any other —
+  /// the flag only marks where it came from, so the UI can say so.
+  isSystem Boolean @default(false)
+
+  sortOrder Int @default(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, sortOrder])
+}
+
+// ---------------- Module 19: optional modules ----------------
+
+/// The modules a workspace can be given, beyond the core product.
+///
+/// A string-keyed table rather than a set of boolean columns on `Tenant`,
+/// because adding the fourth module should not be a schema change to the table
+/// every request already loads.
+enum ModuleKey {
+  MARKETING
+  LEADS
+  SUPPORT
+}
+
+/// Whether one workspace has one module.
+///
+/// **An absent row means off.** A workspace opts in; it never opts out. That
+/// direction matters: a bug that fails to write a row leaves a customer without
+/// a feature they were promised, which they will tell us about. The other
+/// direction silently hands every workspace a module nobody sold them.
+///
+/// Only the super admin console writes these — there is no customer-facing route
+/// that flips one, deliberately. A workspace cannot grant itself a module.
+model TenantModule {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  module  ModuleKey
+  enabled Boolean   @default(false)
+
+  /// Why the operator turned this on or off. Shown in the audit trail.
+  note String?
+
+  /// Who last changed it. Not a relation, and nullable, for the same reason
+  /// `AuditEvent.tenantId` is not a foreign key: deleting an operator account
+  /// must not erase the record of what they configured.
+  updatedByAdminId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, module])
+  @@index([tenantId])
+}
+
+// ---------------- Module 20: leads ----------------
+
+/// Where a lead is in the pipeline.
+///
+/// Six states, in order, ending in one of two terminals. Deliberately short: a
+/// pipeline nobody can hold in their head is one where everything sits in the
+/// middle stage forever.
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+/// What happened to a lead. Recorded rather than inferred, so the timeline is
+/// what actually occurred rather than a reconstruction from the current row.
+enum LeadEventType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  NOTE
+  CALL_LOGGED
+  REMINDER_SET
+  REMINDER_COMPLETED
+  LINKED_TO_CUSTOMER
+}
+
+/// How a call ended, chosen by the agent after dialling.
+///
+/// There is no telephony provider, so nothing can observe this — the agent taps
+/// a `tel:` link and says what happened. Recording an unverified outcome is worth
+/// more than recording nothing, as long as nobody later mistakes it for a metric
+/// the system measured.
+enum CallOutcome {
+  CONNECTED
+  NO_ANSWER
+  BUSY
+  WRONG_NUMBER
+  CALLBACK_REQUESTED
+}
+
+/// Someone the business is trying to win.
+///
+/// A separate model from `Customer` rather than a flag on it, because a lead
+/// exists **before** any WhatsApp conversation: `Customer` is keyed on `waId`,
+/// is created by the inbound webhook, and has no meaningful value for a name and
+/// a number written down after a phone call. `customerId` links the two the
+/// moment that person does message.
+model Lead {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name    String
+  /// E.164 digits without the plus, normalised by `normalisePhone`.
+  ///
+  /// Unique per workspace: one person is one lead. Two agents entering the same
+  /// number is the most common way a pipeline becomes untrustworthy, and the
+  /// second entry silently detaches all the history from the first.
+  phone   String
+  email   String?
+  company String?
+
+  /// Free text — a form, a walk-in, an ad, an event. There is nothing to
+  /// populate it automatically yet, so an enum would be a guess at categories
+  /// the business has not made.
+  source String?
+
+  status LeadStatus @default(NEW)
+
+  /// Who is working it. Null is a real state — an unassigned lead in the pool.
+  ownerId String?
+  owner   User?   @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  /// What it is worth, in **paise**. Integer, like every other amount in this
+  /// schema — a float here eventually reports a pipeline that does not add up.
+  valuePaise Int?
+
+  notes String?
+
+  /// Set once this lead's number turns up as an inbound WhatsApp customer.
+  customerId String?   @unique
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  /// Denormalised from the earliest open reminder, so the list can sort and
+  /// badge on it without a join per row.
+  nextActionAt    DateTime?
+  lastContactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events    LeadEvent[]
+  calls     CallLog[]
+  reminders Reminder[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, status, updatedAt])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, nextActionAt])
+}
+
+/// One entry on a lead's timeline.
+///
+/// `actorId` is nullable and `SetNull`, so removing a colleague from the
+/// workspace does not erase the record of what they did — the same reasoning as
+/// `AuditEvent.superAdminId`.
+model LeadEvent {
+  id     String @id @default(uuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  type LeadEventType
+
+  fromStatus LeadStatus?
+  toStatus   LeadStatus?
+
+  actorId String?
+  actor   User?   @relation("LeadEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  /// One human-readable line, or the note itself for a NOTE event.
+  body String?
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+/// A call an agent placed and then described.
+///
+/// `leadId` is optional so Phase 2 can attach one to a support ticket without a
+/// second table; today every row has one.
+model CallLog {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Deferred from the Leads migration, because `Ticket` did not exist yet.
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorId String?
+  actor   User?   @relation("CallActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  /// Frozen at the time of the call. The lead's number can be corrected later,
+  /// and the record of who was actually dialled should not change with it.
+  phone   String
+  outcome CallOutcome
+  notes   String?
+
+  /// Seconds. Always null today — there is no telephony provider to observe it,
+  /// and asking an agent to estimate a duration produces a number that looks
+  /// measured and is not. Present so a provider can fill it in without a
+  /// migration.
+  durationSeconds Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([leadId, createdAt])
+}
+
+/// A nudge for one person at one time.
+///
+/// Deliberately not a generic scheduler: the only thing that reads these is the
+/// due sweep and the in-app list.
+model Reminder {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Deferred from the Leads migration, because `Ticket` did not exist yet.
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  /// Whose reminder it is. Cascades with the user: a reminder for somebody who
+  /// has left is noise on nobody's list.
+  assigneeId String
+  assignee   User   @relation("ReminderAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+
+  dueAt DateTime
+  note  String
+
+  completedAt DateTime?
+
+  /// Set by the sweep when it first surfaces this reminder, so a due one is
+  /// counted once rather than every time the job runs.
+  notifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, assigneeId, completedAt, dueAt])
+  @@index([leadId])
+  @@index([completedAt, dueAt])
+}
+
+// ---------------- Module 21: customer support ----------------
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  /// Waiting on the customer. Distinct from OPEN because a ticket the business
+  /// cannot progress should not read as one the business is ignoring.
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketEventType {
+  OPENED
+  STATUS_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  /// An internal note. Never sent, never shown to the customer.
+  NOTE
+  /// A message actually delivered to the customer.
+  CUSTOMER_UPDATE
+  /// An update that could not be sent — recorded so the promise is not lost.
+  UPDATE_NOT_SENT
+  RESOLVED
+  REOPENED
+}
+
+/// A customer's problem, and the promise to deal with it.
+model Ticket {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Human-facing reference, `ZT-000001`, unique and **gapless per workspace**.
+  ///
+  /// Gapless because customers quote these back: a jump from 41 to 43 reads as a
+  /// ticket that was lost, and the support conversation that follows costs more
+  /// than the sequence ever saved. Allocated from `sequence` inside the same
+  /// transaction that writes the row.
+  number   String
+  sequence Int
+
+  subject  String
+  body     String
+  status   TicketStatus   @default(OPEN)
+  priority TicketPriority @default(NORMAL)
+
+  /// Who it is for. Optional: a ticket can be raised from a phone call before
+  /// that person has ever messaged on WhatsApp.
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  /// The inbox thread it came from, when it came from one. This is what lets an
+  /// agent read what the customer actually said rather than a retyped summary,
+  /// and it is how a reply is delivered.
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  openedById String?
+  openedBy   User?   @relation("TicketOpener", fields: [openedById], references: [id], onDelete: SetNull)
+
+  openedAt DateTime @default(now())
+
+  /// Stamped **once**, on the first update actually delivered to the customer.
+  /// Never rewritten — the point of a first-response time is that it is the
+  /// first one.
+  firstRespondedAt DateTime?
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events    TicketEvent[]
+  calls     CallLog[]
+  reminders Reminder[]
+
+  @@unique([tenantId, number])
+  @@unique([tenantId, sequence])
+  @@index([tenantId, status, updatedAt])
+  @@index([tenantId, assigneeId])
+  @@index([conversationId])
+}
+
+/// One entry on a ticket's history.
+model TicketEvent {
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  type TicketEventType
+
+  fromStatus TicketStatus?
+  toStatus   TicketStatus?
+
+  actorId String?
+  actor   User?   @relation("TicketEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  body String?
+
+  /// Whether this line was seen by the customer.
+  ///
+  /// The one flag that must never be wrong: an internal note rendered as if it
+  /// had been sent would let an agent believe a customer had been told something
+  /// they were not, and the reverse leaks staff commentary into a support
+  /// history the customer can be shown.
+  visibleToCustomer Boolean @default(false)
+
+  /// The mirrored `Message`, when this update was actually delivered.
+  messageId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+// ---------------- Module 22: marketing ----------------
+
+/// Meta's template category. Decides the rules and the price.
+enum CampaignTemplateCategory {
+  MARKETING
+  UTILITY
+}
+
+enum CampaignTemplateStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  PAUSED
+  FAILED
+  CANCELLED
+}
+
+enum RecipientStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  /// Skipped at send time because consent had gone. Not a failure — a refusal
+  /// honoured, and worth counting separately so nobody "retries" it.
+  SKIPPED_OPTED_OUT
+}
+
+/// A Meta-approved template a campaign can be sent with.
+///
+/// Separate from `MessageTemplate`, which is `@@unique([tenantId, trigger])` —
+/// one row per order-notification trigger — and has no Meta category. A workspace
+/// needs many marketing templates at once, and relaxing that constraint would
+/// reach into the order-notification path.
+model CampaignTemplate {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name         String
+  /// The name Meta approved. What actually goes on the wire.
+  metaTemplate String
+  language     String                   @default("en")
+  category     CampaignTemplateCategory @default(MARKETING)
+
+  /// Readable copy for the campaign screen. Never sent — Meta renders the
+  /// approved template — so it can drift, and is labelled as a preview.
+  bodyPreview String
+
+  /// Ordered placeholder descriptions, so the composer can ask for each one.
+  variables Json @default("[]")
+
+  status CampaignTemplateStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, status])
+}
+
+/// One send to many people.
+model Campaign {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name String
+
+  templateId String
+  template   CampaignTemplate @relation(fields: [templateId], references: [id])
+
+  /// The filter the audience was built from, kept for the record. The audience
+  /// itself is materialised into `CampaignRecipient` at start — this is what was
+  /// *asked for*, not who was reached.
+  audienceFilter Json @default("{}")
+
+  /// Values for the template's placeholders.
+  variableValues Json @default("{}")
+
+  status CampaignStatus @default(DRAFT)
+
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  /// Why it failed or was cancelled, for the screen.
+  error String?
+
+  createdById String?
+  createdBy   User?   @relation("CampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipients CampaignRecipient[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([status, scheduledAt])
+}
+
+/// One person on one campaign.
+///
+/// Materialised when the campaign starts, so the audience cannot shift under a
+/// running send. `@@unique([campaignId, customerId])` is the important line: it
+/// makes a resumed or retried campaign idempotent, and the failure mode being
+/// designed against is messaging somebody twice.
+model CampaignRecipient {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  status RecipientStatus @default(PENDING)
+
+  /// The mirrored `Message`, so a reply threads into the Inbox.
+  messageId   String?
+  waMessageId String?
+  error       String?
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([campaignId, customerId])
+  @@index([campaignId, status])
+}
+
+// ---------------- Module 23: contact enquiries ----------------
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+  /// Junk. A status rather than a delete: a public form attracts spam, and the
+  /// queue has to be clearable without destroying the record of what arrived.
+  SPAM
+}
+
+/// Someone who filled in the contact form on the marketing site.
+///
+/// **This is the only model in the schema with no `tenantId`, and that is
+/// deliberate.** Every other table is workspace-scoped and read through
+/// `tenantIdOf(req)`, so the absence here looks like an oversight and is not: a
+/// person enquiring on zunopilot.com wants to *buy* ZunoPilot. They have no
+/// workspace, and there is no correct tenant to attribute them to.
+///
+/// For the same reason this is **not** a `Lead`. The Leads module is tenant-owned
+/// and switched on per workspace; filing platform enquiries there would put
+/// ZunoPilot's own sales pipeline inside a customer's tenant, visible to their
+/// staff. These belong to the operator, and are read only from the super admin
+/// console.
+model Enquiry {
+  id String @id @default(uuid())
+
+  fullName String
+  email    String
+  /// Dial code and number combined, normalised to E.164 digits where possible.
+  ///
+  /// The form keeps the country code in separate state from the rest of the
+  /// fields, so it has to be joined on the way in. Normalisation is best-effort
+  /// and falls back to the raw value: losing a prospect to a phone-format quibble
+  /// would be a worse outcome than storing an unusual string.
+  phone    String
+  /// Free text rather than an enum. The options are marketing copy in
+  /// `Contact.tsx`; an enum would mean a backend deploy to add a seventh, and a
+  /// rejected enquiry the day the two drifted apart.
+  interest String
+  message  String
+
+  status EnquiryStatus @default(NEW)
+
+  /// Abuse triage for a public, unauthenticated endpoint. Personal data — see the
+  /// note in `docs/super-admin.md`.
+  ip        String?
+  userAgent String?
+
+  /// Who dealt with it. A plain string rather than a relation, for the same reason
+  /// as `AuditEvent.superAdminId`: removing an operator account must not erase the
+  /// record of who handled a prospect.
+  handledByAdminId String?
+  handledAt        DateTime?
+  internalNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
