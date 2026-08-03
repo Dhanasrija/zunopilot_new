@@ -26,6 +26,27 @@ export const queryInt = (value: unknown, fallback: number, max = 200): number =>
   return Math.min(parsed, max);
 };
 
+/**
+ * A pagination offset: a non-negative integer, unclamped.
+ *
+ * Separate from `queryInt` for two reasons, both of which are bugs if you reach for
+ * that instead. `queryInt` treats anything below 1 as absent and returns the fallback,
+ * so it cannot express "skip nothing" distinctly from "no value given" — harmless here
+ * only because both mean 0. More importantly its `max` defaults to **200**, which for a
+ * page size of 10 would silently pin every request past page 20 to the same rows.
+ *
+ * There is no upper bound because there is nothing sensible to bound it to: the ceiling
+ * is the row count, which the caller does not know. An offset past the end returns an
+ * empty page, which is the correct answer.
+ */
+export const queryOffset = (value: unknown): number => {
+  const str = queryString(value);
+  if (str === undefined) return 0;
+  const parsed = Number.parseInt(str, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
 /** A boolean query value: `true`/`1` are true, `false`/`0` are false. */
 export const queryBool = (value: unknown): boolean | undefined => {
   const str = queryString(value)?.toLowerCase();

@@ -5,6 +5,10 @@ import { api } from '@/lib/api';
 import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneField } from '@/components/ui/phone-field';
+import {
+  detectCountry, fullNumber, nationalNumberProblem, type Country,
+} from '@/lib/countries';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
 
@@ -39,7 +43,23 @@ export default function Login() {
   const setSession = useAuthStore((s) => s.setSession);
 
   const [step, setStep] = useState<'phone' | 'code'>('phone');
-  const [phone, setPhone] = useState('+91 ');
+
+  /**
+   * Country and national number are held apart, not as one prefilled string.
+   *
+   * This was `useState('+91 ')` in a free-text field, which meant the dial code was
+   * editable text a visitor could half-overwrite: type a US number over part of it
+   * and `+91 2025550123` reaches the API, where `normalisePhone` happily accepts 12
+   * digits. On *this* form that was not a validation error — sign-in doubles as
+   * sign-up, so it created a second user and a second workspace and told the person
+   * nothing. Keeping the dial code in a picker makes it unrepresentable.
+   *
+   * `detectCountry()` reads the browser locale and only moves off India when the
+   * locale names a region — see the note on it in `lib/countries.ts`.
+   */
+  const [country, setCountry] = useState<Country>(detectCountry);
+  const [national, setNational] = useState('');
+  const phone = fullNumber(country, national);
   const [code, setCode] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -79,7 +99,10 @@ export default function Login() {
     onError: (err: Error) => setError(err.message),
   });
 
-  const digits = phone.replace(/[^\d]/g, '');
+  // Was `digits.length < 8`, one flat rule for every country. libphonenumber knows the
+  // possible lengths per country, so this refuses a half-typed Indian number without
+  // also refusing a legitimately shorter one elsewhere.
+  const numberProblem = nationalNumberProblem(national, country);
 
   return (
     <div className="grid min-h-screen place-items-center bg-gradient-to-br from-accent-100 via-surface-1 to-surface-0 px-4">
@@ -105,18 +128,17 @@ export default function Login() {
           >
             <div className="space-y-1">
               <Label htmlFor="phone">Mobile number</Label>
-              <Input
+              <PhoneField
                 id="phone"
-                type="tel"
-                autoComplete="tel"
                 autoFocus
-                value={phone}
-                placeholder="+91 77020 00350"
-                onChange={(e) => setPhone(e.target.value)}
+                country={country}
+                onCountryChange={setCountry}
+                value={national}
+                onChange={setNational}
               />
               <p className="text-caption text-muted-foreground">
-                Include your country code — it is how we know which country you are in, so we never
-                have to ask.
+                Pick your country, then enter your number. Your country comes from the code you
+                choose, so we never have to ask separately.
               </p>
             </div>
 
@@ -126,7 +148,7 @@ export default function Login() {
               </p>
             )}
 
-            <Button type="submit" className="w-full" disabled={digits.length < 8 || sendCode.isPending}>
+            <Button type="submit" className="w-full" disabled={!!numberProblem || sendCode.isPending}>
               {sendCode.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
               Send me a code
             </Button>

@@ -1,4 +1,4 @@
-import { queryString } from '../utils/query.js';
+import { queryInt, queryOffset, queryString } from '../utils/query.js';
 import { tenantIdOf } from '../middleware/auth.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
@@ -81,13 +81,24 @@ export const listCustomers = asyncHandler(async (req, res) => {
       { phone: { contains: search } },
     ];
   }
-  const customers = await prisma.customer.findMany({
-    where,
-    orderBy: { lastSeenAt: 'desc' },
-    take: 200,
-    include: { _count: { select: { orders: true, messages: true } } },
-  });
-  res.json({ success: true, data: customers });
+  // Was a bare `take: 200` with no offset and no total, so a workspace with more than
+  // 200 customers simply never saw the rest — and nothing on the page said so. Same
+  // `data` + `meta` shape the operator console uses, which is what lets a page-number
+  // control state how many pages there really are.
+  const take = queryInt(req.query.take, 50);
+  const skip = queryOffset(req.query.skip);
+
+  const [customers, total] = await Promise.all([
+    prisma.customer.findMany({
+      where,
+      orderBy: { lastSeenAt: 'desc' },
+      take,
+      skip,
+      include: { _count: { select: { orders: true, messages: true } } },
+    }),
+    prisma.customer.count({ where }),
+  ]);
+  res.json({ success: true, data: customers, meta: { total, take, skip } });
 });
 
 export const getCustomer = asyncHandler(async (req, res) => {

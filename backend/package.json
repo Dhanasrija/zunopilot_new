@@ -17,7 +17,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "dev:superadmin": "tsx watch src/superadmin-server.ts",
     "start:superadmin": "tsx src/superadmin-server.ts",
-    "seed:superadmin": "tsx prisma/seed-superadmin.ts"
+    "seed:superadmin": "tsx prisma/seed-superadmin.ts",
+    "seed:demo-volume": "tsx prisma/seed-demo-volume.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

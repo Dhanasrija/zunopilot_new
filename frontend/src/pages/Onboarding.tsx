@@ -7,6 +7,8 @@ import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/auth.stor
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PhoneField } from '@/components/ui/phone-field';
+import { detectCountry, fullNumber, splitNumber, type Country } from '@/lib/countries';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -42,6 +44,10 @@ export default function Onboarding() {
   const [businessName, setBusinessName] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [fullName, setFullName] = useState('');
+  // Display-only — this is what customers see, not an identity. It still uses the
+  // picker because it defaults from the login number, and a free-text field here
+  // would reintroduce the missing-country-code mismatch one screen later.
+  const [contactCountry, setContactCountry] = useState<Country>(detectCountry);
   const [contactNumber, setContactNumber] = useState('');
   const [website, setWebsite] = useState('');
   const [email, setEmail] = useState('');
@@ -60,8 +66,17 @@ export default function Onboarding() {
     if (tenant?.categoryId) setCategoryId(tenant.categoryId);
     if (user?.fullName) setFullName(user.fullName);
     if (user?.email) setEmail(user.email);
-    // Their login number is almost always the business number too.
-    if (user?.phone) setContactNumber((current) => current || `+${user.phone}`);
+    // Their login number is almost always the business number too. It has to be
+    // **split** before it goes in: the field holds the national part only now, so
+    // dropping the whole stored `917702000351` into it would submit the dial code
+    // twice as `+91 917702000351`.
+    if (user?.phone) {
+      const parts = splitNumber(user.phone);
+      if (parts) {
+        setContactCountry(parts.country);
+        setContactNumber((current) => current || parts.national);
+      }
+    }
   }, [tenant, user]);
 
   useEffect(() => {
@@ -75,7 +90,7 @@ export default function Onboarding() {
       businessName: businessName.trim(),
       businessCategoryId: categoryId,
       fullName: fullName.trim(),
-      contactNumber: contactNumber.trim() || undefined,
+      contactNumber: contactNumber.trim() ? fullNumber(contactCountry, contactNumber) : undefined,
       website: website.trim() || undefined,
       email: email.trim() || undefined,
     }).then((r) => r.data.data),
@@ -138,12 +153,12 @@ export default function Onboarding() {
 
             <div className="space-y-1">
               <Label htmlFor="contact">Contact number</Label>
-              <Input
+              <PhoneField
                 id="contact"
-                type="tel"
+                country={contactCountry}
+                onCountryChange={setContactCountry}
                 value={contactNumber}
-                placeholder="+91 77020 00350"
-                onChange={(e) => setContactNumber(e.target.value)}
+                onChange={setContactNumber}
               />
               <p className="text-caption text-muted-foreground">
                 What customers see. Defaults to your login number.

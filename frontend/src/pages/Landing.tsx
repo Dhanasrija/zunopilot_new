@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { useCountUp } from '@/hooks/useCountUp';
 import { useAuthStore } from '@/stores/auth.store';
 import { formatRupees, useCatalogue } from '@/lib/pricing';
+import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
 
 /* -------------------------------------------------------------------------- */
 /*                          Shared animation variants                          */
@@ -411,7 +412,11 @@ function Hero() {
                 </Button>
               </motion.div>
             </Link>
-            <a href="#contact" className="w-full sm:w-auto">
+            {/* Was `href="#contact"`, which scrolled to the CTA band further down
+                this page. That band's email box does not send anywhere (see the note
+                on `ContactCTA`), so the demo path ended in a dead form. It now goes
+                to the real enquiry form with "Demo Request" already chosen. */}
+            <Link to={DEMO_REQUEST_LINK} className="w-full sm:w-auto">
               <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
                 <Button
                   variant="outline"
@@ -420,7 +425,7 @@ function Hero() {
                   Request a Demo
                 </Button>
               </motion.div>
-            </a>
+            </Link>
           </motion.div>
         </div>
 

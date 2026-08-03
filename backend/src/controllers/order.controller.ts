@@ -1,5 +1,5 @@
 import { OrderStatus } from '@prisma/client';
-import { queryEnum, queryString } from '../utils/query.js';
+import { queryEnum, queryInt, queryOffset, queryString } from '../utils/query.js';
 import { tenantIdOf } from '../middleware/auth.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
@@ -62,23 +62,120 @@ export const createOrder = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: order });
 });
 
-export const listOrders = asyncHandler(async (req, res) => {
+/**
+ * Everything that narrows the order list, in one place.
+ *
+ * All of this used to happen **in the browser**, over a hard `take: 200`. That was
+ * correct while a workspace had fewer than 200 orders and quietly wrong above it: the
+ * oldest orders vanished with no indication, the "of N orders" label counted only what
+ * had been fetched, and the CSV export wrote the truncated set. Filtering has to happen
+ * where the rows are.
+ *
+ * A date *range* rather than only `since`, because the page offers Today / Yesterday /
+ * Last 7 days and "yesterday" needs an upper bound as well as a lower one.
+ */
+const orderListWhere = (req: Parameters<typeof tenantIdOf>[0]): Prisma.OrderWhereInput => {
   const status = queryEnum(req.query.status, Object.values(OrderStatus));
   const since = queryString(req.query.since);
+  const until = queryString(req.query.until);
+  const search = queryString(req.query.search)?.trim();
+
   const where: Prisma.OrderWhereInput = { tenantId: tenantIdOf(req) };
   if (status) where.status = status;
-  if (since) where.placedAt = { gte: new Date(since) };
+  if (since || until) {
+    where.placedAt = {
+      ...(since ? { gte: new Date(since) } : {}),
+      ...(until ? { lt: new Date(until) } : {}),
+    };
+  }
+  if (search) {
+    where.OR = [
+      { customerName: { contains: search, mode: 'insensitive' } },
+      { contactPhone: { contains: search } },
+      // `orderNumber` is an Int, so it only participates when the query is numeric —
+      // `equals` on a non-number throws in the driver rather than simply not matching.
+      //
+      // **Exact, where the client-side version matched substrings.** That was
+      // `String(o.orderNumber).includes(q)`, so "165" also returned #1654 and #2165.
+      // Reproducing it in SQL needs a cast to text on every row, which cannot use the
+      // index — and substring-matching an identifier is mostly noise anyway. A
+      // deliberate change, not an oversight.
+      ...(/^\d+$/.test(search) ? [{ orderNumber: Number.parseInt(search, 10) }] : []),
+    ];
+  }
+  return where;
+};
 
-  const orders = await prisma.order.findMany({
-    where,
-    include: {
-      customer: { select: { id: true, name: true, waId: true, phone: true } },
-      items: { include: { addons: true } },
+export const listOrders = asyncHandler(async (req, res) => {
+  const where = orderListWhere(req);
+  // Same shape the operator console has used since it was built: `data` plus a `meta`
+  // carrying the real total, so a page-number control can be honest about how many
+  // pages exist. See `listTenants` in super-admin.controller.ts.
+  const take = queryInt(req.query.take, 50);
+  const skip = queryOffset(req.query.skip);
+
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      include: {
+        customer: { select: { id: true, name: true, waId: true, phone: true } },
+        items: { include: { addons: true } },
+      },
+      orderBy: { placedAt: 'desc' },
+      take,
+      skip,
+    }),
+    prisma.order.count({ where }),
+  ]);
+  res.json({ success: true, data: orders, meta: { total, take, skip } });
+});
+
+/**
+ * The four numbers on the stats cards, over **every** order in the date range.
+ *
+ * Its own endpoint rather than part of the list response, for one reason that matters:
+ * the cards count each status side by side, so they cannot be derived from a
+ * status-filtered query — and they must not be derived from the current *page* either,
+ * which is exactly the bug this replaces. Revenue in particular was the sum of at most
+ * 200 rows and simply understated the total.
+ *
+ * Deliberately ignores the `status` and `search` filters and honours only the dates,
+ * matching what the page's own range label claims the numbers cover.
+ */
+export const getOrderSummary = asyncHandler(async (req, res) => {
+  const since = queryString(req.query.since);
+  const until = queryString(req.query.until);
+
+  const where: Prisma.OrderWhereInput = { tenantId: tenantIdOf(req) };
+  if (since || until) {
+    where.placedAt = {
+      ...(since ? { gte: new Date(since) } : {}),
+      ...(until ? { lt: new Date(until) } : {}),
+    };
+  }
+
+  const [byStatus, totals] = await Promise.all([
+    prisma.order.groupBy({ by: ['status'], where, _count: { _all: true } }),
+    prisma.order.aggregate({ where, _sum: { totalAmount: true }, _count: { _all: true } }),
+  ]);
+
+  const count = (status: OrderStatus) =>
+    byStatus.find((row) => row.status === status)?._count._all ?? 0;
+
+  res.json({
+    success: true,
+    data: {
+      newOrders: count('NEW'),
+      // Matches what the card has always shown: accepted and preparing are one
+      // "in the kitchen" number.
+      preparing: count('ACCEPTED') + count('PREPARING'),
+      delivered: count('DELIVERED'),
+      // A string, because `Decimal` does not survive JSON as a number without losing
+      // precision. The page already reads amounts through `Number(...)`.
+      revenue: (totals._sum.totalAmount ?? 0).toString(),
+      total: totals._count._all,
     },
-    orderBy: { placedAt: 'desc' },
-    take: 200,
   });
-  res.json({ success: true, data: orders });
 });
 
 export const getOrder = asyncHandler(async (req, res) => {

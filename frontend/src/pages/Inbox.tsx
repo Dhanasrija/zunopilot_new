@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -185,12 +185,67 @@ export default function Inbox() {
 
   const conv = conversations.data?.find((c) => c.id === selectedId);
 
+  // ── Keeping the newest message in view ──────────────────────────────────────
+  //
+  // The API returns up to 500 messages oldest-first, so the newest is at the
+  // bottom and a busy conversation opened at its natural scroll position showed
+  // the *oldest* message — an agent had to scroll through months of history to
+  // find what they had just been asked.
+  //
+  // Two behaviours, and the second is why this is not a one-liner:
+  //
+  //   1. **Opening a conversation jumps to the bottom**, instantly. Animating a
+  //      scroll through 147 messages is something to sit through, not a nicety.
+  //   2. **A message arriving only scrolls if the agent is already at the bottom.**
+  //      The list refetches every second, so unconditionally scrolling would yank
+  //      them back down every second while they were reading history and make it
+  //      impossible to look at anything but the latest message.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Is the agent parked at the bottom, i.e. following the conversation live? */
+  const following = useRef(true);
+  /** Which conversation the list is currently *showing*, to detect a switch. */
+  const shown = useRef<string | null>(null);
+
+  const list = messages.data;
+  // Keyed on the last id rather than the array identity: `refetchInterval` hands
+  // back a fresh array every second, and re-scrolling on each poll would fight the
+  // agent even when nothing changed.
+  const lastMessageId = list?.length ? list[list.length - 1].id : null;
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // A tolerance, not an exact equality: sub-pixel heights and a partly visible
+    // last bubble both mean `scrollTop` never quite reaches the maximum, and an
+    // exact test would decide the agent had scrolled away when they had not.
+    following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+  };
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    // No messages yet — the conversation was just selected and the fetch is still
+    // in flight. `shown` is deliberately left alone so this runs again, and
+    // still counts as a switch, once they arrive.
+    if (!el || !lastMessageId) return;
+
+    const switched = shown.current !== selectedId;
+    if (switched) {
+      shown.current = selectedId;
+      following.current = true;
+    }
+    if (switched || following.current) el.scrollTop = el.scrollHeight;
+  }, [selectedId, lastMessageId, list?.length]);
+
   const send = useMutation({
     mutationFn: async () => {
       await api.post(`/inbox/conversations/${selectedId}/messages`, { body: draft });
     },
     onSuccess: () => {
       setDraft('');
+      // Sending is an explicit request to be at the bottom: if the agent had
+      // scrolled up to check something before replying, their own message must not
+      // land somewhere they cannot see.
+      following.current = true;
       qc.invalidateQueries({ queryKey: ['messages', selectedId] });
       qc.invalidateQueries({ queryKey: ['conversations'] });
     },
@@ -379,7 +434,11 @@ export default function Inbox() {
                 onOpenChange={setRaisingTicket}
               />
             </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto min-h-0 space-y-2 py-4 bg-muted/20">
+            <CardContent
+              ref={scrollRef}
+              onScroll={onScroll}
+              className="flex-1 overflow-y-auto min-h-0 space-y-2 py-4 bg-muted/20"
+            >
               {messages.data?.map((m) => (
                 <div key={m.id} className={cn('max-w-[70%] rounded-lg p-2 px-3 text-sm', m.direction === 'OUTBOUND' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-background border')}>
                   {/*

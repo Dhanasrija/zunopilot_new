@@ -16,6 +16,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { PhoneField } from '@/components/ui/phone-field';
+import { detectCountry, fullNumber, type Country } from '@/lib/countries';
 import { cn, formatDateTime } from '@/lib/utils';
 import { Copy, KeyRound, Loader2, ShieldCheck, UserPlus, Users } from 'lucide-react';
 
@@ -54,9 +56,19 @@ export default function Team() {
   const manage = can('team:manage');
 
   const [inviting, setInviting] = useState(false);
+  /**
+   * `draft.phone` is the **national part only** now. The dial code lives in
+   * `inviteCountry` and is joined on submit.
+   *
+   * It used to be seeded with the string `'+91 '` in a free-text field, which an
+   * inviter could half-overwrite — and `User.phone` is globally unique across the
+   * whole platform, so a mangled number does not just invite the wrong person, it can
+   * collide with a stranger's existing row and fail for reasons nobody can read.
+   */
   const [draft, setDraft] = useState({
-    fullName: '', phone: '+91 ', email: '', roleId: '',
+    fullName: '', phone: '', email: '', roleId: '',
   });
+  const [inviteCountry, setInviteCountry] = useState<Country>(detectCountry);
 
   // The workspace's own roles, not three fixed ones.
   const { data: roleData } = useRoles();
@@ -71,10 +83,17 @@ export default function Team() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['team'] });
 
   const invite = useMutation({
-    mutationFn: () => api.post<{ data: Member }>('/team', draft).then((r) => r.data),
+    mutationFn: () => api
+      // The dial code is joined here rather than held in the field, so an invite
+      // cannot be sent to a number missing its country code.
+      .post<{ data: Member }>('/team', { ...draft, phone: fullNumber(inviteCountry, draft.phone) })
+      .then((r) => r.data),
     onSuccess: (response) => {
       setInviting(false);
-      setDraft({ fullName: '', phone: '+91 ', email: '', roleId: '' });
+      setDraft({ fullName: '', phone: '', email: '', roleId: '' });
+      // Reset the country too, so inviting a second person does not silently inherit
+      // the first one's country.
+      setInviteCountry(detectCountry());
       // Nothing to hand over any more — they sign in with a code sent to their own
       // number, so there is no temporary password to read out and no dialog for it.
       toast.success(`${response.data.fullName} can sign in with their mobile number now.`);
@@ -294,15 +313,14 @@ export default function Team() {
             </div>
             <div className="space-y-1">
               <Label>Mobile number</Label>
-              <Input
-                type="tel"
-                autoComplete="off"
-                placeholder="+91 77020 00350"
+              <PhoneField
+                country={inviteCountry}
+                onCountryChange={setInviteCountry}
                 value={draft.phone}
-                onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))}
+                onChange={(phone) => setDraft((d) => ({ ...d, phone }))}
               />
               <p className="text-caption text-muted-foreground">
-                How they sign in. Include the country code.
+                How they sign in. Pick their country if it is not yours.
               </p>
             </div>
             <div className="space-y-1">

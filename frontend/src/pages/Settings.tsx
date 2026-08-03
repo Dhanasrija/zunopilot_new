@@ -10,18 +10,38 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { User, Bell, CreditCard, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
+import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
 
 const CATEGORIES = [
   { value: 'RESTAURANT', label: 'Restaurant' },
   { value: 'ECOMMERCE_GROCERY', label: 'E-commerce (Grocery)' },
 ];
 
+/**
+ * The tabs this page has, for validating `?tab=`.
+ *
+ * Billing is deliberately absent: it lives on its own `/billing` page, which is
+ * where the plan, the plan grid and the invoices actually are. The tab that used to
+ * sit here rendered a hardcoded "No active subscription" without querying anything,
+ * so a subscribed tenant was told they had no plan.
+ */
+const TABS = ['profile', 'notifications'];
+
 export default function Settings() {
   const qc = useQueryClient();
   const { user } = useAuthStore();
   const [searchParams] = useSearchParams();
-  const tabFromUrl = searchParams.get('tab') ?? 'profile';
+
+  /**
+   * Radix `Tabs` selects *nothing* when `defaultValue` names a tab that does not
+   * exist, which renders the page with no tab active and a blank content area. This
+   * used to be `searchParams.get('tab') ?? 'profile'`, passing the raw parameter
+   * straight through — so now that the Billing tab is gone, an old bookmark or a
+   * pasted `?tab=billing` link would land on that blank page. Only honour a value
+   * the UI can actually show.
+   */
+  const requested = searchParams.get('tab');
+  const tabFromUrl = requested && TABS.includes(requested) ? requested : 'profile';
 
   const { data } = useQuery({
     queryKey: ['tenant.me'],
@@ -57,9 +77,6 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="notifications" className="">
             <Bell className="h-4 w-4" />Notifications
-          </TabsTrigger>
-          <TabsTrigger value="billing" className="">
-            <CreditCard className="h-4 w-4" />Billing
           </TabsTrigger>
         </TabsList>
 
@@ -219,27 +236,6 @@ export default function Settings() {
                 <h3 className="text-body font-medium text-ink-700">No notifications yet</h3>
                 <p className="text-sm text-muted-foreground mt-1 max-w-xs">
                   You’re all caught up! Notifications about your orders, messages, and account activity will appear here.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Billing Tab */}
-        <TabsContent value="billing" className="mt-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>Billing &amp; Subscription</CardTitle>
-              <CardDescription>Manage your plan and payment details.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="h-14 w-14 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <CreditCard className="h-7 w-7 text-muted-foreground" />
-                </div>
-                <h3 className="text-body font-medium text-ink-700">No active subscription</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-                  You don’t have an active plan yet. Upgrade to unlock advanced features and higher message limits.
                 </p>
               </div>
             </CardContent>

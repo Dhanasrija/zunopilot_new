@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -132,10 +133,14 @@ function CustomerFormDialog({
   );
 }
 
+/** Matches the Orders page, so paging feels the same in both places. */
+const PAGE_SIZE = 10;
+
 export default function Customers() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [editing, setEditing] = useState<Customer | null>(null);
@@ -147,11 +152,23 @@ export default function Customers() {
     if (selected) qc.invalidateQueries({ queryKey: ['customer', selected] });
   };
 
-  const { data = [] } = useQuery({
-    queryKey: ['customers', search],
-    queryFn: async () =>
-      (await api.get<{ data: Customer[] }>('/customers', { params: { search: search || undefined } })).data.data,
+  // One page at a time. `take: 200` with no offset meant a workspace past 200 customers
+  // never saw the rest, and nothing on the page admitted it.
+  const { data } = useQuery({
+    queryKey: ['customers', search, page],
+    queryFn: async () => {
+      const response = await api.get<{ data: Customer[]; meta: { total: number } }>('/customers', {
+        params: {
+          search: search || undefined,
+          take: PAGE_SIZE,
+          skip: (page - 1) * PAGE_SIZE,
+        },
+      });
+      return { rows: response.data.data, total: response.data.meta.total };
+    },
   });
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
 
   const detail = useQuery({
     queryKey: ['customer', selected],
@@ -184,7 +201,13 @@ export default function Customers() {
       <Card>
         <CardHeader><CardTitle>Customer list</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <Input placeholder="Search by name or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          {/* Back to page 1 on every keystroke: the result set changes, so staying on
+              page 7 would show an empty table for a search that has matches. */}
+          <Input
+            placeholder="Search by name or phone…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
           <Table>
             <TableHeader>
               <TableRow>
@@ -193,7 +216,7 @@ export default function Customers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((c) => (
+              {rows.map((c) => (
                 <TableRow key={c.id} className="cursor-pointer" onClick={() => setSelected(c.id)}>
                   <TableCell>{c.name || '—'}</TableCell>
                   <TableCell>{c.phone || c.waId}</TableCell>
@@ -224,6 +247,13 @@ export default function Customers() {
             </TableBody>
           </Table>
         </CardContent>
+        <Pagination
+          page={page}
+          onPageChange={setPage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          noun="customers"
+        />
       </Card>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>

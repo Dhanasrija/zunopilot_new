@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { createOrder, listOrders, getOrder, updateOrderStatus } from '../controllers/order.controller.js';
+import {
+  createOrder, listOrders, getOrderSummary, getOrder, updateOrderStatus,
+} from '../controllers/order.controller.js';
 import { createOrderValidator, updateStatusValidator } from '../validators/order.validator.js';
 import { validate } from '../middleware/validate.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
@@ -13,6 +15,9 @@ router.use(requireAuth);
 // workspace can now build a role that cannot.
 router.get('/', requirePermission('orders:read'), listOrders);
 router.post('/', requirePermission('orders:write'), createOrderValidator, validate, createOrder);
+// Ahead of `/:id`, or Express matches "summary" as an order id and returns a 404 for a
+// route that exists.
+router.get('/summary', requirePermission('orders:read'), getOrderSummary);
 router.get('/:id', requirePermission('orders:read'), getOrder);
 router.patch('/:id/status', requirePermission('orders:write'), updateStatusValidator, validate, updateOrderStatus);
 
