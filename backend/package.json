@@ -18,7 +18,8 @@
     "dev:superadmin": "tsx watch src/superadmin-server.ts",
     "start:superadmin": "tsx src/superadmin-server.ts",
     "seed:superadmin": "tsx prisma/seed-superadmin.ts",
-    "seed:demo-volume": "tsx prisma/seed-demo-volume.ts"
+    "seed:demo-volume": "tsx prisma/seed-demo-volume.ts",
+    "seed:connector-types": "tsx prisma/seed-connector-types.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -31,6 +32,7 @@
     "express-validator": "^7.2.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.13.10",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
     "openai": "^7.1.0",

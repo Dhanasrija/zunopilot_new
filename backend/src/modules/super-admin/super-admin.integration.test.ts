@@ -31,6 +31,9 @@ const wipe = async () => {
   await prisma.auditEvent.deleteMany({ where: { tenantId: { in: [TENANT_A, TENANT_B] } } });
   await prisma.superAdmin.deleteMany({ where: { email: EMAIL } });
   await prisma.tenant.deleteMany({ where: { id: { in: [TENANT_A, TENANT_B] } } });
+  // Catalog rows are global, not tenant-scoped, so the tenant cascade does not reach them.
+  await prisma.connectorType.deleteMany({ where: { key: { startsWith: 'sa_test_' } } });
+  await prisma.auditEvent.deleteMany({ where: { targetType: 'ConnectorType' } });
 };
 
 beforeEach(async () => {
@@ -381,5 +384,157 @@ describe('the audit trail', () => {
     const events = await prisma.auditEvent.findMany({ where: { tenantId: TENANT_B } });
     expect(events.length).toBeGreaterThan(0);
     expect(events[0].summary).toContain('Beta Workspace');
+  });
+});
+
+describe('the connector type catalog', () => {
+  // The operator's list of systems a workspace may connect to. It replaced a `z.enum` and
+  // two hardcoded options in the tenant's picker, so the point of every rule below is that
+  // adding a system stopped being a deploy without becoming a way to break existing ones.
+
+  const makeType = (token: string, body: Record<string, unknown> = {}) =>
+    request(app).post('/sa/connector-types').set(asAdmin(token)).send({
+      key: 'sa_test_razorpay',
+      label: 'Razorpay',
+      kind: 'HTTP',
+      allowedAuthTypes: ['BASIC'],
+      defaultBaseUrl: 'https://api.razorpay.com/v1',
+      usernameLabel: 'Key ID',
+      secretLabel: 'Key Secret',
+      ...body,
+    });
+
+  it('adds a type and audits it', async () => {
+    const token = await login();
+    const created = await makeType(token).expect(201);
+    expect(created.body.data.key).toBe('sa_test_razorpay');
+
+    const events = await prisma.auditEvent.findMany({
+      where: { targetType: 'ConnectorType', targetId: created.body.data.id },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].action).toBe('connector_type.created');
+  });
+
+  it('refuses a duplicate key', async () => {
+    const token = await login();
+    await makeType(token).expect(201);
+    const clash = await makeType(token, { label: 'Razorpay again' }).expect(409);
+    expect(clash.body.message).toMatch(/already uses the key/);
+  });
+
+  it('**refuses a default base URL the egress guard blocks**', async () => {
+    // The operator's suggestion is inherited by every workspace that picks the type, so a
+    // bad one here would hand the same SSRF to all of them at once.
+    const token = await login();
+    await makeType(token, { defaultBaseUrl: 'http://169.254.169.254/latest/meta-data/' })
+      .expect(400);
+  });
+
+  it('**cannot rename the key**', async () => {
+    // A workspace's connector records which type it came from. Renaming would orphan that
+    // link with no error anywhere, so `key` is absent from the update schema entirely.
+    const token = await login();
+    const created = await makeType(token).expect(201);
+
+    await request(app)
+      .patch(`/sa/connector-types/${created.body.data.id}`)
+      .set(asAdmin(token))
+      .send({ key: 'sa_test_renamed', label: 'Renamed' })
+      .expect(200);
+
+    const after = await prisma.connectorType.findUnique({ where: { id: created.body.data.id } });
+    expect(after!.key).toBe('sa_test_razorpay');
+    expect(after!.label).toBe('Renamed');
+  });
+
+  it('hides a type from new connections without deleting it', async () => {
+    const token = await login();
+    const created = await makeType(token).expect(201);
+
+    await request(app)
+      .patch(`/sa/connector-types/${created.body.data.id}`)
+      .set(asAdmin(token))
+      .send({ isActive: false })
+      .expect(200);
+
+    const events = await prisma.auditEvent.findMany({
+      where: { targetType: 'ConnectorType', action: 'connector_type.updated' },
+    });
+    expect(events[0].summary).toMatch(/Hid the connector type/);
+  });
+
+  it('deletes a type nothing is using', async () => {
+    const token = await login();
+    const created = await makeType(token).expect(201);
+    await request(app)
+      .delete(`/sa/connector-types/${created.body.data.id}`)
+      .set(asAdmin(token))
+      .expect(200);
+    expect(await prisma.connectorType.findUnique({ where: { id: created.body.data.id } })).toBeNull();
+  });
+
+  it('**refuses to delete a type a workspace is on**', async () => {
+    // The foreign key is SET NULL, so a forced delete would not break those connectors —
+    // but it would erase where they came from and make the operator's own count lie.
+    const token = await login();
+    const created = await makeType(token).expect(201);
+    await prisma.connector.create({
+      data: {
+        tenantId: TENANT_A,
+        connectorTypeId: created.body.data.id,
+        key: 'payments',
+        name: 'Payments',
+        kind: 'HTTP',
+        baseUrl: 'https://api.razorpay.com/v1',
+      },
+    });
+
+    const refused = await request(app)
+      .delete(`/sa/connector-types/${created.body.data.id}`)
+      .set(asAdmin(token))
+      .expect(409);
+    expect(refused.body.message).toMatch(/Hide it from new connections instead/);
+
+    const list = await request(app).get('/sa/connector-types').set(asAdmin(token)).expect(200);
+    const row = list.body.data.find((t: { key: string }) => t.key === 'sa_test_razorpay');
+    expect(row.connectors).toBe(1);
+  });
+
+  it('adds an operation template and keeps it scoped to its type', async () => {
+    const token = await login();
+    const created = await makeType(token).expect(201);
+    const other = await makeType(token, { key: 'sa_test_other', label: 'Other' }).expect(201);
+
+    const op = await request(app)
+      .post(`/sa/connector-types/${created.body.data.id}/operations`)
+      .set(asAdmin(token))
+      .send({ key: 'fetch_payment', name: 'Fetch a payment', method: 'GET', path: '/payments/{id}' })
+      .expect(201);
+
+    // Reached through the other type's id, the same operation must not be found — an
+    // operation id from the client is never trusted on its own.
+    await request(app)
+      .patch(`/sa/connector-types/${other.body.data.id}/operations/${op.body.data.id}`)
+      .set(asAdmin(token))
+      .send({ name: 'Hijacked' })
+      .expect(404);
+  });
+
+  it('refuses two operations with the same key on one type', async () => {
+    const token = await login();
+    const created = await makeType(token).expect(201);
+    const body = { key: 'fetch_payment', name: 'Fetch', method: 'GET', path: '/p/{id}' };
+    await request(app).post(`/sa/connector-types/${created.body.data.id}/operations`)
+      .set(asAdmin(token)).send(body).expect(201);
+    const clash = await request(app).post(`/sa/connector-types/${created.body.data.id}/operations`)
+      .set(asAdmin(token)).send(body).expect(409);
+    expect(clash.body.message).toMatch(/already has an operation keyed/);
+  });
+
+  it('needs an operator token — a customer token is not enough', async () => {
+    const tenantToken = signToken({ userId: ownerId });
+    await request(app).get('/sa/connector-types').set(asAdmin(tenantToken)).expect(401);
+    await request(app).get('/sa/connector-types').expect(401);
   });
 });

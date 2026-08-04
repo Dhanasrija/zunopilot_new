@@ -212,6 +212,49 @@ export interface CategoryRow {
   createdAt: string;
 }
 
+/**
+ * One entry in the catalog of connector types a workspace can pick from.
+ *
+ * A type says how to authenticate, never with what — the credential belongs to the
+ * workspace and is supplied when they create the connector. Nothing on this row is a
+ * secret of ours or of theirs.
+ */
+export interface ConnectorTypeRow {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  kind: 'HTTP' | 'MOCK' | 'GOOGLE_SHEETS' | 'EMAIL';
+  /** Which auth mechanisms this type accepts. Empty means all of them are offered. */
+  allowedAuthTypes: Array<'NONE' | 'API_KEY_HEADER' | 'BEARER' | 'BASIC'>;
+  defaultBaseUrl: string | null;
+  secretLabel: string | null;
+  usernameLabel: string | null;
+  defaultHeader: string | null;
+  docsUrl: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  /** How many workspace connectors are on this type. Zero is what makes it deletable. */
+  connectors: number;
+  operationTemplates: ConnectorTypeOperationRow[];
+  createdAt: string;
+}
+
+export interface ConnectorTypeOperationRow {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  method: string;
+  path: string;
+  inputs: unknown;
+  responseMapping: unknown;
+  sideEffecting: boolean;
+  timeoutMs: number | null;
+  sampleResponse: unknown;
+  sortOrder: number;
+}
+
 export interface AuditRow {
   id: string;
   action: string;
@@ -276,6 +319,23 @@ export const sa = {
     unwrap<{ temporaryPassword: string }>(api.post(`/users/${userId}/reset-password`)),
 
   plans: () => unwrap<PlansResponse>(api.get('/plans')),
+
+  connectorTypes: {
+    list: () => unwrap<ConnectorTypeRow[]>(api.get('/connector-types')),
+    create: (body: Record<string, unknown>) =>
+      unwrap<ConnectorTypeRow>(api.post('/connector-types', body)),
+    update: (id: string, body: Record<string, unknown>) =>
+      unwrap<ConnectorTypeRow>(api.patch(`/connector-types/${id}`, body)),
+    remove: (id: string) => api.delete(`/connector-types/${id}`),
+    addOperation: (id: string, body: Record<string, unknown>) =>
+      unwrap<ConnectorTypeOperationRow>(api.post(`/connector-types/${id}/operations`, body)),
+    updateOperation: (id: string, operationId: string, body: Record<string, unknown>) =>
+      unwrap<ConnectorTypeOperationRow>(
+        api.patch(`/connector-types/${id}/operations/${operationId}`, body),
+      ),
+    removeOperation: (id: string, operationId: string) =>
+      api.delete(`/connector-types/${id}/operations/${operationId}`),
+  },
 
   categories: {
     list: () => unwrap<CategoryRow[]>(api.get('/business-categories')),

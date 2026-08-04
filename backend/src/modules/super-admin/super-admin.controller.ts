@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import type { BillingInterval as PrismaInterval, PlanCode as PrismaPlan } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
@@ -19,6 +20,11 @@ import {
   enquiryById, listEnquiries, newEnquiryCount, updateEnquiry,
 } from '../enquiries/enquiry.service.js';
 import { queryString } from '../../utils/query.js';
+import { assertUrlAllowed, EgressBlockedError } from '../conversation-engine/providers/egress.js';
+import {
+  CONNECTOR_AUTH_TYPES, CONNECTOR_KINDS, HTTP_METHODS, connectorKeySchema,
+  operationCreateSchema, operationInputSchema, responseMappingSchema,
+} from '../conversation-engine/connectors/schemas.js';
 
 // The super admin API.
 //
@@ -1115,6 +1121,380 @@ export const deleteBusinessCategory = asyncHandler(async (req: Request, res: Res
     targetType: 'BusinessCategory',
     targetId: id,
     summary: `Deleted the unused business category "${category.label}"`,
+  });
+
+  res.json({ success: true });
+});
+
+// ── Connector types ───────────────────────────────────────────────────────────
+//
+// The catalog of outside systems ZunoPilot can reach, moved out of a `z.enum` so
+// adding "Razorpay" is an operator action rather than a migration and a deploy.
+// Same shape as business categories above, for the same reasons — including the
+// two that matter most: `key` is immutable because a tenant's connector records
+// which type it came from, and a type in use is deactivated rather than deleted.
+//
+// **Nothing here is a credential.** A type says how to authenticate, never with
+// what; the tenant supplies the secret when they create the connector. That is
+// what makes the whole row safe to serve to a tenant-facing endpoint.
+
+const OPERATION_TEMPLATE_LIMIT = 40;
+
+const connectorTypeCreateSchema = z.object({
+  key: connectorKeySchema,
+  label: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(500).optional(),
+  kind: z.enum(CONNECTOR_KINDS).default('HTTP'),
+  /// Empty means "offer them all", which is what a generic HTTP type wants.
+  allowedAuthTypes: z.array(z.enum(CONNECTOR_AUTH_TYPES)).max(CONNECTOR_AUTH_TYPES.length).default([]),
+  defaultBaseUrl: z.string().trim().max(500).optional(),
+  secretLabel: z.string().trim().max(80).optional(),
+  usernameLabel: z.string().trim().max(80).optional(),
+  defaultHeader: z.string().trim().max(120).optional(),
+  docsUrl: z.string().trim().max(500).optional(),
+  sortOrder: z.number().int().min(0).max(9999).default(100),
+});
+
+/**
+ * A partial update, restated with **no defaults** rather than derived with `.partial()`.
+ *
+ * `.partial()` does not suppress `.default()` — an absent key still parses to its creation
+ * default, so every `!== undefined` guard below would be true and a request that only set
+ * `isActive: false` would also write `kind: 'HTTP'`, `allowedAuthTypes: []` and
+ * `sortOrder: 100`. Hiding a Google Sheets type would quietly turn it into an HTTP type
+ * that accepts any credential. See the same note on `connectorUpdateSchema`.
+ */
+const connectorTypeUpdateSchema = z.object({
+  label: z.string().trim().min(2).max(80).optional(),
+  description: z.string().trim().max(500).nullish(),
+  kind: z.enum(CONNECTOR_KINDS).optional(),
+  allowedAuthTypes: z.array(z.enum(CONNECTOR_AUTH_TYPES)).max(CONNECTOR_AUTH_TYPES.length).optional(),
+  defaultBaseUrl: z.string().trim().max(500).nullish(),
+  secretLabel: z.string().trim().max(80).nullish(),
+  usernameLabel: z.string().trim().max(80).nullish(),
+  defaultHeader: z.string().trim().max(120).nullish(),
+  docsUrl: z.string().trim().max(500).nullish(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+  isActive: z.boolean().optional(),
+});
+
+/** The template shape is the runtime shape, so a clone is a copy and not a translation. */
+const templateCreateSchema = operationCreateSchema.extend({
+  sortOrder: z.number().int().min(0).max(9999).default(100),
+});
+
+/** No defaults, for the reason given on `connectorTypeUpdateSchema`. */
+const templateUpdateSchema = z.object({
+  key: connectorKeySchema.optional(),
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).nullish(),
+  method: z.enum(HTTP_METHODS).optional(),
+  path: z.string().min(1).max(500).optional(),
+  inputs: z.array(operationInputSchema).max(25).optional(),
+  responseMapping: responseMappingSchema.optional(),
+  sideEffecting: z.boolean().optional(),
+  timeoutMs: z.number().int().min(100).max(30_000).nullish(),
+  sampleResponse: z.unknown().nullish(),
+  bodyTemplate: z.unknown().nullish(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+});
+
+/**
+ * A default base URL is checked here, not when a tenant uses it.
+ *
+ * The operator's suggestion is inherited by every tenant who picks the type, so a
+ * type pointing at the metadata service would hand the same SSRF to all of them.
+ * One review point, at the moment somebody is looking at the form.
+ */
+const checkDefaultBaseUrl = (url: string | null | undefined) => {
+  if (!url) return;
+  try {
+    assertUrlAllowed(url);
+  } catch (err) {
+    if (err instanceof EgressBlockedError) throw ApiError.badRequest(err.message);
+    throw err;
+  }
+};
+
+const templateSelect = {
+  id: true,
+  key: true,
+  name: true,
+  description: true,
+  method: true,
+  path: true,
+  inputs: true,
+  responseMapping: true,
+  sideEffecting: true,
+  timeoutMs: true,
+  sampleResponse: true,
+  bodyTemplate: true,
+  sortOrder: true,
+} as const;
+
+const connectorTypeOf = async (typeId: string) => {
+  const type = await prisma.connectorType.findUnique({
+    where: { id: typeId },
+    include: { _count: { select: { connectors: true } } },
+  });
+  if (!type) throw ApiError.notFound('Connector type not found');
+  return type;
+};
+
+export const listConnectorTypes = asyncHandler(async (_req: Request, res: Response) => {
+  const types = await prisma.connectorType.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+    include: {
+      _count: { select: { connectors: true } },
+      operationTemplates: {
+        select: templateSelect,
+        orderBy: [{ sortOrder: 'asc' }, { key: 'asc' }],
+      },
+    },
+  });
+
+  res.json({
+    success: true,
+    data: types.map(({ _count, ...type }) => ({
+      ...type,
+      // How many tenant connectors are on this type. The operator needs it before
+      // touching a row — deactivating one nobody uses is housekeeping, and
+      // deactivating one forty workspaces use is a decision.
+      connectors: _count.connectors,
+    })),
+  });
+});
+
+export const createConnectorType = asyncHandler(async (req: Request, res: Response) => {
+  const body = connectorTypeCreateSchema.parse(req.body);
+  checkDefaultBaseUrl(body.defaultBaseUrl);
+
+  const clash = await prisma.connectorType.findUnique({ where: { key: body.key } });
+  if (clash) throw ApiError.conflict(`A connector type already uses the key "${body.key}"`);
+
+  const type = await prisma.connectorType.create({
+    data: {
+      key: body.key,
+      label: body.label,
+      description: body.description ?? null,
+      kind: body.kind,
+      allowedAuthTypes: body.allowedAuthTypes,
+      defaultBaseUrl: body.defaultBaseUrl ?? null,
+      secretLabel: body.secretLabel ?? null,
+      usernameLabel: body.usernameLabel ?? null,
+      defaultHeader: body.defaultHeader ?? null,
+      docsUrl: body.docsUrl ?? null,
+      sortOrder: body.sortOrder,
+    },
+  });
+
+  await audit(req, {
+    action: 'connector_type.created',
+    targetType: 'ConnectorType',
+    targetId: type.id,
+    summary: `Added the connector type "${type.label}" (${type.key})`,
+    metadata: { ...body },
+  });
+
+  res.status(201).json({ success: true, data: type });
+});
+
+/**
+ * Edit a type.
+ *
+ * `key` is deliberately absent from the update schema. A tenant's connector stores
+ * `connectorTypeId`, and the seed and any future template library match on the key —
+ * renaming one would break that link with no error message anywhere, which is the
+ * same argument the business categories make.
+ */
+export const updateConnectorType = asyncHandler(async (req: Request, res: Response) => {
+  const id = requireId(req.params.typeId, 'connector type');
+  const body = connectorTypeUpdateSchema.parse(req.body);
+  const existing = await connectorTypeOf(id);
+  checkDefaultBaseUrl(body.defaultBaseUrl);
+
+  const type = await prisma.connectorType.update({
+    where: { id },
+    data: {
+      ...(body.label !== undefined ? { label: body.label } : {}),
+      ...(body.description !== undefined ? { description: body.description ?? null } : {}),
+      ...(body.kind !== undefined ? { kind: body.kind } : {}),
+      ...(body.allowedAuthTypes !== undefined ? { allowedAuthTypes: body.allowedAuthTypes } : {}),
+      ...(body.defaultBaseUrl !== undefined ? { defaultBaseUrl: body.defaultBaseUrl ?? null } : {}),
+      ...(body.secretLabel !== undefined ? { secretLabel: body.secretLabel ?? null } : {}),
+      ...(body.usernameLabel !== undefined ? { usernameLabel: body.usernameLabel ?? null } : {}),
+      ...(body.defaultHeader !== undefined ? { defaultHeader: body.defaultHeader ?? null } : {}),
+      ...(body.docsUrl !== undefined ? { docsUrl: body.docsUrl ?? null } : {}),
+      ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+      ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+    },
+  });
+
+  await audit(req, {
+    action: 'connector_type.updated',
+    targetType: 'ConnectorType',
+    targetId: type.id,
+    summary: body.isActive === false
+      ? `Hid the connector type "${type.label}" from new connections`
+      : `Updated the connector type "${type.label}"`,
+    metadata: { changes: body, connectors: existing._count.connectors },
+  });
+
+  res.json({ success: true, data: type });
+});
+
+/**
+ * Remove a type, but only one nothing is using.
+ *
+ * The foreign key is `SET NULL`, so a forced delete would not break the connectors on
+ * it — but it would erase which type they came from and make this very list lie about
+ * how many are in use. Hiding it from new connections achieves the actual intent.
+ */
+export const deleteConnectorType = asyncHandler(async (req: Request, res: Response) => {
+  const id = requireId(req.params.typeId, 'connector type');
+  const type = await connectorTypeOf(id);
+
+  if (type._count.connectors > 0) {
+    throw ApiError.conflict(
+      `${type._count.connectors} connector${type._count.connectors === 1 ? ' is' : 's are'} on `
+      + `"${type.label}". Hide it from new connections instead of deleting it.`,
+    );
+  }
+
+  await prisma.connectorType.delete({ where: { id } });
+
+  await audit(req, {
+    action: 'connector_type.deleted',
+    targetType: 'ConnectorType',
+    targetId: id,
+    summary: `Deleted the unused connector type "${type.label}"`,
+  });
+
+  res.json({ success: true });
+});
+
+// ── Operation templates ───────────────────────────────────────────────────────
+
+export const createConnectorTypeOperation = asyncHandler(async (req: Request, res: Response) => {
+  const typeId = requireId(req.params.typeId, 'connector type');
+  const body = templateCreateSchema.parse(req.body);
+  const type = await connectorTypeOf(typeId);
+
+  const count = await prisma.connectorTypeOperation.count({ where: { connectorTypeId: typeId } });
+  if (count >= OPERATION_TEMPLATE_LIMIT) {
+    throw ApiError.badRequest(
+      `A connector type holds at most ${OPERATION_TEMPLATE_LIMIT} operations. `
+      + 'Every one is copied into each tenant who connects.',
+    );
+  }
+
+  try {
+    const template = await prisma.connectorTypeOperation.create({
+      data: {
+        connectorTypeId: typeId,
+        key: body.key,
+        name: body.name,
+        description: body.description ?? null,
+        method: body.method,
+        path: body.path,
+        inputs: body.inputs as Prisma.InputJsonValue,
+        responseMapping: body.responseMapping as Prisma.InputJsonValue,
+        sideEffecting: body.sideEffecting,
+        timeoutMs: body.timeoutMs ?? null,
+        sampleResponse: (body.sampleResponse ?? null) as Prisma.InputJsonValue,
+        bodyTemplate: (body.bodyTemplate ?? null) as Prisma.InputJsonValue,
+        sortOrder: body.sortOrder,
+      },
+      select: templateSelect,
+    });
+
+    await audit(req, {
+      action: 'connector_type.operation_added',
+      targetType: 'ConnectorType',
+      targetId: typeId,
+      summary: `Added the operation "${body.key}" to the connector type "${type.label}"`,
+      metadata: { operationKey: body.key, method: body.method, sideEffecting: body.sideEffecting },
+    });
+
+    res.status(201).json({ success: true, data: template });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw ApiError.conflict(`"${type.label}" already has an operation keyed "${body.key}"`);
+    }
+    throw err;
+  }
+});
+
+/** Scoped through the type, so an operation id from another type cannot be edited. */
+const templateOf = async (typeId: string, operationId: string) => {
+  const template = await prisma.connectorTypeOperation.findFirst({
+    where: { id: operationId, connectorTypeId: typeId },
+  });
+  if (!template) throw ApiError.notFound('Operation not found');
+  return template;
+};
+
+export const updateConnectorTypeOperation = asyncHandler(async (req: Request, res: Response) => {
+  const typeId = requireId(req.params.typeId, 'connector type');
+  const operationId = requireId(req.params.operationId, 'operation');
+  const body = templateUpdateSchema.parse(req.body);
+  const type = await connectorTypeOf(typeId);
+  const existing = await templateOf(typeId, operationId);
+
+  const template = await prisma.connectorTypeOperation.update({
+    where: { id: existing.id },
+    data: {
+      ...(body.key !== undefined ? { key: body.key } : {}),
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.description !== undefined ? { description: body.description ?? null } : {}),
+      ...(body.method !== undefined ? { method: body.method } : {}),
+      ...(body.path !== undefined ? { path: body.path } : {}),
+      ...(body.inputs !== undefined ? { inputs: body.inputs as Prisma.InputJsonValue } : {}),
+      ...(body.responseMapping !== undefined
+        ? { responseMapping: body.responseMapping as Prisma.InputJsonValue }
+        : {}),
+      ...(body.sideEffecting !== undefined ? { sideEffecting: body.sideEffecting } : {}),
+      ...(body.timeoutMs !== undefined ? { timeoutMs: body.timeoutMs ?? null } : {}),
+      ...(body.sampleResponse !== undefined
+        ? { sampleResponse: (body.sampleResponse ?? null) as Prisma.InputJsonValue }
+        : {}),
+      ...(body.bodyTemplate !== undefined
+        ? { bodyTemplate: (body.bodyTemplate ?? null) as Prisma.InputJsonValue }
+        : {}),
+      ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+    },
+    select: templateSelect,
+  });
+
+  await audit(req, {
+    action: 'connector_type.operation_updated',
+    targetType: 'ConnectorType',
+    targetId: typeId,
+    // Says plainly that this does not reach anyone already connected — the clone is a
+    // one-time snapshot, so an edit here only changes what future tenants receive.
+    summary: `Updated the operation "${template.key}" on "${type.label}" `
+      + '(applies to new connections only)',
+    metadata: { operationId, changes: body, connectors: type._count.connectors },
+  });
+
+  res.json({ success: true, data: template });
+});
+
+export const deleteConnectorTypeOperation = asyncHandler(async (req: Request, res: Response) => {
+  const typeId = requireId(req.params.typeId, 'connector type');
+  const operationId = requireId(req.params.operationId, 'operation');
+  const type = await connectorTypeOf(typeId);
+  const template = await templateOf(typeId, operationId);
+
+  await prisma.connectorTypeOperation.delete({ where: { id: template.id } });
+
+  await audit(req, {
+    action: 'connector_type.operation_deleted',
+    targetType: 'ConnectorType',
+    targetId: typeId,
+    summary: `Removed the operation "${template.key}" from "${type.label}" `
+      + '(tenants already connected keep their copy)',
+    metadata: { operationKey: template.key, connectors: type._count.connectors },
   });
 
   res.json({ success: true });

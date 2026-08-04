@@ -256,6 +256,40 @@ export interface ConnectorOperation {
   sideEffecting: boolean;
   timeoutMs?: number | null;
   sampleResponse?: unknown;
+  /**
+   * The request body to send, with `{placeholders}` filled from declared inputs.
+   *
+   * Null means the older behaviour: a flat object built from whichever inputs are declared
+   * `in: 'body'`, which cannot express a nested payload or a constant field.
+   */
+  bodyTemplate?: unknown;
+}
+
+export type ConnectorKind = 'HTTP' | 'MOCK' | 'GOOGLE_SHEETS' | 'EMAIL';
+export type ConnectorAuthType = 'NONE' | 'API_KEY_HEADER' | 'BEARER' | 'BASIC';
+
+/**
+ * One entry in the operator's catalog of connector types.
+ *
+ * A type says how to authenticate, never with what — the credential is the tenant's and is
+ * supplied when they create the connector. That is why the whole row is safe to serve here.
+ */
+export interface ConnectorType {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  kind: ConnectorKind;
+  /** Which auth mechanisms this type accepts. Empty means offer them all. */
+  allowedAuthTypes: ConnectorAuthType[];
+  /** Prefilled and editable — the base URL stays the tenant's to set. */
+  defaultBaseUrl?: string | null;
+  secretLabel?: string | null;
+  usernameLabel?: string | null;
+  defaultHeader?: string | null;
+  docsUrl?: string | null;
+  /** Cloned into the tenant's connector on create, as a one-time snapshot. */
+  operationTemplates: Array<{ key: string; name: string; method: string; sideEffecting: boolean }>;
 }
 
 export interface Connector {
@@ -263,9 +297,11 @@ export interface Connector {
   key: string;
   name: string;
   description?: string | null;
-  kind: 'HTTP' | 'MOCK' | 'GOOGLE_SHEETS' | 'EMAIL';
+  kind: ConnectorKind;
+  /** Which catalog entry this came from, or null for one registered by hand. */
+  connectorTypeId?: string | null;
   baseUrl?: string | null;
-  authType: 'NONE' | 'API_KEY_HEADER' | 'BEARER' | 'BASIC';
+  authType: ConnectorAuthType;
   authConfig: { header?: string; username?: string };
   status: 'ACTIVE' | 'DISABLED';
   operations: ConnectorOperation[];
@@ -323,6 +359,8 @@ export const engine = {
   connectors: {
     list: () => api.get<{ data: Connector[]; meta: ConnectorListMeta }>('/connectors')
       .then((r) => ({ connectors: r.data.data, meta: r.data.meta })),
+    /** The operator's catalog, active entries only. Ordered for the picker. */
+    types: () => unwrap<ConnectorType[]>(api.get('/connectors/types')),
     get: (connectorId: string) => unwrap<Connector>(api.get(`/connectors/${connectorId}`)),
     create: (body: Record<string, unknown>) => unwrap<Connector>(api.post('/connectors', body)),
     update: (connectorId: string, body: Record<string, unknown>) =>

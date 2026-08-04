@@ -26,19 +26,35 @@ import { walk, type WalkDeps, type WalkOutcome } from './walker.js';
 // forever — after `maxRetries` the run hands off to a human rather than looping.
 
 export interface ResumeResult {
-  outcome: 'CONTINUED' | 'REPROMPTED' | 'HANDED_OFF' | 'NOT_WAITING';
+  outcome: 'CONTINUED' | 'REPROMPTED' | 'HANDED_OFF' | 'NOT_WAITING' | 'SWITCHED_INTENT';
   walk?: WalkOutcome;
   validationError?: string;
 }
 
+/**
+ * What the caller decides when a reply does not fit the waiting node.
+ *
+ * `SWITCHED` means the caller recognised a different intent, abandoned this run and handled
+ * the message itself — so there is nothing left to re-prompt.
+ */
+export type RejectedDecision = 'REPROMPT' | 'SWITCHED';
+
 export const resumeWithUserInput = async ({
-  instance, deps, answer, replyId,
+  instance, deps, answer, replyId, onRejected,
 }: {
   instance: WorkflowInstance;
   deps: WalkDeps;
   answer: string;
   /** Set when the customer tapped a list row or reply button. */
   replyId?: string | null;
+  /**
+   * Consulted when the reply does not fit the waiting node, before re-prompting.
+   *
+   * The hook exists so intent can be reconsidered **only on a rejection**. Asking the router
+   * about every message would classify each valid answer too — one model call per turn of
+   * every conversation, to learn something the node already knew.
+   */
+  onRejected?: (reason: string) => Promise<RejectedDecision>;
 }): Promise<ResumeResult> => {
   const logger = withContext({
     tenantId: instance.tenantId,
@@ -94,6 +110,20 @@ export const resumeWithUserInput = async ({
   });
 
   if (!validated.ok) {
+    // **A customer changing the subject is not a customer failing to answer.**
+    //
+    // Before this, "can I place an order" in the middle of a class list was treated as a bad
+    // answer: the same prompt three times, then a handoff. The caller gets first refusal on
+    // reinterpreting it, and if it does, nothing is re-prompted and no retry is counted —
+    // this run is already gone.
+    if (onRejected) {
+      const decision = await onRejected(validated.reason);
+      if (decision === 'SWITCHED') {
+        logger.info('Reply reinterpreted as a different intent', { reason: validated.reason });
+        return { outcome: 'SWITCHED_INTENT', validationError: validated.reason };
+      }
+    }
+
     const attempts = instance.retryCount + 1;
 
     if (attempts >= config.maxRetries) {

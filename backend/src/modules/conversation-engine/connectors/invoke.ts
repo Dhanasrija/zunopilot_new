@@ -109,6 +109,14 @@ const placeValues = (
   query: Record<string, string>;
   body: Record<string, unknown>;
   headers: Record<string, string>;
+  /**
+   * Every declared input's coerced value, whatever its `in`.
+   *
+   * A body template is the body, so `in` stops meaning anything for the fields inside it —
+   * `{order_id}` should resolve whether the operation declared that input as a path segment
+   * or a body field. This is the map it resolves against.
+   */
+  values: Record<string, unknown>;
   missing: string[];
 } => {
   const out = {
@@ -116,6 +124,7 @@ const placeValues = (
     query: {} as Record<string, string>,
     body: {} as Record<string, unknown>,
     headers: {} as Record<string, string>,
+    values: {} as Record<string, unknown>,
     missing: [] as string[],
   };
 
@@ -132,6 +141,8 @@ const placeValues = (
       : declared.type === 'boolean' ? (String(raw) === 'true' || raw === true)
         : String(raw);
 
+    out.values[declared.key] = coerced;
+
     switch (declared.in) {
       case 'path': out.path[declared.key] = encodeURIComponent(String(coerced)); break;
       case 'body': out.body[declared.key] = coerced; break;
@@ -141,6 +152,87 @@ const placeValues = (
   }
 
   return out;
+};
+
+/** `{input_key}` on its own, so the whole value is one placeholder rather than text around one. */
+const WHOLE_PLACEHOLDER = /^\{([a-zA-Z0-9_]+)\}$/;
+const ANY_PLACEHOLDER = /\{([a-zA-Z0-9_]+)\}/g;
+
+/** Every placeholder a template names, for cross-checking against declared inputs. */
+export const placeholdersIn = (template: unknown): string[] => {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (typeof node === 'string') {
+      for (const match of node.matchAll(ANY_PLACEHOLDER)) found.add(match[1]!);
+      return;
+    }
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (node && typeof node === 'object') { Object.values(node).forEach(walk); }
+  };
+  walk(template);
+  return [...found];
+};
+
+/**
+ * Fill a stored body template with the operation's inputs.
+ *
+ * Two substitutions, and the difference matters:
+ *
+ *   • A string that is **exactly** one placeholder is replaced by the typed value, so
+ *     `{"amount": "{amount}"}` on a number input sends `"amount": 500` rather than
+ *     `"amount": "500"`. An API that validates types rejects the quoted form, and writing
+ *     an unquoted `{amount}` is not valid JSON, so this is the only way to express it.
+ *   • A placeholder inside longer text is interpolated as a string —
+ *     `"Refund for {order_id}"`.
+ *
+ * Unfilled placeholders are an error rather than a literal, exactly as `buildPath` treats
+ * the path. A body arriving at someone's API with `{amount}` in it is worse than a refusal.
+ */
+export const renderBody = (
+  template: unknown,
+  values: Record<string, unknown>,
+): unknown => {
+  const missing = new Set<string>();
+
+  const render = (node: unknown): unknown => {
+    if (typeof node === 'string') {
+      const whole = WHOLE_PLACEHOLDER.exec(node);
+      if (whole) {
+        const value = values[whole[1]!];
+        if (value === undefined) { missing.add(whole[1]!); return null; }
+        return value;
+      }
+      return node.replace(ANY_PLACEHOLDER, (_, name: string) => {
+        const value = values[name];
+        if (value === undefined) { missing.add(name); return ''; }
+        return String(value);
+      });
+    }
+
+    if (Array.isArray(node)) return node.map(render);
+
+    if (node && typeof node === 'object') {
+      // A null-prototype object, deliberately. Assigning a key called `__proto__` onto a
+      // plain `{}` hits the setter and creates no own property, so the field would be
+      // silently dropped from the body — an API that genuinely has one would fail with no
+      // explanation. There is no prototype to pollute here either way.
+      const out = Object.create(null) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(node)) out[key] = render(value);
+      return out;
+    }
+
+    return node;
+  };
+
+  const rendered = render(template);
+
+  if (missing.size) {
+    throw new ConnectorError(
+      `The request body needs ${[...missing].join(', ')}, which was not supplied`,
+      'MISSING_INPUT',
+    );
+  }
+  return rendered;
 };
 
 /** Fill `{placeholders}` in an operation path. Unfilled ones are an error, not a literal. */
@@ -257,6 +349,12 @@ export const invokeOperation = async (args: InvokeArgs): Promise<InvokeResult> =
       for (const [name, value] of Object.entries(placed.query)) url.searchParams.set(name, value);
 
       const sendsBody = ['POST', 'PUT', 'PATCH'].includes(operation.method.toUpperCase());
+      // The template is the body when there is one, and the flat object built from
+      // `in: "body"` inputs when there is not. Keeping the second path byte-for-byte is what
+      // leaves every operation that predates templates behaving exactly as it did.
+      const payload = operation.bodyTemplate == null
+        ? placed.body
+        : renderBody(operation.bodyTemplate, placed.values);
       const response = await egressRequest({
         method: operation.method,
         url: url.toString(),
@@ -266,7 +364,7 @@ export const invokeOperation = async (args: InvokeArgs): Promise<InvokeResult> =
           ...placed.headers,
           ...authHeaders(connector),
         },
-        body: sendsBody ? JSON.stringify(placed.body) : null,
+        body: sendsBody ? JSON.stringify(payload) : null,
         ...(operation.timeoutMs ? { timeoutMs: operation.timeoutMs } : {}),
       });
       result = { status: response.status, body: response.body };

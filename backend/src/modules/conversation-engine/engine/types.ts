@@ -84,7 +84,19 @@ export interface MockIntegration {
 /** The read-only view a node's templates can address. */
 export interface TemplateScope {
   tenant: { name: string; category: string };
-  customer: { name: string; waId: string; phone: string };
+  customer: {
+    name: string;
+    waId: string;
+    phone: string;
+    /**
+     * The waId without its country code — `7702000350` for `917702000350`.
+     *
+     * For an API that keys on the national number alone. Empty when the code cannot be
+     * determined, which makes a required input fail loudly rather than sending a number
+     * that quietly matches nobody. See `local-number.ts`.
+     */
+    localNumber: string;
+  };
   conversation: { id: string; status: string };
   message: { text: string; type: string };
   vars: Record<string, unknown>;

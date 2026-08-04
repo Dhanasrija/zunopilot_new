@@ -20,6 +20,31 @@ import {
   AlertTriangle, KeyRound, Loader2, Pencil, Plug, PlugZap, Plus, Trash2,
 } from 'lucide-react';
 
+/**
+ * Inputs derived from the `{placeholders}` in a path.
+ *
+ * Not a guess: a placeholder in a path can only ever be filled by an input declared
+ * `in: 'path'`, so there is exactly one correct declaration and typing it by hand would be
+ * busywork. Without this the dialog would happily create an operation whose path names an
+ * input that does not exist — refused on its first real call with "Missing required input".
+ *
+ * The label is title-cased from the key as a starting point; the operation editor is where
+ * anyone who cares refines it.
+ */
+const pathInputsFor = (path: string) => [...new Set(
+  [...path.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]),
+)].map((key) => ({
+  key,
+  label: key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()),
+  type: 'string' as const,
+  required: true,
+  in: 'path' as const,
+}));
+
+/** Methods whose body actually goes on the wire. Mirrors `SENDS_BODY` on the server. */
+const SENDS_BODY = ['POST', 'PUT', 'PATCH'];
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
 // Connectors — registered ways to reach an outside system.
 //
 // The shape of this page follows the security model rather than the data model.
@@ -280,30 +305,136 @@ function ConnectorCard({ connector }: { connector: Connector }) {
 export default function Connectors() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [typeId, setTypeId] = useState('');
   const [draft, setDraft] = useState({
     key: '', name: '', description: '', kind: 'HTTP', baseUrl: '',
     authType: 'NONE', header: '', username: '', secret: '',
   });
+  /**
+   * An optional first operation, so a custom HTTP connector arrives with something callable
+   * instead of an empty card and a second trip to the operation editor.
+   *
+   * The method lives on the operation, not the connector — one connector has many operations
+   * with different methods, which is why this is a nested thing rather than a field beside
+   * the base URL.
+   */
+  const [op, setOp] = useState({ key: '', name: '', method: 'GET', path: '/', payload: '' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['engine', 'connectors'],
     queryFn: () => engine.connectors.list(),
   });
 
+  /**
+   * The operator's catalog. This is what turned "invent a kind" into "pick a system": the
+   * list used to be two options hardcoded in this file, so supporting a new one meant a
+   * deploy.
+   */
+  const types = useQuery({
+    queryKey: ['engine', 'connector-types'],
+    queryFn: () => engine.connectors.types(),
+  });
+
+  const chosen = types.data?.find((t) => t.id === typeId) ?? null;
+
+  /**
+   * What the chosen type accepts. Empty means it has no opinion — a custom HTTP API
+   * authenticates however its owner decided, so all four stay on offer.
+   */
+  const authOptions = chosen && chosen.allowedAuthTypes.length > 0
+    ? chosen.allowedAuthTypes
+    : (Object.keys(AUTH_LABELS) as Array<keyof typeof AUTH_LABELS>);
+
+  /** Adopt the type's defaults. The base URL and credential stay the tenant's to change. */
+  const pickType = (id: string) => {
+    const type = types.data?.find((t) => t.id === id);
+    setTypeId(id);
+    if (!type) return;
+    const allowed = type.allowedAuthTypes;
+    setDraft((d) => ({
+      ...d,
+      kind: type.kind,
+      baseUrl: type.defaultBaseUrl ?? '',
+      header: type.defaultHeader ?? d.header,
+      // Keep the current choice when the type still permits it, so re-picking a type does
+      // not silently discard a credential the person has already typed.
+      authType: allowed.length === 0 || allowed.includes(d.authType as never)
+        ? d.authType
+        : allowed[0],
+    }));
+  };
+
+  const closeDialog = () => {
+    setCreating(false);
+    setTypeId('');
+    setDraft({
+      key: '', name: '', description: '', kind: 'HTTP', baseUrl: '',
+      authType: 'NONE', header: '', username: '', secret: '',
+    });
+    setOp({ key: '', name: '', method: 'GET', path: '/', payload: '' });
+  };
+
+  /** Parsed so a malformed payload is caught here rather than by the API. */
+  const opPayload = (() => {
+    if (!op.payload.trim()) return { ok: true as const, value: undefined };
+    try {
+      return { ok: true as const, value: JSON.parse(op.payload) as unknown };
+    } catch (err) {
+      return { ok: false as const, message: err instanceof Error ? err.message : 'Invalid JSON' };
+    }
+  })();
+
+  const opDerived = pathInputsFor(op.path);
+  /**
+   * A path segment that is a bare run of digits — a phone number, an id — pasted straight from
+   * a working request. It saves cleanly and then only ever fetches that one record, which is
+   * the kind of mistake that is obvious in hindsight and invisible at the time.
+   */
+  const opLooksHardcoded = /\/\d{4,}(\/|$)/.test(op.path);
+
+  const opStarted = !!(op.key.trim() || op.name.trim() || op.payload.trim() || op.path !== '/');
+  const opReady = !!(op.key.trim() && op.name.trim());
+  /** A half-filled first operation blocks the save; an untouched one does not. */
+  const opBlocking = opStarted && (!opReady || !opPayload.ok);
+
   const create = useMutation({
-    mutationFn: () => engine.connectors.create({
-      key: draft.key,
-      name: draft.name,
-      description: draft.description || null,
-      kind: draft.kind,
-      baseUrl: draft.kind === 'HTTP' ? draft.baseUrl : null,
-      authType: draft.authType,
-      authConfig: { ...(draft.header ? { header: draft.header } : {}), ...(draft.username ? { username: draft.username } : {}) },
-      ...(draft.secret ? { secret: draft.secret } : {}),
-    }),
-    onSuccess: () => {
-      toast.success('Connector created');
-      setCreating(false);
+    mutationFn: async () => {
+      const connector = await engine.connectors.create({
+        key: draft.key,
+        name: draft.name,
+        description: draft.description || null,
+        ...(typeId ? { connectorTypeId: typeId } : {}),
+        kind: draft.kind,
+        baseUrl: draft.kind === 'HTTP' ? draft.baseUrl : null,
+        authType: draft.authType,
+        authConfig: { ...(draft.header ? { header: draft.header } : {}), ...(draft.username ? { username: draft.username } : {}) },
+        ...(draft.secret ? { secret: draft.secret } : {}),
+      });
+
+      // A second call rather than a nested create, because the operation endpoint is where
+      // the payload cross-check lives — a placeholder naming an undeclared input is refused
+      // there, and duplicating that rule here would be a second thing to keep correct.
+      if (opReady) {
+        await engine.connectors.createOperation(connector.id, {
+          key: op.key.trim(),
+          name: op.name.trim(),
+          method: op.method,
+          path: op.path || '/',
+          inputs: pathInputsFor(op.path),
+          ...(opPayload.value !== undefined ? { bodyTemplate: opPayload.value } : {}),
+        });
+        return engine.connectors.get(connector.id);
+      }
+      return connector;
+    },
+    onSuccess: (connector) => {
+      // Says how many operations arrived with it. The clone is the payoff of picking a
+      // type, and silently landing four operations would leave someone wondering.
+      const cloned = connector.operations?.length ?? 0;
+      toast.success(cloned > 0
+        ? `Connector created with ${cloned} operation${cloned === 1 ? '' : 's'}`
+        : 'Connector created');
+      closeDialog();
       qc.invalidateQueries({ queryKey: ['engine', 'connectors'] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -363,7 +494,7 @@ export default function Connectors() {
         ))}
       </div>
 
-      <Dialog open={creating} onOpenChange={setCreating}>
+      <Dialog open={creating} onOpenChange={(open) => (open ? setCreating(true) : closeDialog())}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New connector</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -398,14 +529,43 @@ export default function Connectors() {
             </div>
 
             <div className="space-y-1">
-              <Label>Kind</Label>
-              <Select value={draft.kind} onValueChange={(v) => setDraft((d) => ({ ...d, kind: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label>System</Label>
+              <Select value={typeId} onValueChange={pickType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose what you are connecting to…" />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="HTTP">HTTP API</SelectItem>
-                  <SelectItem value="MOCK">Mock (fixtures, no network)</SelectItem>
+                  {(types.data ?? []).map((type) => (
+                    <SelectItem key={type.id} value={type.id}>{type.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {chosen?.description && (
+                <p className="text-caption text-muted-foreground">{chosen.description}</p>
+              )}
+              {chosen && chosen.operationTemplates.length > 0 && (
+                <p className="text-caption text-muted-foreground">
+                  Comes with {chosen.operationTemplates.length} ready operation
+                  {chosen.operationTemplates.length === 1 ? '' : 's'}:{' '}
+                  {chosen.operationTemplates.map((o) => o.key).join(', ')}. They become yours to
+                  edit once created.
+                </p>
+              )}
+              {chosen?.docsUrl && (
+                <a
+                  className="inline-flex items-center gap-1 text-caption text-accent-600 underline"
+                  href={chosen.docsUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Where to find your credential
+                </a>
+              )}
+              {types.data?.length === 0 && (
+                <p className="text-caption text-muted-foreground">
+                  No connector types are available yet. An administrator adds them.
+                </p>
+              )}
             </div>
 
             {draft.kind === 'HTTP' && (
@@ -428,11 +588,16 @@ export default function Connectors() {
               <Select value={draft.authType} onValueChange={(v) => setDraft((d) => ({ ...d, authType: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(AUTH_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  {authOptions.map((value) => (
+                    <SelectItem key={value} value={value}>{AUTH_LABELS[value]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {chosen && chosen.allowedAuthTypes.length === 1 && (
+                <p className="text-caption text-muted-foreground">
+                  {chosen.label} only authenticates this way.
+                </p>
+              )}
             </div>
 
             {draft.authType === 'API_KEY_HEADER' && (
@@ -449,14 +614,17 @@ export default function Connectors() {
 
             {draft.authType === 'BASIC' && (
               <div className="space-y-1">
-                <Label>Username</Label>
+                {/* The type's own words where it has them. Razorpay's basic auth is a
+                    "Key ID" and a "Key Secret" — the same mechanism, named the way the
+                    customer's own dashboard names it. */}
+                <Label>{chosen?.usernameLabel || 'Username'}</Label>
                 <Input value={draft.username} onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))} />
               </div>
             )}
 
             {needsKey && (
               <div className="space-y-1">
-                <Label>Credential</Label>
+                <Label>{chosen?.secretLabel || 'Credential'}</Label>
                 <Input
                   type="password"
                   autoComplete="off"
@@ -469,12 +637,122 @@ export default function Connectors() {
                 </p>
               </div>
             )}
+
+            {/* An optional first operation.
+                Hidden when the chosen type already brings its own, since those are cloned and
+                this would just be a second, competing way to end up with one. */}
+            {typeId && chosen?.operationTemplates.length === 0 && (
+              <div className="space-y-3 rounded-md border border-ink-300 bg-surface-0 p-3">
+                <div>
+                  <p className="text-sm font-medium text-ink-900">First operation (optional)</p>
+                  <p className="text-caption text-muted-foreground">
+                    One thing this connector can do. A workflow node names the connector and the
+                    operation — never a URL. You can add more, and refine this one, afterwards.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Operation key</Label>
+                    <Input
+                      className="font-mono text-caption"
+                      placeholder="fetch_payment"
+                      value={op.key}
+                      onChange={(e) => setOp((o) => ({
+                        ...o, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Operation name</Label>
+                    <Input
+                      placeholder="Fetch a payment"
+                      value={op.name}
+                      onChange={(e) => setOp((o) => ({ ...o, name: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[110px_1fr] gap-3">
+                  <div className="space-y-1">
+                    <Label>Type</Label>
+                    <Select value={op.method} onValueChange={(v) => setOp((o) => ({ ...o, method: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Path</Label>
+                    <Input
+                      className="font-mono text-caption"
+                      placeholder="/payments/{payment_id}"
+                      value={op.path}
+                      onChange={(e) => setOp((o) => ({ ...o, path: e.target.value }))}
+                    />
+                    {opDerived.length > 0 ? (
+                      <p className="text-caption text-muted-foreground">
+                        Appended to the base URL. Declares {opDerived.length === 1 ? 'an input' : 'inputs'}
+                        {' '}for {opDerived.map((i) => i.key).join(', ')}, filled per call.
+                      </p>
+                    ) : (
+                      <p className="text-caption text-muted-foreground">
+                        Appended to the base URL. Put a value in{' '}
+                        <code>{'{braces}'}</code> to have it supplied per call —{' '}
+                        <code>/parents/mobile/{'{mobile_number}'}</code>.
+                      </p>
+                    )}
+                    {opLooksHardcoded && (
+                      <p className="text-caption text-ink-900">
+                        This path ends in a literal value, so the operation would only ever
+                        fetch that one record. Replace it with{' '}
+                        <code>{'{mobile_number}'}</code> to pass it in per call.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Only for methods whose body is actually sent. On a GET a payload would be
+                    dropped, so offering the box would invite writing one that does nothing. */}
+                {SENDS_BODY.includes(op.method) && (
+                  <div className="space-y-1">
+                    <Label>Sample payload</Label>
+                    <Textarea
+                      rows={6}
+                      className="font-mono text-caption"
+                      placeholder={'{\n  "amount": 500,\n  "currency": "INR"\n}'}
+                      value={op.payload}
+                      onChange={(e) => setOp((o) => ({ ...o, payload: e.target.value }))}
+                    />
+                    {!opPayload.ok ? (
+                      <p className="text-caption text-destructive">
+                        Not valid JSON: {opPayload.message}
+                      </p>
+                    ) : (
+                      <p className="text-caption text-muted-foreground">
+                        The body this {op.method} sends. Add <code>{'{braces}'}</code> later in the
+                        operation editor to fill fields from a workflow&apos;s values — a constant
+                        payload like this one is sent exactly as written.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {opStarted && !opReady && (
+                  <p className="text-caption text-muted-foreground">
+                    An operation needs both a key and a name. Clear them both to skip this step.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreating(false)}>Cancel</Button>
+            <Button variant="outline" onClick={closeDialog}>Cancel</Button>
             <Button
               className={cn(create.isPending && 'opacity-70')}
-              disabled={!draft.key || !draft.name || (needsKey && !draft.secret) || create.isPending}
+              disabled={!typeId || !draft.key || !draft.name || (needsKey && !draft.secret)
+                || opBlocking || create.isPending}
               onClick={() => create.mutate()}
             >
               Create connector

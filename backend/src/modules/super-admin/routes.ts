@@ -58,6 +58,17 @@ superAdminRoutes.post('/tenants/:tenantId/impersonation', sa.requestImpersonatio
 superAdminRoutes.post('/tenants/:tenantId/impersonation/:grantId/token', sa.startImpersonation);
 superAdminRoutes.post('/tenants/:tenantId/impersonation/:grantId/end', sa.endImpersonation);
 
+// Connector types — the catalog of outside systems a workspace can connect to.
+// A type says how to authenticate, never with what: the tenant supplies the
+// credential when they create the connector, so nothing here is a secret.
+superAdminRoutes.get('/connector-types', sa.listConnectorTypes);
+superAdminRoutes.post('/connector-types', sa.createConnectorType);
+superAdminRoutes.patch('/connector-types/:typeId', sa.updateConnectorType);
+superAdminRoutes.delete('/connector-types/:typeId', sa.deleteConnectorType);
+superAdminRoutes.post('/connector-types/:typeId/operations', sa.createConnectorTypeOperation);
+superAdminRoutes.patch('/connector-types/:typeId/operations/:operationId', sa.updateConnectorTypeOperation);
+superAdminRoutes.delete('/connector-types/:typeId/operations/:operationId', sa.deleteConnectorTypeOperation);
+
 // Business categories — what a workspace can pick on the profile page.
 superAdminRoutes.get('/business-categories', sa.listBusinessCategories);
 superAdminRoutes.post('/business-categories', sa.createBusinessCategory);

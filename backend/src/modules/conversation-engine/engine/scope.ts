@@ -1,5 +1,6 @@
 import type { Conversation, Customer, Tenant } from '@prisma/client';
 import type { TemplateScope } from './types.js';
+import { localNumberOf } from './local-number.js';
 
 // Template interpolation for the conversation engine.
 //
@@ -39,6 +40,9 @@ export const buildScope = ({
       name: contact.name ?? '',
       waId: contact.waId,
       phone: contact.phone ?? '',
+      // Derived, not stored: `phone` is set to the same full international number on the
+      // inbound path (`phone: message.from`), so it is not the local form either.
+      localNumber: localNumberOf(contact.waId),
     },
     conversation: {
       id: conversation.id,

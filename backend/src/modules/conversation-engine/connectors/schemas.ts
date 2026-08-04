@@ -58,6 +58,16 @@ export const connectorCreateSchema = z.object({
   key: connectorKeySchema,
   name: z.string().min(1).max(120),
   description: z.string().max(500).nullish(),
+  /**
+   * The catalog entry this is being created from, when the tenant picked one.
+   *
+   * Optional on purpose. Every caller that predates the catalog — including the test
+   * suite — still creates a connector by naming a `kind` directly, and that path is
+   * unchanged. When this is present the type narrows what may be chosen and its
+   * operation templates are cloned; the tenant still supplies the base URL and the
+   * credential either way.
+   */
+  connectorTypeId: z.string().uuid().optional(),
   kind: z.enum(CONNECTOR_KINDS).default('HTTP'),
   baseUrl: z.string().max(500).nullish(),
   authType: z.enum(CONNECTOR_AUTH_TYPES).default('NONE'),
@@ -70,7 +80,36 @@ export const connectorCreateSchema = z.object({
   secret: z.string().min(1).max(4000).nullish(),
 });
 
-export const connectorUpdateSchema = connectorCreateSchema.partial().extend({
+/**
+ * A partial update, with **no defaults**.
+ *
+ * This used to be `connectorCreateSchema.partial()`, and that was a real bug rather than a
+ * tidiness problem: **Zod's `.partial()` does not suppress `.default()`.** An absent key
+ * still comes back as its creation default, so every `body.x !== undefined` guard in the
+ * handler was always true and a request that only changed the name also wrote
+ * `kind: 'HTTP'`, `authType: 'NONE'` and `authConfig: {}`.
+ *
+ * What that did in practice: renaming a bearer-auth connector stopped its credential being
+ * sent — every call then failed at the far end while the encrypted secret sat there looking
+ * configured — and renaming a MOCK connector was refused outright, because `checkBaseUrl`
+ * was handed the reset `HTTP` kind and a fixture connector has no base URL.
+ *
+ * Hence the fields are restated here as plainly optional. It is more typing than `.partial()`
+ * and it is the only version that means what it says.
+ */
+export const connectorUpdateSchema = z.object({
+  key: connectorKeySchema.optional(),
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).nullish(),
+  connectorTypeId: z.string().uuid().optional(),
+  kind: z.enum(CONNECTOR_KINDS).optional(),
+  baseUrl: z.string().max(500).nullish(),
+  authType: z.enum(CONNECTOR_AUTH_TYPES).optional(),
+  authConfig: z.object({
+    header: z.string().max(120).optional(),
+    username: z.string().max(200).optional(),
+  }).optional(),
+  secret: z.string().min(1).max(4000).nullish(),
   status: z.enum(['ACTIVE', 'DISABLED']).optional(),
 });
 
@@ -85,9 +124,44 @@ export const operationCreateSchema = z.object({
   sideEffecting: z.boolean().default(false),
   timeoutMs: z.number().int().min(100).max(30_000).nullish(),
   sampleResponse: z.unknown().nullish(),
+  /**
+   * The request body to send, with `{placeholders}` filled from declared inputs.
+   *
+   * Stored parsed rather than as a string, so a payload that is not valid JSON cannot be
+   * saved at all. Null keeps the older behaviour: a flat object assembled from whichever
+   * inputs are declared `in: "body"`.
+   */
+  bodyTemplate: z.unknown().nullish(),
 });
 
-export const operationUpdateSchema = operationCreateSchema.partial();
+/**
+ * A partial update, with **no defaults** — see the note on `connectorUpdateSchema`.
+ *
+ * This was `operationCreateSchema.partial()`, which was the most destructive instance of
+ * that bug: because `.partial()` does not suppress `.default()`, a request that only changed
+ * the name also wrote `method: 'GET'`, `path: '/'`, **`inputs: []`** and
+ * `sideEffecting: false`. So renaming an operation wiped its entire declared parameter list,
+ * reset its path, and cleared the flag that forces a destructive operation to confirm first.
+ *
+ * The editor in the browser always sends a full payload, which is why nobody had hit it —
+ * but the route is open to any `connectors:author` caller.
+ */
+export const operationUpdateSchema = z.object({
+  key: connectorKeySchema.optional(),
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).nullish(),
+  method: z.enum(HTTP_METHODS).optional(),
+  path: z.string().min(1).max(500).optional(),
+  inputs: z.array(operationInputSchema).max(25).optional(),
+  responseMapping: responseMappingSchema.optional(),
+  sideEffecting: z.boolean().optional(),
+  timeoutMs: z.number().int().min(100).max(30_000).nullish(),
+  sampleResponse: z.unknown().nullish(),
+  bodyTemplate: z.unknown().nullish(),
+});
+
+/** Methods whose body the call path actually sends. Anything else drops it. */
+export const SENDS_BODY: readonly string[] = ['POST', 'PUT', 'PATCH'];
 
 export type ConnectorCreate = z.infer<typeof connectorCreateSchema>;
 export type OperationCreate = z.infer<typeof operationCreateSchema>;

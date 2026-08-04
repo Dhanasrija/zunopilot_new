@@ -171,9 +171,21 @@ conversationEngineRoutes.get('/:conversationId/routing-decisions', routing.listR
 export const connectorRoutes = Router();
 connectorRoutes.use(requireAuth);
 
-connectorRoutes.get('/', connectors.listConnectors);
+// The operator's catalog of connector types, for the "New connector" picker. Ahead of
+// `/:connectorId`, or Express reads "types" as a connector id and 404s it.
+const connectorReader = requirePermission('connectors:read');
+connectorRoutes.get('/types', connectorReader, connectors.listConnectorTypes);
+
+// `connectors:read` on the reads.
+//
+// It was in the permission vocabulary from the start but never passed to
+// `requirePermission`, so these two were open to any authenticated user of the workspace —
+// including a custom role built specifically to keep someone away from the integrations.
+// A connector row carries a base URL and a credential hint, which is enough to tell you
+// which systems a business is wired into.
+connectorRoutes.get('/', connectorReader, connectors.listConnectors);
 connectorRoutes.post('/', connectorAuthor, connectors.createConnector);
-connectorRoutes.get('/:connectorId', connectors.getConnector);
+connectorRoutes.get('/:connectorId', connectorReader, connectors.getConnector);
 connectorRoutes.patch('/:connectorId', connectorAuthor, connectors.updateConnector);
 // Its own grant: deleting a connector breaks every workflow that calls it, which
 // is a different risk from publishing one.

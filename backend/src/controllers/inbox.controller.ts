@@ -59,6 +59,21 @@ export const listConversations = asyncHandler(async (req, res) => {
       customer: true,
       assignedAgent: { select: { id: true, fullName: true, email: true } },
       messages: { take: 1, orderBy: { createdAt: 'desc' } },
+      // **The workflow occupying this conversation, if any.**
+      //
+      // Needed because a conversation holds one active instance at a time, and while it
+      // does the router refuses every inbound message with `ACTIVE_WORKFLOW_BUSY`. That is
+      // right for a flow mid-question and wrong for one parked at a handoff — but without
+      // this the Inbox could not tell the two apart, so an agent had no way to see that the
+      // bot was stuck, let alone hand control back.
+      activeWorkflowInstance: {
+        select: {
+          id: true,
+          status: true,
+          currentNodeId: true,
+          workflow: { select: { name: true } },
+        },
+      },
     },
     orderBy: { lastMessageAt: 'desc' },
     take: 100,

@@ -80,6 +80,8 @@ interface Draft {
   sideEffecting: boolean;
   timeoutMs: string;
   sampleText: string;
+  /** The request body template, as text so a half-typed payload is still editable. */
+  payloadText: string;
 }
 
 const draftFrom = (operation: ConnectorOperation): Draft => ({
@@ -96,6 +98,7 @@ const draftFrom = (operation: ConnectorOperation): Draft => ({
   sideEffecting: operation.sideEffecting,
   timeoutMs: operation.timeoutMs == null ? '' : String(operation.timeoutMs),
   sampleText: operation.sampleResponse == null ? '' : JSON.stringify(operation.sampleResponse, null, 2),
+  payloadText: operation.bodyTemplate == null ? '' : JSON.stringify(operation.bodyTemplate, null, 2),
 });
 
 const placeholdersIn = (path: string): string[] => {
@@ -188,6 +191,29 @@ export default function OperationEditor({
     }
   }, [draft.sampleText]);
 
+  const payload = useMemo(() => {
+    if (!draft.payloadText.trim()) return { ok: true as const, value: undefined };
+    try {
+      return { ok: true as const, value: JSON.parse(draft.payloadText) as unknown };
+    } catch (err) {
+      return { ok: false as const, message: err instanceof Error ? err.message : 'Invalid JSON' };
+    }
+  }, [draft.payloadText]);
+
+  /** What `renderBody` would send, with the declared inputs standing in for real values. */
+  const payloadPreview = useMemo(() => {
+    if (!payload.ok || payload.value === undefined) return null;
+    const declared = new Set(draft.inputs.map((i) => i.key));
+    // Every placeholder the payload names, and whether an input actually declares it.
+    const named = [...new Set(
+      [...draft.payloadText.matchAll(PLACEHOLDER_RE)].map((m) => m[1]),
+    )];
+    return {
+      used: named.filter((n) => declared.has(n)),
+      unknown: named.filter((n) => !declared.has(n)),
+    };
+  }, [payload, draft.payloadText, draft.inputs]);
+
   /** What `extractItems` would return for this mapping against the sample. */
   const preview = useMemo(() => {
     if (!sample.ok || sample.value === undefined) return null;
@@ -247,6 +273,25 @@ export default function OperationEditor({
       if (bodyInputs.length) {
         w.push(`A ${draft.method} request sends no body, so ${bodyInputs.join(', ')} will be dropped. Use query instead.`);
       }
+      if (draft.payloadText.trim()) {
+        e.push(`A ${draft.method} request sends no body, so this payload would be dropped. Change the method, or move the values to the query string.`);
+      }
+    }
+
+    // Mirrors `checkBodyTemplate` on the server. A placeholder naming an input that does not
+    // exist can never be filled, so the operation would fail on its first real call.
+    if (!payload.ok) e.push(`The payload is not valid JSON: ${payload.message}`);
+    if (payloadPreview?.unknown.length) {
+      e.push(`The payload uses {${payloadPreview.unknown.join('}, {')}}, which no input declares. Add the input below, or correct the placeholder.`);
+    }
+    if (payload.ok && payload.value !== undefined && SENDS_BODY.includes(draft.method.toUpperCase())) {
+      const bodyInputs = draft.inputs.filter((i) => i.in === 'body').map((i) => i.key);
+      const unusedBody = bodyInputs.filter((k) => !draft.payloadText.includes(`{${k}}`));
+      if (unusedBody.length) {
+        // With a payload present the template *is* the body, so a body-declared input that
+        // the template never names is simply not sent.
+        w.push(`The payload is the whole body, so ${unusedBody.join(', ')} — declared in the body — is not sent unless the payload names {${unusedBody[0]}}.`);
+      }
     }
 
     if (draft.timeoutMs.trim()) {
@@ -271,7 +316,7 @@ export default function OperationEditor({
     }
 
     return { errors: e, warnings: w };
-  }, [draft, sample, preview, operation.key]);
+  }, [draft, sample, preview, payload, payloadPreview, operation.key]);
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(draftFrom(operation)),
@@ -295,6 +340,7 @@ export default function OperationEditor({
       sideEffecting: draft.sideEffecting,
       timeoutMs: draft.timeoutMs.trim() ? Number(draft.timeoutMs) : null,
       sampleResponse: sample.ok && sample.value !== undefined ? sample.value : null,
+      bodyTemplate: payload.ok && payload.value !== undefined ? payload.value : null,
     }),
     onSuccess: () => {
       toast.success('Operation saved');
@@ -418,6 +464,39 @@ export default function OperationEditor({
                 </p>
               </div>
             </div>
+
+            {/* Only for the methods whose body actually goes on the wire. Showing it on a
+                GET would invite somebody to write a payload that is silently dropped. */}
+            {SENDS_BODY.includes(draft.method.toUpperCase()) && (
+              <div className="space-y-1">
+                <Label>Request payload</Label>
+                <Textarea
+                  rows={7}
+                  className="font-mono text-caption"
+                  placeholder={'{\n  "amount": "{amount}",\n  "currency": "INR",\n  "notes": { "reason": "{reason}" }\n}'}
+                  value={draft.payloadText}
+                  onChange={(e) => set({ payloadText: e.target.value })}
+                />
+                <p className="text-caption text-muted-foreground">
+                  The JSON body to send. <code>{'{braces}'}</code> are filled from the inputs
+                  below — a value that is <em>only</em> a placeholder keeps the input&apos;s
+                  type, so <code>&quot;{'{amount}'}&quot;</code> on a number input sends{' '}
+                  <code>500</code> and not <code>&quot;500&quot;</code>. Anything else is sent
+                  as written, which is how a constant field gets in.
+                </p>
+                {payloadPreview && payloadPreview.used.length > 0 && (
+                  <p className="text-caption text-muted-foreground">
+                    Fills from: {payloadPreview.used.join(', ')}.
+                  </p>
+                )}
+                {!draft.payloadText.trim() && (
+                  <p className="text-caption text-muted-foreground">
+                    Leave it empty to send a flat object built from whichever inputs are
+                    declared in the body — which is what this operation does today.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label>Timeout</Label>

@@ -11,7 +11,9 @@ import { cn, formatDateTime } from '@/lib/utils';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
 import { useAuthStore, useHasModule } from '@/stores/auth.store';
-import { LifeBuoy } from 'lucide-react';
+import {
+  Bot, LifeBuoy,
+} from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -27,6 +29,20 @@ interface Conversation {
   lastMessageAt: string | null;
   customer: { id: string; name?: string; waId: string };
   assignedAgent?: { id: string; fullName: string; email: string } | null;
+  /**
+   * The workflow occupying this conversation, if one is.
+   *
+   * A conversation holds one active instance at a time, and while it does the router refuses
+   * every inbound message with `ACTIVE_WORKFLOW_BUSY`. `PAUSED` is the state a handoff node
+   * leaves behind — the flow has given up control and is waiting for a human, so it will sit
+   * there forever and the bot can never answer again until somebody clears it.
+   */
+  activeWorkflowInstance?: {
+    id: string;
+    status: string;
+    currentNodeId: string | null;
+    workflow: { name: string };
+  } | null;
 }
 
 type Scope = 'all' | 'mine' | 'unassigned';
@@ -268,6 +284,26 @@ export default function Inbox() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  /**
+   * Hand the conversation back to the bot.
+   *
+   * This existed on the server from the start and had no button, which meant a conversation
+   * that reached a handoff was automated exactly once and never again: Release clears the
+   * agent and the Automation toggle flips a different flag, but neither cancels the parked
+   * instance holding the workflow slot.
+   */
+  const handBackToBot = useMutation({
+    mutationFn: async () => {
+      await api.post(`/conversations/${selectedId}/resume-bot`);
+    },
+    onSuccess: () => {
+      toast.success('Handed back to the bot');
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const toggleAutomation = useMutation({
     mutationFn: async (paused: boolean) => {
       await api.post(`/inbox/conversations/${selectedId}/automation`, { paused });
@@ -401,6 +437,41 @@ export default function Inbox() {
                       <option key={m.id} value={m.id}>{m.id === myId ? 'Me' : m.fullName}</option>
                     ))}
                   </select>
+                )}
+
+                {/*
+                  The bot is blocked. Shown only when something is actually holding the
+                  workflow slot, because the router refuses every inbound message while one
+                  is — and `PAUSED` means a handoff node parked it and nothing will ever move
+                  it on. An agent looking at an unanswered conversation had no way to see
+                  that, which made the handoff a one-way door.
+                */}
+                {conv.activeWorkflowInstance && (
+                  <Button
+                    size="sm"
+                    variant={conv.activeWorkflowInstance.status === 'PAUSED' ? 'default' : 'outline'}
+                    className="h-7 gap-1 text-caption"
+                    disabled={handBackToBot.isPending}
+                    title={conv.activeWorkflowInstance.status === 'PAUSED'
+                      ? `"${conv.activeWorkflowInstance.workflow.name}" handed this conversation to a person and is waiting. The bot cannot reply until it is cleared.`
+                      : `"${conv.activeWorkflowInstance.workflow.name}" is mid-conversation. Handing back cancels it, and the customer's next message starts fresh.`}
+                    onClick={() => {
+                      // A confirm only for a flow still in progress — cancelling that
+                      // abandons a customer mid-question, which is different from clearing
+                      // one that has already given up.
+                      const parked = conv.activeWorkflowInstance?.status === 'PAUSED';
+                      if (parked || window.confirm(
+                        `"${conv.activeWorkflowInstance?.workflow.name}" is still running. Cancel it and let the bot start fresh on the next message?`,
+                      )) {
+                        handBackToBot.mutate();
+                      }
+                    }}
+                  >
+                    <Bot className="h-3 w-3" />
+                    {conv.activeWorkflowInstance.status === 'PAUSED'
+                      ? 'Hand back to the bot'
+                      : 'Cancel the running flow'}
+                  </Button>
                 )}
 
                 {/*

@@ -3,7 +3,7 @@ import {
   Link, Navigate, Route, Routes, useLocation,
 } from 'react-router-dom';
 import {
-  Building2, ClipboardList, Inbox, LayoutDashboard, LogOut, ReceiptIndianRupee, ShieldCheck, Tags,
+  Building2, ClipboardList, Inbox, LayoutDashboard, LogOut, PlugZap, ReceiptIndianRupee, ShieldCheck, Tags,
 } from 'lucide-react';
 import { sa, tokenStore } from './lib/api';
 import { cn } from './components/ui';
@@ -13,6 +13,7 @@ import Tenants from './pages/Tenants';
 import TenantDetail from './pages/TenantDetail';
 import Plans from './pages/Plans';
 import Categories from './pages/Categories';
+import ConnectorTypes from './pages/ConnectorTypes';
 import Enquiries from './pages/Enquiries';
 import Audit from './pages/Audit';
 
@@ -29,6 +30,7 @@ const NAV = [
   { to: '/plans', label: 'Plans', icon: ReceiptIndianRupee },
   { to: '/enquiries', label: 'Enquiries', icon: Inbox, badge: 'newEnquiries' as const },
   { to: '/categories', label: 'Categories', icon: Tags },
+  { to: '/connector-types', label: 'Connector types', icon: PlugZap },
   { to: '/audit', label: 'Audit log', icon: ClipboardList },
 ];
 
@@ -134,6 +136,7 @@ export default function App() {
       <Route path="/plans" element={<RequireAuth><Plans /></RequireAuth>} />
       <Route path="/enquiries" element={<RequireAuth><Enquiries /></RequireAuth>} />
       <Route path="/categories" element={<RequireAuth><Categories /></RequireAuth>} />
+      <Route path="/connector-types" element={<RequireAuth><ConnectorTypes /></RequireAuth>} />
       <Route path="/audit" element={<RequireAuth><Audit /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

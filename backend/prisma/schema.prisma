@@ -1361,11 +1361,113 @@ enum ConnectorStatus {
   DISABLED
 }
 
+/// One kind of outside system ZunoPilot knows how to reach.
+///
+/// The catalog exists so that supporting a new system is a row an operator adds rather than
+/// a deploy — before it, `CONNECTOR_KINDS` was a `z.enum` and the tenant's picker was two
+/// hardcoded options in JSX.
+///
+/// **It offers a type and nothing more.** The tenant still creates the connector, supplies
+/// the base URL and holds the credential; nothing on this model is a secret of ours, which
+/// is why the whole row is safe to hand to a tenant-facing endpoint.
+model ConnectorType {
+  id String @id @default(uuid())
+
+  /// Lowercase snake, stable forever. A tenant's connector records which type it came from,
+  /// so renaming one orphans that link with no error anywhere.
+  key         String  @unique
+  label       String
+  description String?
+
+  /// The runtime strategy. This is why the catalog needs no change to `invoke.ts`: the
+  /// dispatch switch there still sees a `ConnectorKind`, and the catalog only decides which
+  /// one a tenant's connector is created with.
+  kind ConnectorKind @default(HTTP)
+
+  /// The auth mechanisms this type accepts, in the order they should be offered. An array
+  /// because some systems genuinely take either a bearer token or basic auth, and forcing a
+  /// single choice would be wrong for them. Empty means "offer them all".
+  allowedAuthTypes ConnectorAuthType[] @default([])
+
+  /// Suggested base URL, prefilled and **editable**. Deliberately a default rather than a
+  /// pin: creating the connector stays in the tenant's hands.
+  defaultBaseUrl String?
+
+  /// What to call the credential fields for this type. Razorpay's basic auth is a "Key ID"
+  /// and a "Key Secret", not a "Username" and a "Credential" — the same mechanism, wearing
+  /// the words the customer's own dashboard uses.
+  secretLabel   String?
+  usernameLabel String?
+  /// Prefilled header name for API_KEY_HEADER, e.g. `X-Api-Key`.
+  defaultHeader String?
+
+  /// Where the tenant goes to find their credential.
+  docsUrl String?
+
+  /// Where it appears in the picker. Lower first.
+  sortOrder Int @default(100)
+
+  /// Hidden from new connections without breaking the connectors already on it — the same
+  /// reasoning as `BusinessCategory.isActive`, which is why a type in use is deactivated
+  /// rather than deleted.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  operationTemplates ConnectorTypeOperation[]
+  connectors         Connector[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// A ready-made operation, copied into a tenant's connector when they connect.
+///
+/// Mirrors `ConnectorOperation` field for field, because it is copied straight across.
+/// Without these, picking a type leaves a tenant holding a credential and nothing they can
+/// call — which is the difference between a catalog and a dropdown.
+model ConnectorTypeOperation {
+  id              String        @id @default(uuid())
+  connectorTypeId String
+  connectorType   ConnectorType @relation(fields: [connectorTypeId], references: [id], onDelete: Cascade)
+
+  key         String
+  name        String
+  description String?
+
+  method String @default("GET")
+  path   String @default("/")
+
+  /// Same shapes the runtime already validates on every invoke — see
+  /// `connectors/schemas.ts`. Kept identical so the clone is a copy, not a translation.
+  inputs          Json    @default("[]")
+  responseMapping Json    @default("{}")
+  bodyTemplate    Json?
+  sideEffecting   Boolean @default(false)
+  timeoutMs       Int?
+  sampleResponse  Json?
+
+  sortOrder Int      @default(100)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectorTypeId, key])
+}
+
 model Connector {
   id       String        @id @default(uuid())
   tenantId String
   tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   kind     ConnectorKind @default(HTTP)
+
+  /// The catalog entry this came from, when it came from one.
+  ///
+  /// Null for every connector registered before the catalog existed, and for any whose type
+  /// the operator later deleted — so this is **provenance, never something the call path
+  /// depends on**. `SetNull` rather than `Cascade` for the same reason: removing a type must
+  /// not remove a tenant's working connector.
+  connectorTypeId String?
+  connectorType   ConnectorType? @relation(fields: [connectorTypeId], references: [id], onDelete: SetNull)
 
   /// Stable identifier a workflow node references. Renaming the display name
   /// must not break every graph pointing at it, so this is what nodes store.
@@ -1425,6 +1527,14 @@ model ConnectorOperation {
   /// Where the useful data sits in the response: { itemsPath, idField,
   /// titleField, descriptionField }. Dotted paths, resolved safely.
   responseMapping Json @default("{}")
+
+  /// The request body to send, with `{placeholders}` filled from declared inputs.
+  ///
+  /// Null means the older behaviour: the body is a flat object built from whichever inputs
+  /// are declared `in: "body"`. That cannot express a nested payload or a constant field,
+  /// which is most real POST APIs — hence this. Stored parsed rather than as a string, so a
+  /// malformed payload cannot be saved at all.
+  bodyTemplate Json?
 
   /// True when calling this changes something the customer cannot undo. Drives
   /// the publish rule that a side-effecting workflow must confirm first.

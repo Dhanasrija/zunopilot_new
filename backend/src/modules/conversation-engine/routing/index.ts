@@ -50,6 +50,13 @@ export interface RouteArgs {
   conversation: Conversation;
   message: InboundEnvelope;
   dryRun?: boolean;
+  /**
+   * Set only on the second pass after an intent switch.
+   *
+   * Internal, and a one-shot guard: routing re-enters itself once the abandoned run's slot is
+   * free, and without this a message the router keeps mis-reading could switch for ever.
+   */
+  afterIntentSwitch?: boolean;
 }
 
 export interface RouteOutcome {
@@ -179,6 +186,26 @@ export const assistantForChannel = async (channelId: string) => {
   });
 };
 
+/**
+ * Node types that change something outside this conversation.
+ *
+ * A run that has passed one of these must not be silently abandoned: the class is already
+ * cancelled, the order already placed. Switching intent there would leave the customer talking
+ * about something else, unaware that the thing they asked for actually happened.
+ */
+const IRREVERSIBLE_NODES = ['CONNECTOR_ACTION', 'DATABASE_WRITE', 'CREATE_ORDER'];
+
+const hasActedIrreversibly = async (workflowInstanceId: string): Promise<boolean> => {
+  const done = await prisma.nodeExecution.count({
+    where: {
+      workflowInstanceId,
+      nodeType: { in: IRREVERSIBLE_NODES as never },
+      status: 'SUCCESS',
+    },
+  });
+  return done > 0;
+};
+
 export const routeInboundMessage = async (args: RouteArgs): Promise<RouteOutcome> => {
   const logger = withContext({
     tenantId: args.tenant.id,
@@ -265,6 +292,8 @@ export const routeInboundMessage = async (args: RouteArgs): Promise<RouteOutcome
     // classified — a customer answering "Cardiology" must not be re-interpreted
     // as a new intent.
     if (active.status === 'WAITING_FOR_USER') {
+      let switchedTo: RouteOutcome | null = null;
+
       const result = await resumeWithUserInput({
         instance: active,
         deps: walkDepsFor(args),
@@ -273,7 +302,53 @@ export const routeInboundMessage = async (args: RouteArgs): Promise<RouteOutcome
         // only match on the visible label, which is exactly the ambiguity the
         // ids exist to remove.
         replyId: args.message.interactive?.replyId ?? null,
+        /**
+         * The reply did not fit. Ask whether it is a different intent instead.
+         *
+         * Only reached on a rejection, so a conversation of valid answers costs nothing extra.
+         * Refuses to switch once the run has done something irreversible, and refuses when the
+         * router picks the workflow that is already running — re-prompting is right there.
+         */
+        onRejected: async (reason) => {
+          if (args.afterIntentSwitch) return 'REPROMPT';
+          if (await hasActedIrreversibly(active.id)) {
+            logger.debug('Not switching intent: this run has already changed something', { reason });
+            return 'REPROMPT';
+          }
+
+          const reroute = await routeWithAi({
+            tenant: args.tenant,
+            assistant,
+            conversation: args.conversation,
+            contact: args.contact,
+            message: args.message.body,
+          });
+          if (!reroute) return 'REPROMPT';
+
+          const gate = applyConfidenceGate({
+            output: reroute.output,
+            assistant,
+            candidates: reroute.candidates,
+          });
+          const target = gate.action === 'START_WORKFLOW' ? gate.workflowId : null;
+          if (!target || target === active.workflowId) return 'REPROMPT';
+
+          const { cancelInstance } = await import('../engine/instance-manager.js');
+          await cancelInstance({
+            instanceId: active.id,
+            conversationId: args.conversation.id,
+            reason: `Customer changed the subject: ${args.message.body.slice(0, 80)}`,
+          });
+
+          // Re-enter routing with the slot free, so the new workflow starts through exactly
+          // the same path a fresh message takes — thresholds, entitlement, audit and all.
+          // `afterIntentSwitch` makes this a one-shot: the second pass cannot switch again.
+          switchedTo = await routeInboundMessage({ ...args, afterIntentSwitch: true });
+          return 'SWITCHED';
+        },
       });
+
+      if (result.outcome === 'SWITCHED_INTENT' && switchedTo) return switchedTo;
       await recordDecision(args, {
         source: 'ACTIVE_WORKFLOW', decision: 'RESUME_WORKFLOW',
         workflowId: active.workflowId, reasonCode: 'ACTIVE_WORKFLOW_AWAITING_INPUT',
