@@ -225,6 +225,128 @@ export const validateWorkflowDefinition = ({
     }
   }
 
+  // ── 8b. Data flow between nodes ────────────────────────────────────────────
+  //
+  // Three faults with one shape: a graph the engine walks happily while carrying nothing
+  // useful between the steps. Written after a generated draft got every edge plausible and
+  // every variable wrong — a list reading a name nothing wrote, a confirmation that gated
+  // nothing, a condition comparing a whole response body to a word. Each is checkable from
+  // the definition alone, which is why none of them needs a model to catch.
+
+  /** Variables a node writes normalised rows into, for a list to read back. */
+  const rowVariables = new Set<string>();
+  /** Variables holding a whole response body, and the node that wrote each. */
+  const bodyVariables = new Map<string, string>();
+
+  for (const node of definition.nodes) {
+    const config = (node.config ?? {}) as Record<string, unknown>;
+    const writesRows = node.type === 'CONNECTOR_QUERY'
+      || node.type === 'CONNECTOR_ACTION'
+      || node.type === 'DATABASE_LOOKUP';
+    if (writesRows) {
+      if (typeof config.itemsVariable === 'string' && config.itemsVariable) {
+        rowVariables.add(config.itemsVariable);
+      }
+      if (typeof config.outputVariable === 'string' && config.outputVariable) {
+        bodyVariables.set(config.outputVariable, node.id);
+      }
+    }
+  }
+
+  for (const node of definition.nodes) {
+    const config = (node.config ?? {}) as Record<string, unknown>;
+
+    // A list rendering from a variable nothing fills shows no rows, every time. The engine
+    // reports it at runtime — "No rows to show" — which is a customer's conversation, not a
+    // form. Two ways to arrive here, and a generator found both: naming a variable no node
+    // writes, and writing `{{vars.parent}}` with the dot deleted into a field that wants a
+    // bare name.
+    if (node.type === 'LIST_MESSAGE' && config.source === 'variable') {
+      const reads = typeof config.itemsVariable === 'string' ? config.itemsVariable : '';
+      if (!reads) {
+        error(
+          'LIST_ITEMS_VARIABLE_UNWRITTEN',
+          `"${node.name ?? node.id}" renders rows from a variable but names none`,
+          { nodeId: node.id },
+        );
+      } else if (!rowVariables.has(reads)) {
+        const hint = bodyVariables.has(reads)
+          ? ` "${reads}" holds a whole response body, not rows — set that node's rows variable and read it here.`
+          : ` No node writes rows into "${reads}".`;
+        error(
+          'LIST_ITEMS_VARIABLE_UNWRITTEN',
+          `"${node.name ?? node.id}" would show no rows.${hint}`,
+          { nodeId: node.id },
+        );
+      }
+    }
+
+    // A condition whose left side is a whole response body can only ever equal another JSON
+    // string: `readPath` stringifies an object, so `equals "success"` is false however well
+    // the call went. This is a warning for a person — they may be testing for emptiness — and
+    // a blocker for a generator, which is the split `GENERATION_BLOCKERS` exists for.
+    if (node.type === 'CONDITION') {
+      const left = typeof config.left === 'string' ? config.left : '';
+      const whole = /^\{\{\s*vars\.([a-zA-Z0-9_]+)\s*\}\}$/.exec(left);
+      const named = whole?.[1];
+      if (named && bodyVariables.has(named)) {
+        warn(
+          'CONDITION_COMPARES_WHOLE_BODY',
+          `"${node.name ?? node.id}" compares "${named}", which holds an entire response body — `
+          + 'read a field out of it instead, or this branch never matches',
+          { nodeId: node.id },
+        );
+      }
+    }
+  }
+
+  // A confirmation that gates nothing.
+  //
+  // The rule is not "has one outgoing edge" — a BUTTON_MESSAGE legitimately has one, because
+  // the branching belongs to a CONDITION reading the variable it stored. The fault is reaching
+  // something irreversible without passing that condition at all: every button leads to the
+  // cancel, so tapping "Keep it" cancels the class. That reached a real WhatsApp number.
+  for (const node of definition.nodes) {
+    if (node.type !== 'BUTTON_MESSAGE') continue;
+    const config = (node.config ?? {}) as Record<string, unknown>;
+    const stored = typeof config.variableName === 'string' ? config.variableName : '';
+    if (!stored) continue;
+
+    const readsTheChoice = (candidate: typeof definition.nodes[number]): boolean => {
+      if (candidate.type !== 'CONDITION') return false;
+      const left = String(((candidate.config ?? {}) as Record<string, unknown>).left ?? '');
+      return left.includes(`vars.${stored}`);
+    };
+
+    // Forward from the buttons, stopping at any node that waits for the customer again —
+    // past that point they have had another say, so this confirmation is not the gate.
+    const seen = new Set<string>([node.id]);
+    const queue = outgoingEdges(definition, node.id).map((e) => e.target);
+    let ungated: string | null = null;
+
+    while (queue.length && !ungated) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const next = nodes.get(id);
+      if (!next) continue;
+      if (readsTheChoice(next)) continue;
+      if (nodeHasSideEffect(next.type as NodeType, next.config)) { ungated = id; break; }
+      if (isWaitingCapable(next.type as NodeType)) continue;
+      queue.push(...outgoingEdges(definition, id).map((e) => e.target));
+    }
+
+    if (ungated) {
+      const target = nodes.get(ungated);
+      error(
+        'CONFIRMATION_NOT_BRANCHED',
+        `"${node.name ?? node.id}" asks for confirmation, but "${target?.name ?? ungated}" runs `
+        + `whichever button is tapped — no condition reads "${stored}", so declining still acts`,
+        { nodeId: node.id },
+      );
+    }
+  }
+
   // ── 9. Cycles ──────────────────────────────────────────────────────────────
   for (const cycle of findCycles(definition)) {
     const hasBound = cycle.some((id) => {
