@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { httpLoggerStream } from './config/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { routes } from './routes/index.js';
+import { publicMediaRoutes } from './modules/media/media.routes.js';
 
 export const buildApp = (): Express => {
   const app = express();
@@ -52,6 +53,17 @@ export const buildApp = (): Express => {
   app.get('/health', (_req, res) => { res.json({ status: 'ok', uptime: process.uptime() }); });
 
   app.use('/api', routes);
+
+  /*
+   * Template media, served unauthenticated and outside `/api`.
+   *
+   * Meta fetches header media from its own servers when a template is sent, and cannot
+   * present a token — so this route must be open. It is mounted here rather than under the
+   * API so it sits outside `apiLimiter` too: Meta may fetch the same asset once per
+   * recipient, and a campaign to several hundred people would otherwise rate-limit itself.
+   * The uuid in the path is the capability; see the `MediaAsset` comment in schema.prisma.
+   */
+  app.use('/media', publicMediaRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

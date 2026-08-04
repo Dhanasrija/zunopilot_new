@@ -3,7 +3,7 @@ import { requireAuth, requireModule, requirePermission } from '../../middleware/
 import {
   getCampaign, getConsentSummary, listCampaignRecipients, listCampaigns, listTemplates,
   patchTemplate, postAudiencePreview, postCampaign, postCampaignPause, postCampaignStart,
-  postTemplate,
+  postTemplate, postTemplateSync,
 } from './campaign.controller.js';
 
 // Marketing.
@@ -19,6 +19,9 @@ router.use(requireModule('MARKETING'));
 // Templates. Literal paths before `/:campaignId`, or the parameter route eats them.
 router.get('/templates', requirePermission('campaigns:read'), listTemplates);
 router.post('/templates', requirePermission('campaigns:write'), postTemplate);
+// Reads from Meta and writes rows, so `campaigns:write`. Ahead of `/templates/:templateId`,
+// or "sync" is taken for a template id.
+router.post('/templates/sync', requirePermission('campaigns:write'), postTemplateSync);
 router.patch('/templates/:templateId', requirePermission('campaigns:write'), patchTemplate);
 
 // A count, not a send — `campaigns:read` is enough.

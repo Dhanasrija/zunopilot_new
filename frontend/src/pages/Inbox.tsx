@@ -279,7 +279,7 @@ export default function Inbox() {
   });
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-48px)]">
+    <div className="flex flex-col gap-4 lg:h-[calc(100vh-var(--shell-offset))]">
       {/* Page header */}
       <div className="flex items-center gap-3 shrink-0">
         <div>

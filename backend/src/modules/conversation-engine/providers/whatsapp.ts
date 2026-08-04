@@ -3,6 +3,7 @@ import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import {
   sendInteractiveButtons, sendInteractiveList, sendTemplate, sendTextMessage,
+  type TemplateComponent,
 } from '../../../services/whatsapp.service.js';
 import type { WhatsAppSender } from '../engine/types.js';
 import { MockWhatsAppProvider } from './mock.js';
@@ -46,17 +47,40 @@ export class MetaWhatsAppProvider implements WhatsAppSender {
     return { messageId: sent?.messages?.[0]?.id ?? null };
   }
 
-  async sendTemplate({ to, templateName, language, params }: {
+  async sendTemplate({ to, templateName, language, params, headerMedia }: {
     to: string; templateName: string; language: string; params: string[];
+    headerMedia?: { kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT'; link: string; filename?: string };
   }) {
+    const components: TemplateComponent[] = [];
+
+    // Header first. Meta requires components in template order, and it rejects the message
+    // rather than reordering them.
+    if (headerMedia) {
+      const key = headerMedia.kind.toLowerCase() as 'image' | 'video' | 'document';
+      components.push({
+        type: 'header',
+        parameters: [{
+          type: key,
+          // `link`, not `id`: the asset lives on our own public media route rather than in
+          // Meta's media store, so there is nothing to pre-upload and nothing to expire.
+          [key]: {
+            link: headerMedia.link,
+            // Only a document header shows a filename, and Meta rejects the field on the
+            // others.
+            ...(key === 'document' && headerMedia.filename
+              ? { filename: headerMedia.filename }
+              : {}),
+          },
+        }],
+      });
+    }
+
+    if (params.length) {
+      components.push({ type: 'body', parameters: params.map((p) => ({ type: 'text', text: p })) });
+    }
+
     const sent = await sendTemplate({
-      ...this.credentials,
-      to,
-      templateName,
-      language,
-      components: params.length
-        ? [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: p })) }]
-        : [],
+      ...this.credentials, to, templateName, language, components,
     });
     return { messageId: sent?.messages?.[0]?.id ?? null };
   }

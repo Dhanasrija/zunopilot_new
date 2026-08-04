@@ -44,6 +44,15 @@ export interface WhatsAppSender {
     templateName: string;
     language: string;
     params: string[];
+    /**
+     * Media for the template's header, when the approved template declares one.
+     *
+     * Optional because most templates have no header, or a text one. When a template *does*
+     * declare an IMAGE/VIDEO/DOCUMENT header, Meta refuses the message without this — so
+     * omitting it is not a degraded send, it is a failed one. `link` is fetched by Meta from
+     * its own servers, which is why the media route is public.
+     */
+    headerMedia?: { kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT'; link: string; filename?: string };
   }): Promise<{ messageId: string | null }>;
 }
 

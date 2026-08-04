@@ -58,10 +58,14 @@ export class MockWhatsAppProvider implements WhatsAppSender {
     return { messageId: this.nextId() };
   }
 
-  async sendTemplate({ to, templateName, language, params }: {
+  async sendTemplate({ to, templateName, language, params, headerMedia }: {
     to: string; templateName: string; language: string; params: string[];
+    headerMedia?: { kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT'; link: string; filename?: string };
   }) {
-    this.sent.push({ to, kind: 'template', body: templateName, meta: { language, params } });
+    // `headerMedia` is recorded rather than ignored: whether a media template carried its
+    // media is exactly what a test of this needs to assert, and swallowing it here would
+    // make the send look fine while Meta would have refused it.
+    this.sent.push({ to, kind: 'template', body: templateName, meta: { language, params, headerMedia } });
     return { messageId: this.nextId() };
   }
 

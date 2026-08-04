@@ -214,9 +214,13 @@ export default function LeadDetail() {
               <Button variant="ghost" onClick={() => setLogging(true)}>Log a call</Button>
             </>
           )}
-          {lead.customer && (
+          {/* Straight to the thread. This used to link at bare `/inbox`, which dropped the
+              agent on the conversation list to find the person by hand — the id comes down
+              with the lead now. Hidden when the linked customer has no thread yet, because
+              there would be nothing to open. */}
+          {lead.customer?.conversations[0] && (
             <Button asChild variant="ghost">
-              <Link to="/inbox">
+              <Link to={`/inbox?conversationId=${lead.customer.conversations[0].id}`}>
                 <MessageSquare className="mr-2 h-4 w-4" /> Open conversation
               </Link>
             </Button>

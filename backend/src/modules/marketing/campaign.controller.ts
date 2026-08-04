@@ -4,11 +4,13 @@ import { prisma } from '../../config/prisma.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../../middleware/auth.js';
-import { queryString } from '../../utils/query.js';
+import { queryEnum, queryString } from '../../utils/query.js';
 import {
   campaignInclude, campaignOf, campaignProgress, pauseCampaign, previewAudience,
   startCampaign, type AudienceFilter,
 } from './campaign.service.js';
+import { syncTemplatesFromMeta } from './template-sync.service.js';
+import { mediaFor } from '../media/media.service.js';
 
 const idParam = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const requireId = (value: string | undefined, what: string): string => {
@@ -33,17 +35,38 @@ const templateSchema = z.object({
   language: z.string().trim().min(2).max(10).default('en'),
   category: z.enum(['MARKETING', 'UTILITY']).default('MARKETING'),
   bodyPreview: z.string().trim().min(1).max(2_000),
+  // Preview copy. `headerText` is deliberately absent: it only means anything for a TEXT
+  // header, and `headerFormat` is not settable here either — the sync is the authority on a
+  // template's shape, and letting someone type a header in would let the two disagree.
+  footerText: z.string().trim().max(200).optional(),
+  buttons: z.array(z.object({
+    type: z.string().trim().min(1).max(40),
+    text: z.string().trim().min(1).max(80),
+  })).max(10).default([]),
   variables: z.array(z.string().trim().max(80)).max(20).default([]),
   status: z.enum(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED']).optional(),
 });
 
 export const listTemplates = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = tenantIdOf(req);
+  // `?category=MARKETING` for the campaign picker. Filtered here rather than in the browser
+  // so the page cannot accidentally offer a UTILITY or AUTHENTICATION template as a
+  // broadcast — an OTP template sent to a list is the mistake this prevents.
+  const category = queryEnum(req.query.category, ['MARKETING', 'UTILITY'] as const);
   const templates = await prisma.campaignTemplate.findMany({
-    where: { tenantId },
+    where: { tenantId, ...(category ? { category } : {}) },
     orderBy: { updatedAt: 'desc' },
   });
   res.json({ success: true, data: templates });
+});
+
+/**
+ * Reconcile this workspace's templates with Meta.
+ *
+ * The header format is the reason this exists — see `template-sync.service.ts`.
+ */
+export const postTemplateSync = asyncHandler(async (req: Request, res: Response) => {
+  res.json({ success: true, data: await syncTemplatesFromMeta(tenantIdOf(req)) });
 });
 
 export const postTemplate = asyncHandler(async (req: Request, res: Response) => {
@@ -101,6 +124,8 @@ const campaignSchema = z.object({
   templateId: z.string().regex(idParam),
   audienceFilter: audienceSchema.default({}),
   variableValues: z.record(z.string(), z.string().max(1_000)).default({}),
+  /** The media filling the template's header, when it declares one. */
+  headerMediaId: z.string().regex(idParam).nullish(),
   scheduledAt: z.string().datetime().nullish(),
 });
 
@@ -144,15 +169,35 @@ export const postCampaign = asyncHandler(async (req: Request, res: Response) => 
 
   const template = await prisma.campaignTemplate.findFirst({
     where: { id: body.templateId, tenantId },
-    select: { id: true },
+    select: { id: true, headerFormat: true },
   });
   if (!template) throw ApiError.badRequest('That template is not in this workspace');
+
+  /*
+   * The media id comes from the client, so it is resolved against this tenant before it is
+   * stored — otherwise a workspace could attach another's file and have Meta serve it from
+   * our public media route.
+   *
+   * `mediaFor` 404s on a miss, which is the right answer for an id that is not yours.
+   */
+  if (body.headerMediaId) {
+    const asset = await mediaFor(tenantId, body.headerMediaId);
+    // Caught here as well as in `startCampaign`, so the mismatch is reported while the
+    // person is still choosing rather than when they press send.
+    if (template.headerFormat !== asset.kind) {
+      throw ApiError.badRequest(
+        `That template needs a ${template.headerFormat.toLowerCase()}, but the chosen file `
+        + `is a ${asset.kind.toLowerCase()}.`,
+      );
+    }
+  }
 
   const campaign = await prisma.campaign.create({
     data: {
       tenantId,
       name: body.name,
       templateId: body.templateId,
+      headerMediaId: body.headerMediaId ?? null,
       audienceFilter: body.audienceFilter,
       variableValues: body.variableValues,
       scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,

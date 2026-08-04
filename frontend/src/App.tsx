@@ -16,6 +16,7 @@ import Menu from '@/pages/Menu';
 import Leads from './pages/Leads';
 import Tickets from './pages/Tickets';
 import Campaigns from './pages/Campaigns';
+import CampaignNew from './pages/CampaignNew';
 import CampaignDetail from './pages/CampaignDetail';
 import TicketDetail from './pages/TicketDetail';
 import LeadDetail from './pages/LeadDetail';
@@ -99,6 +100,8 @@ export default function App() {
               {/* Module 22: marketing. */}
               <Route element={<RequireCapability module="MARKETING" permission="campaigns:read" />}>
                 <Route path="campaigns" element={<Campaigns />} />
+                {/* Before `:campaignId`, or "new" is matched as a campaign id. */}
+                <Route path="campaigns/new" element={<CampaignNew />} />
                 <Route path="campaigns/:campaignId" element={<CampaignDetail />} />
               </Route>
               <Route path="workflows" element={<Workflows />} />

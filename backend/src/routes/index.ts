@@ -15,6 +15,7 @@ import leads from '../modules/leads/lead.routes.js';
 import tickets from '../modules/support/ticket.routes.js';
 import campaigns from '../modules/marketing/campaign.routes.js';
 import customerLists from '../modules/customer-lists/list.routes.js';
+import { mediaRoutes } from '../modules/media/media.routes.js';
 import { contactRoutes } from '../modules/enquiries/enquiry.routes.js';
 import {
   billingRoutes, publicPricingRoutes, razorpayWebhookRoutes,
@@ -82,6 +83,7 @@ routes.use('/tickets', tickets);
 
 // Module 22: marketing.
 routes.use('/campaigns', campaigns);
+routes.use('/media', mediaRoutes);
 
 // Module 23: contact enquiries.
 //

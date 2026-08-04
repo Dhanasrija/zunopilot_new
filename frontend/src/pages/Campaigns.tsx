@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useCustomerLists } from '@/lib/customer-lists';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -122,161 +122,14 @@ function NewTemplateDialog({ open, onOpenChange, onSaved }: {
   );
 }
 
-function NewCampaignDialog({ templates, open, onOpenChange, onSaved, initialListId }: {
-  templates: CampaignTemplate[];
-  open: boolean; onOpenChange: (v: boolean) => void; onSaved: () => void;
-  /** Preselected when arriving from a list's Broadcast button. */
-  initialListId?: string | null;
-}) {
-  const [name, setName] = useState('');
-  const [templateId, setTemplateId] = useState('');
-
-  /**
-   * Which curated lists this campaign goes to. Empty means everyone who has consented,
-   * which is what this dialog did unconditionally before there was any way to narrow it.
-   */
-  const [listIds, setListIds] = useState<string[]>(initialListId ? [initialListId] : []);
-
-  // Re-seed when the dialog opens, so arriving from Broadcast a second time for a
-  // different list does not keep the first one ticked.
-  useEffect(() => {
-    if (open) setListIds(initialListId ? [initialListId] : []);
-  }, [open, initialListId]);
-  const lists = useCustomerLists();
-  const audienceFilter = listIds.length ? { listIds } : {};
-
-  // Live, so the reachable and excluded counts are visible before anyone commits. The
-  // filter is in the query key, so the numbers move as lists are ticked.
-  const audience = useQuery({
-    queryKey: ['audience-preview', listIds],
-    queryFn: async () => (await api.post<{ data: { reachable: number; excludedNoConsent: number } }>(
-      '/campaigns/audience-preview', audienceFilter)).data.data,
-    enabled: open,
-  });
-
-  const save = useMutation({
-    mutationFn: () => api.post('/campaigns', { name, templateId, audienceFilter }),
-    onSuccess: () => {
-      toast.success('Campaign created as a draft');
-      setName(''); setTemplateId('');
-      onOpenChange(false);
-      onSaved();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>New campaign</DialogTitle></DialogHeader>
-        <div className="grid gap-3 py-2">
-          <div className="grid gap-1">
-            <Label htmlFor="c-name">Name</Label>
-            <Input id="c-name" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="Diwali week" />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="c-template">Template</Label>
-            <select id="c-template" value={templateId}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <option value="">Choose a template…</option>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}{t.status === 'APPROVED' ? '' : ` (${t.status.toLowerCase()} — cannot send)`}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid gap-1">
-            <Label>Send to</Label>
-            {(lists.data ?? []).length === 0 ? (
-              <p className="text-caption text-muted-foreground">
-                Everyone who has opted in. Build a list under Customers → Lists to send to
-                a group you choose.
-              </p>
-            ) : (
-              <div className="space-y-1 rounded-md border p-2">
-                {(lists.data ?? []).map((list) => (
-                  <label key={list.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-ink-400 text-accent-600"
-                      checked={listIds.includes(list.id)}
-                      onChange={(e) => setListIds((current) => (e.target.checked
-                        ? [...current, list.id]
-                        : current.filter((id) => id !== list.id)))}
-                    />
-                    <span>{list.name}</span>
-                    <span className="text-caption text-muted-foreground">
-                      {list._count.members} on it
-                    </span>
-                  </label>
-                ))}
-                <p className="pt-1 text-caption text-muted-foreground">
-                  {listIds.length === 0
-                    ? 'No list picked — this goes to everyone who has opted in.'
-                    : 'Anyone on a ticked list who has opted in. Membership is fixed, so this is the group you see.'}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {audience.data && (
-            <div className="rounded-md border bg-muted/40 p-3 text-caption">
-              <p className="flex items-center gap-1 font-medium">
-                <Users className="h-3.5 w-3.5" />
-                {audience.data.reachable} customer{audience.data.reachable === 1 ? '' : 's'} will get this
-              </p>
-              <p className="mt-1 text-muted-foreground">
-                {audience.data.excludedNoConsent} excluded — they have not opted in, or
-                they replied STOP. There is no way to include them.
-              </p>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={!name.trim() || !templateId || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Creating…' : 'Create draft'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function Campaigns() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const permissions = useAuthStore((s) => s.permissions);
   const canWrite = permissions.includes('campaigns:write');
   const canSend = permissions.includes('campaigns:send');
 
   const [newTemplate, setNewTemplate] = useState(false);
-  const [newCampaign, setNewCampaign] = useState(false);
-
-  /**
-   * `?listId=` from a list's Broadcast button.
-   *
-   * Opens the dialog with that list already the audience, and clears the parameter so a
-   * refresh or a Back does not reopen it — the URL should describe where you are, not
-   * replay an action.
-   */
-  const [params, setParams] = useSearchParams();
-  // Held in state, not read from the URL where it is needed: the effect below strips the
-  // parameter, so anything reading `params.get('listId')` at render time would find it
-  // already gone by the time the dialog mounted.
-  const [broadcastListId, setBroadcastListId] = useState<string | null>(null);
-  useEffect(() => {
-    const fromUrl = params.get('listId');
-    if (!fromUrl) return;
-    setBroadcastListId(fromUrl);
-    setNewCampaign(true);
-    params.delete('listId');
-    setParams(params, { replace: true });
-  }, [params, setParams]);
 
   const campaigns = useQuery({
     queryKey: ['campaigns'],
@@ -318,7 +171,7 @@ export default function Campaigns() {
         {canWrite && (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setNewTemplate(true)}>Add a template</Button>
-            <Button onClick={() => setNewCampaign(true)}>
+            <Button onClick={() => nav('/campaigns/new')}>
               <Megaphone className="mr-2 h-4 w-4" /> New campaign
             </Button>
           </div>
@@ -367,7 +220,7 @@ export default function Campaigns() {
                   variant={(templates.data ?? []).length === 0 ? 'outline' : 'default'}
                   onClick={() => ((templates.data ?? []).length === 0
                     ? setNewTemplate(true)
-                    : setNewCampaign(true))}
+                    : nav('/campaigns/new'))}
                 >
                   <Megaphone className="mr-2 h-4 w-4" />
                   {(templates.data ?? []).length === 0 ? 'Add a template' : 'New campaign'}
@@ -485,13 +338,6 @@ export default function Campaigns() {
         open={newTemplate}
         onOpenChange={setNewTemplate}
         onSaved={() => qc.invalidateQueries({ queryKey: ['campaign-templates'] })}
-      />
-      <NewCampaignDialog
-        templates={templates.data ?? []}
-        open={newCampaign}
-        onOpenChange={setNewCampaign}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['campaigns'] })}
-        initialListId={broadcastListId}
       />
     </div>
   );

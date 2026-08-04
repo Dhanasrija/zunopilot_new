@@ -402,3 +402,112 @@ describe('linking a lead to the customer who messages', () => {
     expect(created.body.data.customerId).toBe(customer.id);
   });
 });
+
+describe('the link between a lead and a customer, seen from Customers', () => {
+  const PHONE = '15551110090';
+
+  /** A customer for the same number, with one conversation so a deep link has a target. */
+  const makeCustomer = async (tenantId: string, waId = PHONE) => {
+    const customer = await prisma.customer.create({ data: { tenantId, waId } });
+    const conversation = await prisma.conversation.create({
+      data: { tenantId, customerId: customer.id, lastMessageAt: new Date() },
+    });
+    return { customer, conversation };
+  };
+
+  const listCustomers = (token: string, query = '') =>
+    request(app).get(`/api/customers${query}`).set(auth(token)).expect(200);
+
+  it('reports the lead behind a customer, so the Customers page can badge it', async () => {
+    const { customer } = await makeCustomer(TENANT_A);
+    const lead = await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+
+    const response = await listCustomers(ownerA);
+    const row = response.body.data.find((c: { id: string }) => c.id === customer.id);
+    expect(row.lead).toMatchObject({ id: lead.body.data.id, name: 'Priya', status: 'NEW' });
+  });
+
+  it('**omits the field entirely for a workspace without the module**', async () => {
+    // Absent rather than null. A key present as null would tell someone the concept exists,
+    // which is the roadmap leak `requireModule`'s 404 exists to prevent.
+    const { customer } = await makeCustomer(TENANT_A);
+    await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+    await prisma.tenantModule.updateMany({
+      where: { tenantId: TENANT_A, module: 'LEADS' }, data: { enabled: false },
+    });
+
+    const response = await listCustomers(ownerA);
+    const row = response.body.data.find((c: { id: string }) => c.id === customer.id);
+    expect(row).not.toHaveProperty('lead');
+  });
+
+  it('omits the field for a role that may read customers but not leads', async () => {
+    // Both questions have to be yes: the operator sold the module, *and* this role may read
+    // it. A customers permission is not a leads permission.
+    const { customer } = await makeCustomer(TENANT_A);
+    await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+
+    const role = await prisma.role.create({
+      data: { tenantId: TENANT_A, name: 'Front desk', permissions: ['customers:read'] },
+    });
+    const user = await prisma.user.create({
+      data: { tenantId: TENANT_A, phone: '15551110099', fullName: 'Desk', role: 'AGENT', roleId: role.id },
+    });
+
+    const response = await listCustomers(signToken({ userId: user.id }));
+    const row = response.body.data.find((c: { id: string }) => c.id === customer.id);
+    expect(row).not.toHaveProperty('lead');
+  });
+
+  it('filters to customers who are leads, and to those who are not', async () => {
+    const { customer: isLead } = await makeCustomer(TENANT_A, PHONE);
+    const { customer: notLead } = await makeCustomer(TENANT_A, '15551110091');
+    await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+
+    const leads = await listCustomers(ownerA, '?isLead=true');
+    expect(leads.body.data.map((c: { id: string }) => c.id)).toEqual([isLead.id]);
+
+    const others = await listCustomers(ownerA, '?isLead=false');
+    const ids = others.body.data.map((c: { id: string }) => c.id);
+    expect(ids).toContain(notLead.id);
+    expect(ids).not.toContain(isLead.id);
+  });
+
+  it('**ignores the filter when the workspace has no Leads module**', async () => {
+    // Otherwise `?isLead=true` returning a narrower list than `?isLead=false` would prove
+    // the module exists to a workspace that was never given it.
+    await makeCustomer(TENANT_A, PHONE);
+    await makeCustomer(TENANT_A, '15551110091');
+    await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+    await prisma.tenantModule.updateMany({
+      where: { tenantId: TENANT_A, module: 'LEADS' }, data: { enabled: false },
+    });
+
+    const filtered = await listCustomers(ownerA, '?isLead=true');
+    const all = await listCustomers(ownerA);
+    expect(filtered.body.meta.total).toBe(all.body.meta.total);
+  });
+
+  it("never reports another workspace's lead", async () => {
+    // Both workspaces hold a lead on the same number. `tenantId` is in the customers where,
+    // and the lead relation is reached through it, so B's lead cannot surface on A's row.
+    const { customer } = await makeCustomer(TENANT_A, PHONE);
+    await addLead(ownerB, { name: 'Beta lead', phone: PHONE }).expect(201);
+
+    const response = await listCustomers(ownerA);
+    const row = response.body.data.find((c: { id: string }) => c.id === customer.id);
+    expect(row.lead).toBeNull();
+  });
+
+  it('gives the lead the conversation id, so "Open conversation" lands on the thread', async () => {
+    // It used to link at bare `/inbox` and drop the agent on the list to find the person.
+    const { customer, conversation } = await makeCustomer(TENANT_A);
+    const created = await addLead(ownerA, { name: 'Priya', phone: PHONE }).expect(201);
+
+    const detail = await request(app)
+      .get(`/api/leads/${created.body.data.id}`).set(auth(ownerA)).expect(200);
+    // The detail route nests the lead under `data.lead`, beside its events and reminders.
+    expect(detail.body.data.lead.customer.id).toBe(customer.id);
+    expect(detail.body.data.lead.customer.conversations).toEqual([{ id: conversation.id }]);
+  });
+});

@@ -46,7 +46,13 @@ export interface Lead {
   valuePaise: number | null;
   notes: string | null;
   customerId: string | null;
-  customer: { id: string; waId: string; name: string | null } | null;
+  customer: {
+    id: string;
+    waId: string;
+    name: string | null;
+    /** The newest thread, or empty for a linked customer who has no conversation yet. */
+    conversations: Array<{ id: string }>;
+  } | null;
   nextActionAt: string | null;
   lastContactedAt: string | null;
   createdAt: string;

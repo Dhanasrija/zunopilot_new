@@ -1,8 +1,9 @@
-import type { Campaign, Prisma } from '@prisma/client';
+import type { Campaign, Prisma, TemplateHeaderFormat } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { whatsappProviderFor } from '../conversation-engine/providers/whatsapp.js';
+import { publicUrlFor } from '../media/media.service.js';
 import { recordOutboundMessage } from '../conversation-engine/providers/mirror.js';
 import { mayReceiveMarketing } from './consent.service.js';
 
@@ -21,11 +22,23 @@ export const campaignInclude = {
   template: {
     select: {
       id: true, name: true, metaTemplate: true, language: true, category: true,
-      status: true, bodyPreview: true,
+      status: true, bodyPreview: true, headerFormat: true,
     },
   },
   createdBy: { select: { id: true, fullName: true } },
+  // Loaded here rather than fetched at send time: `sendCampaignBatch` needs the asset for
+  // every message in the batch, and the include is the difference between one join and one
+  // query per recipient.
+  headerMedia: true,
 } satisfies Prisma.CampaignInclude;
+
+/**
+ * The header formats that require a file.
+ *
+ * `TEXT` and `NONE` are headers too, and neither needs media — treating "has a header" as
+ * "needs media" would block every text-header template for no reason.
+ */
+const MEDIA_HEADERS: TemplateHeaderFormat[] = ['IMAGE', 'VIDEO', 'DOCUMENT'];
 
 export interface AudienceFilter {
   /** Only customers seen since this date. */
@@ -158,6 +171,31 @@ export const startCampaign = async (
     );
   }
 
+  /*
+   * A media header with no media is refused **here**, not at Meta.
+   *
+   * Without this the campaign starts, and then every single message fails with a component
+   * mismatch — four hundred recipients, four hundred identical Graph API errors, and the
+   * only explanation in a log. One error on one screen is the same information delivered
+   * somewhere a person can act on it.
+   */
+  const needsMedia = MEDIA_HEADERS.includes(campaign.template.headerFormat);
+  if (needsMedia && !campaign.headerMediaId) {
+    throw ApiError.badRequest(
+      `The template "${campaign.template.name}" has a `
+      + `${campaign.template.headerFormat.toLowerCase()} header, so it needs a `
+      + `${campaign.template.headerFormat.toLowerCase()} attached before it can send.`,
+    );
+  }
+  if (needsMedia && campaign.headerMedia
+      && campaign.headerMedia.kind !== campaign.template.headerFormat) {
+    // Attaching a video to an image header is accepted by neither Meta nor common sense.
+    throw ApiError.badRequest(
+      `That template needs a ${campaign.template.headerFormat.toLowerCase()}, but the `
+      + `attached file is a ${campaign.headerMedia.kind.toLowerCase()}.`,
+    );
+  }
+
   const channel = await prisma.whatsappAccount.findFirst({ where: { tenantId } });
   if (!channel) throw ApiError.badRequest('No WhatsApp number is connected.');
 
@@ -242,6 +280,20 @@ export const sendCampaignBatch = async (
 
   const provider = whatsappProviderFor(channel);
   const params = Object.values((campaign.variableValues ?? {}) as Record<string, string>);
+
+  /*
+   * The header media, resolved once for the whole batch rather than per recipient.
+   *
+   * The URL is the same for every message, and `publicUrlFor` is pure — but building it in
+   * the loop would invite a database read per recipient the day it stops being pure.
+   */
+  const headerMedia = campaign.headerMedia && MEDIA_HEADERS.includes(campaign.template.headerFormat)
+    ? {
+      kind: campaign.headerMedia.kind,
+      link: publicUrlFor(campaign.headerMedia),
+      filename: campaign.headerMedia.originalName,
+    }
+    : undefined;
   const outcome: SendOutcome = { sent: 0, skipped: 0, failed: 0, remaining: 0 };
 
   for (const recipient of pending) {
@@ -267,6 +319,7 @@ export const sendCampaignBatch = async (
         templateName: campaign.template.metaTemplate,
         language: campaign.template.language,
         params,
+        headerMedia,
       });
 
       // A campaign send is a message like any other: it belongs in the thread,

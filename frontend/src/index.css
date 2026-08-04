@@ -68,6 +68,30 @@
     --duration-panel: 250ms;
     --duration-page: 400ms;
     --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /*
+     * How much vertical space the app shell takes from a full-height page.
+     *
+     * 48px is `main`'s `p-6` top and bottom. The two pages that fill the viewport — Inbox
+     * and Customers — subtract this rather than hard-coding 48px, which they both used to
+     * do: the mobile header added 56px those numbers knew nothing about, and both pages
+     * overhung the bottom of the screen on a phone.
+     *
+     * One definition, two consumers. Change the header height and this is the only place
+     * that needs to know.
+     *
+     * Both consumers apply it **only at `lg`**. Below that the two panes stack, and pinning
+     * a stacked column to the viewport height leaves the table a few pixels tall — on a
+     * phone the page should simply scroll.
+     */
+    --shell-offset: 104px; /* 48px padding + 56px mobile header */
+  }
+
+  /* At `lg` the mobile header is not rendered, so only the padding is taken. */
+  @media (min-width: 1024px) {
+    :root {
+      --shell-offset: 48px;
+    }
   }
 
   * {

@@ -126,6 +126,51 @@ model Tenant {
 
   // Module 24: curated customer lists
   customerLists CustomerList[]
+
+  // Module 25: uploaded media for template headers
+  mediaAssets MediaAsset[]
+}
+
+/// A file uploaded to fill a template's media header.
+///
+/// **The served URL is public and unauthenticated, by necessity.** Meta fetches the media
+/// itself when sending a template, from its own servers, with no way to present a token. So
+/// the protection is the id: a uuid in the path and nothing enumerable. That is the same
+/// trade every WhatsApp integration makes, and it is worth knowing rather than discovering.
+///
+/// The bytes live on disk under `MEDIA_DIR`, keyed by `storageKey` — a uuid, never anything
+/// derived from the uploaded filename, because a filename from a client is a path-traversal
+/// attempt waiting to happen. `originalName` keeps the human-readable version for display.
+model MediaAsset {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Which template header slot this can fill. Derived from the MIME type on upload, and
+  /// checked against the template's own header format before a campaign may use it.
+  kind MediaKind
+
+  mimeType     String
+  sizeBytes    Int
+  /// As the uploader named it. Display only — never used to build a path.
+  originalName String
+  /// The uuid filename on disk. Not the id, so the id can be rotated without moving bytes.
+  storageKey   String @unique
+
+  uploadedByUserId String?
+
+  createdAt DateTime @default(now())
+
+  campaigns Campaign[]
+
+  @@index([tenantId, kind, createdAt])
+}
+
+/// Matches the media header formats a Meta template can declare.
+enum MediaKind {
+  IMAGE
+  VIDEO
+  DOCUMENT
 }
 
 model User {
@@ -2363,6 +2408,15 @@ enum CampaignTemplateCategory {
   UTILITY
 }
 
+/// The header a Meta template can carry. `TEXT` still means no *media* is needed.
+enum TemplateHeaderFormat {
+  NONE
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
 enum CampaignTemplateStatus {
   DRAFT
   PENDING
@@ -2412,6 +2466,36 @@ model CampaignTemplate {
   /// approved template — so it can drift, and is labelled as a preview.
   bodyPreview String
 
+  /// The HEADER component's text, when `headerFormat` is TEXT. Null for every other format:
+  /// a media header has no text of its own.
+  headerText String?
+
+  /// The FOOTER component's text, if the template has one.
+  footerText String?
+
+  /// The BUTTONS component, reduced to what a preview shows: `[{ type, text }]`.
+  ///
+  /// **The label only, never the destination.** A URL button's target is Meta's business and
+  /// nothing here needs it, so it is not copied — a preview shows what the customer sees, and
+  /// storing less is one fewer thing to keep correct.
+  buttons Json @default("[]")
+
+  /// What the template's HEADER component is, if it has one.
+  ///
+  /// **Read from Meta, not typed in.** A template whose header is an image needs an image
+  /// supplied with every send; get this wrong and Meta rejects each message individually
+  /// with a component mismatch, which is a campaign that fails several hundred times and
+  /// explains itself nowhere useful. The sync endpoint parses it off the approved template
+  /// so the two cannot disagree.
+  headerFormat TemplateHeaderFormat @default(NONE)
+
+  /// Meta's own id for the template, when this row came from a sync. The upsert key, so
+  /// re-syncing updates rather than duplicating.
+  metaId String?
+
+  /// When this row was last reconciled with Meta. Null means it was created by hand.
+  syncedAt DateTime?
+
   /// Ordered placeholder descriptions, so the composer can ask for each one.
   variables Json @default("[]")
 
@@ -2444,6 +2528,15 @@ model Campaign {
 
   /// Values for the template's placeholders.
   variableValues Json @default("{}")
+
+  /// The media filling the template's header, when it declares one.
+  ///
+  /// `SetNull` rather than cascade: deleting an asset must not delete the campaigns that
+  /// used it — a sent campaign is a record of what happened. A *running* campaign losing
+  /// its media is caught at send time, which reports the failure per recipient instead of
+  /// silently omitting the header.
+  headerMediaId String?
+  headerMedia   MediaAsset? @relation(fields: [headerMediaId], references: [id], onDelete: SetNull)
 
   status CampaignStatus @default(DRAFT)
 

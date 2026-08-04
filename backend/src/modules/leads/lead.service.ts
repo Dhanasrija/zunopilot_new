@@ -24,7 +24,21 @@ export const TERMINAL_STATUSES: LeadStatus[] = ['WON', 'LOST'];
 
 export const leadInclude = {
   owner: { select: { id: true, fullName: true, phone: true, email: true } },
-  customer: { select: { id: true, waId: true, name: true } },
+  customer: {
+    select: {
+      id: true,
+      waId: true,
+      name: true,
+      // The newest thread only, so "Open conversation" can land on it instead of dropping
+      // the agent on the Inbox list to find the person by hand. One row per lead, not the
+      // whole history — the id is all the deep link needs.
+      conversations: {
+        orderBy: { lastMessageAt: 'desc' as const },
+        take: 1,
+        select: { id: true },
+      },
+    },
+  },
 } satisfies Prisma.LeadInclude;
 
 /**

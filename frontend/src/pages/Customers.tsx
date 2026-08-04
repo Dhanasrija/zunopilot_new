@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
@@ -11,6 +11,8 @@ import {
   useAddToList, useCustomerLists, useRemoveFromList,
 } from '@/lib/customer-lists';
 import { splitNumber } from '@/lib/countries';
+import { usePermissions } from '@/lib/permissions';
+import { useHasModule } from '@/stores/auth.store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +27,7 @@ import {
 import { Label } from '@/components/ui/label';
 import {
   MessageSquarePlus, UserPlus, Pencil, Info, MoreHorizontal, Search, Filter, Send, Tag, Check,
+  Target,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -47,6 +50,15 @@ interface Customer {
   lastMessageAt?: string | null;
   marketingOptIn?: boolean;
   optedOutAt?: string | null;
+  /**
+   * The lead behind this number, when there is one.
+   *
+   * **Absent, not null, when the workspace does not have Leads** — the server omits the key
+   * entirely rather than sending null, so an undefined here means "cannot say" and a null
+   * means "this customer is not a lead". Nothing on this page needs to tell those apart, but
+   * the distinction is why the field is optional rather than nullable.
+   */
+  lead?: { id: string; name: string; status: string; ownerId: string | null } | null;
 }
 interface CustomerDetail extends Customer {
   orders: { id: string; orderNumber: number; status: string; totalAmount: number; placedAt: string }[];
@@ -69,6 +81,18 @@ const phoneLabel = (customer: Customer): string => {
   if (!parts) return raw.startsWith('+') ? raw : `+${raw}`;
   return `${parts.country.dialCode} ${parts.national} · ${parts.country.name}`;
 };
+
+/**
+ * The two halves of the lead filter.
+ *
+ * "Not a lead" is as useful as "is a lead" — it is how someone finds the customers their
+ * pipeline has never picked up, which is the whole reason to look at this from the Customers
+ * side rather than from Leads.
+ */
+const LEAD_OPTIONS = [
+  { value: 'yes' as const, label: 'Is a lead' },
+  { value: 'no' as const, label: 'Not a lead' },
+];
 
 // ── Add / edit dialog ─────────────────────────────────────────────────────────
 // One component for both modes. In edit mode the WhatsApp number is shown but not
@@ -192,7 +216,18 @@ export default function Customers() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ContactStatus | ''>('');
   const [tag, setTag] = useState('');
+  /** `true` = only leads, `false` = only non-leads, `''` = don't filter. */
+  const [leadOnly, setLeadOnly] = useState<'' | 'yes' | 'no'>('');
   const [page, setPage] = useState(1);
+
+  /**
+   * Leads is optional and separately permissioned, so this page shows lead information only
+   * when both are true. The server enforces it as well and omits the field regardless — this
+   * is here so a workspace without Leads never sees a filter for something it does not have.
+   */
+  const hasLeads = useHasModule('LEADS');
+  const { can } = usePermissions();
+  const showLeads = hasLeads && can('leads:read');
 
   const [selected, setSelected] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
@@ -216,7 +251,7 @@ export default function Customers() {
   // Every filter is in the key, so changing one refetches rather than reusing the previous
   // answer. Leaving any of them out is the bug where picking a list changes nothing.
   const { data, isLoading } = useQuery({
-    queryKey: ['customers', { listId, search, status, tag, page }],
+    queryKey: ['customers', { listId, search, status, tag, leadOnly, page }],
     queryFn: async () => {
       const response = await api.get<{ data: Customer[]; meta: { total: number } }>('/customers', {
         params: {
@@ -224,6 +259,7 @@ export default function Customers() {
           search: search || undefined,
           status: status || undefined,
           tag: tag || undefined,
+          isLead: leadOnly ? leadOnly === 'yes' : undefined,
           take: PAGE_SIZE,
           skip: (page - 1) * PAGE_SIZE,
         },
@@ -274,6 +310,13 @@ export default function Customers() {
   /** Any filter change returns to page 1, or a narrower result shows an empty table. */
   const resetTo = <T,>(setter: (v: T) => void) => (value: T) => { setter(value); setPage(1); };
 
+  /** One place, so a filter added later cannot be forgotten by the Clear buttons. */
+  const clearFilters = () => {
+    resetTo(setStatus)('');
+    resetTo(setTag)('');
+    resetTo(setLeadOnly)('');
+  };
+
   const pageIds = rows.map((c) => c.id);
   const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const togglePage = () => setSelectedIds((current) => {
@@ -293,7 +336,7 @@ export default function Customers() {
   const taggingCustomer = rows.find((c) => c.id === taggingId) ?? null;
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col gap-4">
+    <div className="flex flex-col gap-4 lg:h-[calc(100vh-var(--shell-offset))]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-h2 font-semibold">Customers</h1>
@@ -346,9 +389,17 @@ export default function Customers() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => { resetTo(setStatus)(''); resetTo(setTag)(''); }}>
+                  <DropdownMenuItem onClick={clearFilters}>
                     Clear filters
                   </DropdownMenuItem>
+                  {showLeads && LEAD_OPTIONS.map((option) => (
+                    <DropdownMenuItem key={option.value} onClick={() => resetTo(setLeadOnly)(option.value)}>
+                      <span className="mr-2 w-3.5">
+                        {leadOnly === option.value && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
                   {STATUS_OPTIONS.map((option) => (
                     <DropdownMenuItem key={option} onClick={() => resetTo(setStatus)(option)}>
                       {/* An icon rather than a tick character — §8 keeps glyphs like that
@@ -376,22 +427,24 @@ export default function Customers() {
                   reachable than the list has members. */}
               <Button
                 className="gap-1"
-                onClick={() => nav(listId ? `/campaigns?listId=${listId}` : '/campaigns')}
+                onClick={() => nav(listId ? `/campaigns/new?listId=${listId}` : '/campaigns/new')}
               >
                 <Send className="h-4 w-4" /> Broadcast
               </Button>
             </div>
           </div>
 
-          {(status || tag) && (
+          {(status || tag || leadOnly) && (
             <div className="flex flex-wrap items-center gap-2 border-b bg-surface-0/40 px-4 py-2">
               <span className="text-caption text-ink-500">Filtered by</span>
               {status && <Badge variant="secondary">{statusLabel(status)}</Badge>}
               {tag && <Badge variant="secondary">{tag}</Badge>}
-              <Button variant="outline" size="sm"
-                onClick={() => { resetTo(setStatus)(''); resetTo(setTag)(''); }}>
-                Clear
-              </Button>
+              {leadOnly && (
+                <Badge variant="secondary">
+                  {LEAD_OPTIONS.find((o) => o.value === leadOnly)?.label}
+                </Badge>
+              )}
+              <Button variant="outline" size="sm" onClick={clearFilters}>Clear</Button>
             </div>
           )}
 
@@ -489,9 +542,26 @@ export default function Customers() {
                           {initialsOf(c.name, c.waId)}
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-ink-900">
-                            {c.name || '—'}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm font-medium text-ink-900">
+                              {c.name || '—'}
+                            </p>
+                            {/* Straight to the lead. `stopPropagation` because the row itself
+                                opens the customer dialog, and a link inside a clickable row
+                                otherwise does both. */}
+                            {showLeads && c.lead && (
+                              <Link
+                                to={`/leads/${c.lead.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                title={`${c.lead.name} — ${c.lead.status.toLowerCase()} in the pipeline`}
+                              >
+                                <Badge variant="outline" className="gap-1">
+                                  <Target className="h-3 w-3" />
+                                  Lead
+                                </Badge>
+                              </Link>
+                            )}
+                          </div>
                           <p className="truncate text-caption text-ink-500">{phoneLabel(c)}</p>
                         </div>
                       </div>
@@ -533,6 +603,11 @@ export default function Customers() {
                           <DropdownMenuItem onClick={() => setTaggingId(c.id)}>
                             <Tag className="mr-2 h-3.5 w-3.5" /> Manage tags
                           </DropdownMenuItem>
+                          {showLeads && c.lead && (
+                            <DropdownMenuItem onClick={() => nav(`/leads/${c.lead!.id}`)}>
+                              <Target className="mr-2 h-3.5 w-3.5" /> Open lead
+                            </DropdownMenuItem>
+                          )}
                           {listId && (
                             <DropdownMenuItem
                               onClick={() => removeFromList.mutate({ listId, customerIds: [c.id] })}
@@ -575,7 +650,15 @@ export default function Customers() {
                 <div><div className="text-muted-foreground">Orders</div><div>{detail.data.orders.length}</div></div>
                 <div><div className="text-muted-foreground">Lifetime</div><div>{formatCurrency(detail.data.lifetimeSpend as number)}</div></div>
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
+                {showLeads && detail.data.lead && (
+                  <Button asChild variant="outline">
+                    <Link to={`/leads/${detail.data.lead.id}`}>
+                      <Target className="mr-1 h-3.5 w-3.5" />
+                      Open lead ({detail.data.lead.status.toLowerCase()})
+                    </Link>
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => detail.data && openEdit(detail.data)}>
                   <Pencil className="mr-1 h-3.5 w-3.5" />Edit details
                 </Button>

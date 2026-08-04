@@ -1,9 +1,24 @@
-import { queryEnum, queryInt, queryOffset, queryString } from '../utils/query.js';
-import { tenantIdOf } from '../middleware/auth.js';
+import { queryBool, queryEnum, queryInt, queryOffset, queryString } from '../utils/query.js';
+import { holds, tenantIdOf } from '../middleware/auth.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
+import { moduleEnabled } from '../modules/modules/module.service.js';
+
+/**
+ * Whether this request may see that a customer is also a lead.
+ *
+ * **Two questions, both of which have to be yes.** Whether the workspace was given Leads at
+ * all is the operator's decision; whether this person may read them is the workspace's. A
+ * customers screen that leaked either would tell someone about a module they were never sold,
+ * which is the same roadmap leak `requireModule`'s 404 exists to prevent.
+ *
+ * When the answer is no the field is not included at all, rather than sent as null — an
+ * absent field cannot be mistaken for "this customer is not a lead".
+ */
+const maySeeLeads = async (req: Parameters<typeof tenantIdOf>[0]): Promise<boolean> =>
+  holds(req, 'leads:read') && await moduleEnabled(tenantIdOf(req), 'LEADS');
 
 // `waId` is the WhatsApp identity: the phone number in international format with
 // no '+', spaces, or leading zeros. Staff will type it any number of ways, so
@@ -112,6 +127,8 @@ export const listCustomers = asyncHandler(async (req, res) => {
   const listId = queryString(req.query.listId);
   const tag = queryString(req.query.tag);
   const status = queryEnum(req.query.status, ['subscribed', 'pending', 'unsubscribed'] as const);
+  const withLeads = await maySeeLeads(req);
+  const isLead = withLeads ? queryBool(req.query.isLead) : undefined;
   const where: Prisma.CustomerWhereInput = { tenantId: tenantIdOf(req) };
   if (search) {
     where.OR = [
@@ -134,6 +151,9 @@ export const listCustomers = asyncHandler(async (req, res) => {
   if (status === 'unsubscribed') where.optedOutAt = { not: null };
   if (status === 'subscribed') { where.marketingOptIn = true; where.optedOutAt = null; }
   if (status === 'pending') { where.marketingOptIn = false; where.optedOutAt = null; }
+  // Whether this customer is also a lead. Silently ignored when the workspace does not have
+  // Leads, so the parameter cannot be used to probe for the module's existence.
+  if (isLead !== undefined) where.lead = isLead ? { isNot: null } : { is: null };
   // Was a bare `take: 200` with no offset and no total, so a workspace with more than
   // 200 customers simply never saw the rest — and nothing on the page said so. Same
   // `data` + `meta` shape the operator console uses, which is what lets a page-number
@@ -157,6 +177,11 @@ export const listCustomers = asyncHandler(async (req, res) => {
           take: 1,
           select: { lastMessageAt: true },
         },
+        // The lead behind this number, when there is one and this request may see it.
+        // Spread so the key is absent rather than null when Leads is off — see `maySeeLeads`.
+        ...(withLeads
+          ? { lead: { select: { id: true, name: true, status: true, ownerId: true } } }
+          : {}),
       },
     }),
     prisma.customer.count({ where }),
@@ -204,6 +229,9 @@ export const getCustomer = asyncHandler(async (req, res) => {
     include: {
       orders: { orderBy: { placedAt: 'desc' }, take: 50, include: { items: true } },
       conversations: { orderBy: { lastMessageAt: 'desc' }, take: 10 },
+      ...(await maySeeLeads(req)
+        ? { lead: { select: { id: true, name: true, status: true, ownerId: true } } }
+        : {}),
     },
   });
   if (!customer) throw ApiError.notFound();
