@@ -22,11 +22,34 @@ export const createCategory = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: cat });
 });
 
+/*
+ * Why the update handlers below name every field instead of forwarding `req.body`.
+ *
+ * They used to pass `req.body` straight to Prisma. The ownership check above it is real —
+ * you cannot reach another tenant's row — but the *payload* was never filtered, and these
+ * routes validate with express-validator, which checks the fields it is told about and
+ * leaves everything else untouched. `tenantId` is a plain scalar column, and Prisma's
+ * unchecked update input accepts it, so:
+ *
+ *     PATCH /api/menu/categories/<my-own-id>  {"name":"x","tenantId":"<someone-else's>"}
+ *
+ * moved the row into another workspace. Not a read of anyone else's data, but a write
+ * across the tenant boundary, which is the same wall.
+ *
+ * The Zod helpers in `middleware/validate.ts` reassign `req.body` to the parsed value and
+ * strip unknown keys, which is why the engine's `data: req.body` calls are safe. These
+ * routes are on the older express-validator path, so the whitelist has to be here — the
+ * same shape `customer.controller.ts` and `workflow.controller.ts` already use.
+ */
 export const updateCategory = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const cat = await prisma.menuCategory.findFirst({ where: { id, tenantId: tenantIdOf(req) } });
   if (!cat) throw ApiError.notFound();
-  const updated = await prisma.menuCategory.update({ where: { id }, data: req.body });
+  const { name, description, sortOrder, isActive } = req.body;
+  const updated = await prisma.menuCategory.update({
+    where: { id },
+    data: { name, description, sortOrder, isActive },
+  });
   res.json({ success: true, data: updated });
 });
 
@@ -84,14 +107,36 @@ export const updateItem = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const item = await prisma.menuItem.findFirst({ where: { id, tenantId: tenantIdOf(req) } });
   if (!item) throw ApiError.notFound();
-  const { addonGroupIds, ...rest } = req.body;
+  const {
+    addonGroupIds, categoryId, name, description, basePrice, imageUrl, inStock, sortOrder,
+    attributes,
+  } = req.body;
+
+  // A move between categories is allowed, but only to one of this tenant's own. `createItem`
+  // has always checked this; the update path took whatever UUID it was handed, so an item
+  // could be filed under a category belonging to someone else.
+  if (categoryId !== undefined && categoryId !== item.categoryId) {
+    const category = await prisma.menuCategory.findFirst({
+      where: { id: categoryId, tenantId: tenantIdOf(req) },
+    });
+    if (!category) throw ApiError.badRequest('Invalid category');
+  }
+
   if (addonGroupIds) {
     await prisma.menuItemAddonGroup.deleteMany({ where: { itemId: id } });
     await prisma.menuItemAddonGroup.createMany({
       data: addonGroupIds.map((groupId: string) => ({ itemId: id, groupId })),
     });
   }
-  const updated = await prisma.menuItem.update({ where: { id }, data: rest });
+  const updated = await prisma.menuItem.update({
+    where: { id },
+    data: {
+      categoryId, name, description, basePrice, imageUrl, inStock, sortOrder,
+      // `undefined` leaves the column alone; `null` would erase it, and express-validator
+      // does not distinguish "absent" from "explicitly null" for an optional JSON field.
+      attributes: attributes ?? undefined,
+    },
+  });
   res.json({ success: true, data: updated });
 });
 

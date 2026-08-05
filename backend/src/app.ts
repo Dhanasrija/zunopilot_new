@@ -3,8 +3,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { randomUUID } from 'node:crypto';
 import { env } from './config/env.js';
-import { httpLoggerStream } from './config/logger.js';
+import { prisma } from './config/prisma.js';
+import { httpLoggerStream, logger } from './config/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { routes } from './routes/index.js';
 import { publicMediaRoutes } from './modules/media/media.routes.js';
@@ -26,7 +28,45 @@ export const buildApp = (): Express => {
   app.set('trust proxy', 1);
 
   app.use(helmet());
-  app.use(cors());
+
+  /*
+   * CORS, restricted to the origins this API is actually served to.
+   *
+   * It used to be a bare `cors()`, which reflects whatever `Origin` it is given. That was
+   * never the dramatic hole it looks like — sessions are a bearer token in a header, not a
+   * cookie, so a hostile page cannot ride an existing session the way it could with
+   * `credentials: true` — but "any website may read our JSON if it obtains a token" is not a
+   * property worth keeping, and `frontendUrl` was already sitting in the config for exactly
+   * this.
+   *
+   * No `Origin` header at all is allowed through: that is every server-to-server caller,
+   * curl, and Meta's webhook. CORS is a browser control, and refusing those would break the
+   * webhook while stopping nothing.
+   */
+  const allowedOrigins = new Set([env.frontendUrl, env.superAdmin.origin, env.appUrl]);
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      logger.warn('Blocked a cross-origin request from an unknown origin', { origin });
+      return callback(null, false);
+    },
+  }));
+
+  /*
+   * A request id on every request, echoed in the response and carried into the logs.
+   *
+   * Honours an inbound `X-Request-Id` so a proxy's id wins and one identifier spans the whole
+   * hop; generates one otherwise. This is the smallest thing that makes "a customer says
+   * saving failed at about 3pm" answerable — before it, nothing tied a user's report to a
+   * line in the log.
+   */
+  app.use((req, res, next) => {
+    const inbound = req.get('x-request-id');
+    const id = inbound && /^[\w-]{1,128}$/.test(inbound) ? inbound : randomUUID();
+    (req as express.Request & { requestId?: string }).requestId = id;
+    res.setHeader('X-Request-Id', id);
+    next();
+  });
   // The raw body is kept alongside the parsed one so the WhatsApp webhook can
   // verify Meta's X-Hub-Signature-256, which is computed over the exact bytes
   // sent — re-serialising the parsed JSON would produce a different digest.
@@ -50,7 +90,31 @@ export const buildApp = (): Express => {
   });
   app.use('/api', apiLimiter);
 
-  app.get('/health', (_req, res) => { res.json({ status: 'ok', uptime: process.uptime() }); });
+  /*
+   * Health, meaning "can this instance actually serve a request".
+   *
+   * It used to return 200 unconditionally, which is the one answer a load balancer must
+   * never be given wrongly: an instance whose database connection is gone reported itself
+   * healthy and kept receiving traffic, so every request it took returned a 500. A liveness
+   * check that cannot fail is decoration.
+   *
+   * `SELECT 1` and nothing more. The point is to exercise the connection pool, not to audit
+   * the schema — a health check that runs real queries becomes a load source of its own, and
+   * one that touches many subsystems fails for reasons that are not this instance's fault.
+   * pg-boss is deliberately not checked: workers are optional in this process
+   * (`RUN_WORKERS_IN_API`), so a queue problem must not take the API out of rotation.
+   */
+  app.get('/health', async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      res.json({ status: 'ok', uptime: process.uptime() });
+    } catch (err) {
+      logger.error('Health check failed: the database is unreachable', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(503).json({ status: 'unavailable', uptime: process.uptime() });
+    }
+  });
 
   app.use('/api', routes);
 

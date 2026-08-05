@@ -1,4 +1,5 @@
 import { OrderStatus, PrismaClient, Prisma } from '@prisma/client';
+import { assertSeedable } from './guard.js';
 
 // Bulk customers and orders for Demo Biryani House, so the list pages have enough in
 // them to exercise pagination, filters and CSV export.
@@ -149,6 +150,7 @@ const clean = async () => {
 };
 
 const main = async () => {
+  assertSeedable({ script: 'seed-demo-volume' });
   const tenant = await prisma.tenant.findUnique({
     where: { id: TENANT_ID },
     select: { businessName: true },

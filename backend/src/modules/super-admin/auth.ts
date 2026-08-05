@@ -51,17 +51,21 @@ export interface SuperAdminTokenPayload {
   superAdminId: string;
 }
 
+/** Pinned, not taken from the token's own header. See the note in utils/jwt.ts. */
+const ALGORITHM = 'HS256' as const;
+
 export const signSuperAdminToken = (superAdminId: string): string => jwt.sign(
   { superAdminId } satisfies SuperAdminTokenPayload,
   secret(),
   {
+    algorithm: ALGORITHM,
     audience: AUDIENCE,
     expiresIn: env.superAdmin.jwtExpiresIn as SignOptions['expiresIn'],
   },
 );
 
 export const verifySuperAdminToken = (token: string): SuperAdminTokenPayload => {
-  const decoded = jwt.verify(token, secret(), { audience: AUDIENCE });
+  const decoded = jwt.verify(token, secret(), { algorithms: [ALGORITHM], audience: AUDIENCE });
   if (typeof decoded === 'string' || typeof decoded.superAdminId !== 'string') {
     throw new jwt.JsonWebTokenError('Token payload is missing superAdminId');
   }

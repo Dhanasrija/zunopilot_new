@@ -2,6 +2,7 @@ import { PrismaClient, Prisma, UserRole } from '@prisma/client';
 import type { WorkflowDefinition } from '../src/modules/conversation-engine/domain/definition.js';
 import type { CapabilityContract } from '../src/modules/conversation-engine/domain/capability.js';
 import { validateWorkflowDefinition } from '../src/modules/conversation-engine/validation/definition-validator.js';
+import { assertSeedable } from './guard.js';
 
 // Bright Minds Academy — the connectors demo.
 //
@@ -298,6 +299,7 @@ const definition: WorkflowDefinition = {
 };
 
 const main = async () => {
+  assertSeedable({ script: 'seed-lms' });
   const result = validateWorkflowDefinition({
     definition, category: 'CONVERSATION', capability, slug: 'cancel_class', siblingSlugs: [],
   });

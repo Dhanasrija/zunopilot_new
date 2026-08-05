@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../src/config/prisma.js';
+import { assertSeedable } from './guard.js';
 
 // Seed the first super admin.
 //
@@ -25,6 +26,7 @@ const resolvePassword = (): { password: string; generated: boolean } => {
 };
 
 const main = async () => {
+  assertSeedable({ script: 'seed-superadmin' });
   const existing = await prisma.superAdmin.findUnique({ where: { email: EMAIL } });
 
   if (existing && !RESET) {

@@ -58,8 +58,23 @@ export const env = {
   },
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   databaseUrl: required('DATABASE_URL'),
+  /**
+   * The tenant session secret. **No default, deliberately** — see `superAdmin.jwtSecret`
+   * above for the full reasoning, which applies here with more force because this secret
+   * guards every customer's workspace rather than one operator console.
+   *
+   * It used to read `required('JWT_SECRET', 'dev-secret-change-me')`. That cannot throw:
+   * `required` only fails when the env var *and* the fallback are empty, so supplying a
+   * fallback disables the check the function exists to perform. An unset `JWT_SECRET`
+   * booted silently and signed every session with a string committed to this repository —
+   * `jwt.sign({ userId }, 'dev-secret-change-me')` was any user of any tenant. The same
+   * "unset must not read as configured" mistake, in its fifth incarnation.
+   *
+   * Length is enforced at boot in `server.ts`, not here, so importing this module for a
+   * test does not depend on a production-grade secret being present.
+   */
   jwt: {
-    secret: required('JWT_SECRET', 'dev-secret-change-me'),
+    secret: required('JWT_SECRET'),
     expiresIn: process.env.JWT_EXPIRES_IN || '1d',
   },
   /**
@@ -98,7 +113,14 @@ export const env = {
     appSecret: process.env.META_APP_SECRET || '',
     configId: process.env.META_CONFIG_ID || '',
     graphVersion: process.env.META_GRAPH_VERSION || 'v21.0',
-    webhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || 'verify-token',
+    /**
+     * The subscribe-handshake token, shared with Meta.
+     *
+     * Empty rather than `'verify-token'` when unset. A guessable default let anyone
+     * complete the handshake, and — worse — made the "secret" in the mismatch diagnostic
+     * that used to live in `webhook.controller.ts` not a secret at all.
+     */
+    webhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || '',
     // Six-digit two-step PIN used to register onboarded numbers for Cloud API.
     // Optional: when unset, phone registration is skipped and reported as a warning.
     defaultPhonePin: process.env.META_DEFAULT_PHONE_PIN || '',
@@ -198,3 +220,34 @@ export const env = {
 };
 
 export type Env = typeof env;
+
+/** 32 characters is roughly 192 bits from `openssl rand -base64 48`. */
+const MIN_SECRET_LENGTH = 32;
+
+/**
+ * Why the tenant session secret is too weak to start with, or `null` when it is fine.
+ *
+ * A separate exported predicate rather than an inline `if` in `server.ts` so a test can
+ * assert the rule without spawning a process. Absence is not checked here: `required()`
+ * above already throws at import for that, which is the earliest possible failure.
+ *
+ * The mirror of `superAdminConfigured()`. Both surfaces now refuse to start on a weak
+ * signing secret, which is the property that matters — a server that comes up and then
+ * accepts forged tokens looks healthy right up until it isn't.
+ */
+export const jwtSecretWeakness = (): string | null => {
+  const secret = process.env.JWT_SECRET ?? '';
+
+  // Named first, before the length rule. The old fallback is 20 characters, so the length
+  // check would catch it anyway and report "20 characters" — true, but it sends the operator
+  // to count instead of telling them the actual problem: this exact string is public, and
+  // lengthening it is not the fix. Checking it second made this branch unreachable.
+  if (secret === 'dev-secret-change-me') {
+    return 'JWT_SECRET is still the placeholder that used to be this app\'s fallback, which is '
+      + 'published in the repository and therefore not a secret';
+  }
+  if (secret.length < MIN_SECRET_LENGTH) {
+    return `JWT_SECRET is ${secret.length} characters; at least ${MIN_SECRET_LENGTH} are required`;
+  }
+  return null;
+};

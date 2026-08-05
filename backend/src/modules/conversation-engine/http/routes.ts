@@ -42,6 +42,23 @@ const author = requirePermission('workflows:author');
 const connectorAuthor = requirePermission('connectors:author');
 const publisher = requirePermission('workflows:publish');
 const remover = requirePermission('workflows:delete');
+/**
+ * Reading a workflow is a named grant too, not a side effect of being signed in.
+ *
+ * This router is mounted at `/workflows` **before** the legacy one in `routes/index.ts`, so
+ * whichever path it defines it answers first. `GET /:workflowId` had only `requireAuth`,
+ * which meant the legacy router's `requirePermission('workflows:read')` on the identical URL
+ * never ran: a role with that permission deliberately withheld still got the full node
+ * graph. Shadowing makes the gate silently unreachable rather than visibly absent, which is
+ * why it survived — the same way the connector reads below did, see the note there.
+ */
+const reader = requirePermission('workflows:read');
+/**
+ * Seizing or releasing a live conversation is the inbox's automation toggle by another name,
+ * so it answers to the same grant. `inbox.routes.ts` has always gated the equivalent action;
+ * these two endpoints took any authenticated member, including one whose role holds nothing.
+ */
+const automationToggler = requirePermission('inbox:toggle_automation');
 
 /**
  * Rate limit for anything that can trigger an LLM completion.
@@ -125,14 +142,14 @@ templateRoutes.get('/', workflows.listTemplates);
 export const engineWorkflowRoutes = Router();
 engineWorkflowRoutes.use(requireAuth);
 
-engineWorkflowRoutes.get('/:workflowId', validateParams(workflowIdParam), workflows.getWorkflow);
+engineWorkflowRoutes.get('/:workflowId', validateParams(workflowIdParam), reader, workflows.getWorkflow);
 engineWorkflowRoutes.patch('/:workflowId', validateParams(workflowIdParam), author, validateBody(updateWorkflowSchema), workflows.updateWorkflow);
 engineWorkflowRoutes.delete('/:workflowId', validateParams(workflowIdParam), remover, workflows.deleteWorkflow);
 
-engineWorkflowRoutes.get('/:workflowId/capability', validateParams(workflowIdParam), workflows.getCapability);
+engineWorkflowRoutes.get('/:workflowId/capability', validateParams(workflowIdParam), reader, workflows.getCapability);
 engineWorkflowRoutes.put('/:workflowId/capability', validateParams(workflowIdParam), author, validateBody(putCapabilitySchema), workflows.putCapability);
 
-engineWorkflowRoutes.get('/:workflowId/versions', validateParams(workflowIdParam), workflows.listVersions);
+engineWorkflowRoutes.get('/:workflowId/versions', validateParams(workflowIdParam), reader, workflows.listVersions);
 engineWorkflowRoutes.post('/:workflowId/versions', validateParams(workflowIdParam), author, validateBody(createVersionSchema), workflows.createVersion);
 
 engineWorkflowRoutes.post('/:workflowId/validate', validateParams(workflowIdParam), author, validateBody(validateWorkflowSchema), workflows.validateWorkflow);
@@ -156,8 +173,8 @@ instanceRoutes.post('/:instanceId/cancel', author, validateBody(cancelInstanceSc
 export const conversationEngineRoutes = Router();
 conversationEngineRoutes.use(requireAuth);
 
-conversationEngineRoutes.post('/:conversationId/handoff', validateBody(handoffSchema), instances.handoffConversation);
-conversationEngineRoutes.post('/:conversationId/resume-bot', instances.resumeBot);
+conversationEngineRoutes.post('/:conversationId/handoff', automationToggler, validateBody(handoffSchema), instances.handoffConversation);
+conversationEngineRoutes.post('/:conversationId/resume-bot', automationToggler, instances.resumeBot);
 conversationEngineRoutes.post('/:conversationId/simulate', author, llmLimiter, validateBody(simulatorReplySchema), instances.simulatorReply);
 conversationEngineRoutes.get('/:conversationId/routing-decisions', routing.listRoutingDecisions);
 

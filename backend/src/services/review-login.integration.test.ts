@@ -22,7 +22,7 @@ const app = buildApp();
 
 const NUMBER = '9955000111';
 const E164 = `91${NUMBER}`;
-const CODE = '7412';
+const CODE = '741253';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let saved: Record<string, string | undefined> = {};
@@ -154,7 +154,7 @@ describe('nothing else is relaxed', () => {
 
   it('refuses a wrong code', async () => {
     await askForCode(E164);
-    await verify(E164, '9999').expect(401);
+    await verify(E164, '999999').expect(401);
   });
 });
 

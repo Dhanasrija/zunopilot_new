@@ -1,4 +1,5 @@
 import type { Payment, Prisma } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { DISCLOSURES, INTERVAL_META, planByCode, type BillingInterval } from './catalogue.js';
@@ -19,6 +20,31 @@ import { computeGst, grossPaise, sellerTaxIdentity, GST_RATE_BPS, GST_STATES } f
 //     actually succeeded. A failed or retried payment never consumes one.
 
 const PREFIX = 'ZP';
+
+/** How many times to re-attempt an invoice number lost to a concurrent issue. */
+const MAX_SEQUENCE_ATTEMPTS = 10;
+
+/** Which unique index a P2002 landed on, or `null` if it was not a P2002 at all. */
+const collidedOn = (err: unknown): string | null => {
+  if (!(err instanceof PrismaClientKnownRequestError) || err.code !== 'P2002') return null;
+  return String((err.meta as { target?: string | string[] } | undefined)?.target ?? '');
+};
+
+/**
+ * Two issues for the **same payment** — the webhook and the browser callback, which
+ * `billing.controller.ts` notes both routinely arrive. Recoverable: return the winner's
+ * invoice.
+ */
+const isPaymentCollision = (err: unknown): boolean => collidedOn(err)?.includes('paymentId') ?? false;
+
+/**
+ * Two issues for **different payments of one tenant** that read the same `max(sequence)`.
+ * Retryable: this payment still needs an invoice, just with the next number.
+ *
+ * Telling these two apart is the entire fix. The old code treated every P2002 as the first
+ * case, looked for an invoice against its own `paymentId`, found none, and gave up.
+ */
+const isSequenceCollision = (err: unknown): boolean => collidedOn(err)?.includes('sequence') ?? false;
 
 export interface IssueInvoiceArgs {
   payment: Payment;
@@ -166,8 +192,8 @@ export const issueInvoiceForPayment = async ({
     buyerStateCode: tenant.gstStateCode,
   });
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  async function issueOnce() {
+    return prisma.$transaction(async (tx) => {
       // Allocate inside the transaction, so two concurrent issues cannot pick
       // the same number. The unique index on (tenantId, sequence) is the
       // backstop if they somehow do.
@@ -255,20 +281,52 @@ export const issueInvoiceForPayment = async ({
 
       return invoice;
     });
-  } catch (err) {
-    // A unique violation means another writer won the race and the invoice
-    // already exists — return theirs rather than failing a paid transaction.
-    const code = (err as Prisma.PrismaClientKnownRequestError)?.code;
-    if (code === 'P2002') {
-      const raced = await prisma.invoice.findUnique({ where: { paymentId: payment.id } });
-      if (raced) return raced;
-    }
-    logger.error('Could not issue invoice', {
-      paymentId: payment.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
   }
+
+  /*
+   * Allocate the number, and retry if someone else took it.
+   *
+   * The transaction below is necessary but not sufficient. `findFirst` takes no lock, so under
+   * READ COMMITTED — Postgres's default, and what Prisma uses — two transactions can both read
+   * the same `max(sequence)` and both try to insert it. The unique index on
+   * `(tenantId, sequence)` correctly refuses the second one, and that is where this used to
+   * end: the `catch` recovered only the case where the collision was on `paymentId`, so a
+   * *different* payment losing the race found no invoice of its own and rethrew. A collected
+   * payment with no GST invoice, which for Indian invoicing is a compliance problem and not
+   * merely a failed request.
+   *
+   * Two payments for one tenant landing in the same instant is not exotic: a renewal and an
+   * AI-overage charge, or two subscriptions activating together.
+   *
+   * A Postgres sequence would be the obvious fix and is the wrong one — it advances on
+   * rollback and leaves gaps, and gapless is the requirement. So: retry, exactly as
+   * `ticket.service.ts` does for ticket numbers, with the index still the backstop.
+   */
+  for (let attempt = 0; attempt < MAX_SEQUENCE_ATTEMPTS; attempt += 1) {
+    try {
+      return await issueOnce();
+    } catch (err) {
+      // The same payment, issued twice concurrently. Whoever won produced the invoice this
+      // caller wanted, so return theirs rather than failing a paid transaction.
+      if (isPaymentCollision(err)) {
+        const raced = await prisma.invoice.findUnique({ where: { paymentId: payment.id } });
+        if (raced) return raced;
+      }
+      if (!isSequenceCollision(err) || attempt === MAX_SEQUENCE_ATTEMPTS - 1) {
+        logger.error('Could not issue invoice', {
+          paymentId: payment.id,
+          attempt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+      // Jittered, so a burst of contenders does not re-collide in lockstep.
+      await new Promise((resolve) => { setTimeout(resolve, 10 + Math.random() * 40); });
+    }
+  }
+
+  // Unreachable: the loop either returns or rethrows on its last attempt.
+  throw new Error('Could not allocate an invoice number');
 };
 
 /** Rupees, for display. Amounts are stored and compared in paise only. */

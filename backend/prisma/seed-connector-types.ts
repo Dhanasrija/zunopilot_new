@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { assertSeedable } from './guard.js';
 
 // The connector type catalog.
 //
@@ -51,6 +52,7 @@ const TYPES = [
 ];
 
 const main = async () => {
+  assertSeedable({ script: 'seed-connector-types' });
   for (const type of TYPES) {
     const { key, sortOrder, ...rest } = type;
     const existing = await prisma.connectorType.findUnique({ where: { key } });

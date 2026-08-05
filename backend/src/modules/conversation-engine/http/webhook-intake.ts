@@ -39,16 +39,38 @@ export interface NormalisedWebhook {
 /**
  * Verify Meta's X-Hub-Signature-256 over the exact bytes received.
  *
- * The raw body is captured in app.ts because re-serialising the parsed JSON
- * produces different bytes and therefore a different digest. Returns true when
- * no app secret is configured, so local development against a mock still works
- * — but that is logged, because it means the endpoint is unauthenticated.
+ * The raw body is captured in app.ts because re-serialising the parsed JSON produces
+ * different bytes and therefore a different digest.
+ *
+ * **Fails closed when there is no app secret.** `POST /api/webhook` is unauthenticated by
+ * design — Meta cannot present a token — so this HMAC is the only thing separating a real
+ * inbound message from an invented one. This used to `return true` on a missing secret,
+ * which turned the endpoint into an open write API: anyone could forge inbound messages for
+ * any `phone_number_id` and manufacture customers, orders and automation triggers in any
+ * tenant. Razorpay's webhook, two directories over, has always failed closed on exactly
+ * this condition.
+ *
+ * Local development opts out with `ALLOW_UNSIGNED_WEBHOOKS=true` rather than by leaving the
+ * secret unset. That inversion is the point: the permissive path now needs a deliberate act,
+ * so an environment that simply forgot to configure the secret is safe rather than open.
+ * Gating on `NODE_ENV !== 'production'` was considered and rejected — `NODE_ENV` is set
+ * nowhere in this repository, so "unset" must be the safe state, not the relaxed one.
  */
 export const verifySignature = (req: Request): boolean => {
   const secret = env.meta.appSecret;
   if (!secret) {
-    logger.warn('META_APP_SECRET is not set — webhook signatures are not being verified');
-    return true;
+    if (process.env.ALLOW_UNSIGNED_WEBHOOKS === 'true') {
+      logger.warn(
+        'META_APP_SECRET is not set and ALLOW_UNSIGNED_WEBHOOKS=true — accepting an '
+        + 'unverified webhook. This must never be the case outside local development.',
+      );
+      return true;
+    }
+    logger.error(
+      'META_APP_SECRET is not set, so this webhook cannot be verified and is being '
+      + 'REJECTED. Set the secret, or set ALLOW_UNSIGNED_WEBHOOKS=true for local work.',
+    );
+    return false;
   }
 
   const header = req.get('x-hub-signature-256');

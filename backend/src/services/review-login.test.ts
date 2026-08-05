@@ -11,7 +11,7 @@ import { reviewCodeFor, reviewLoginConfigured, reviewLoginPhones } from './revie
 // on the number, and a blank code being accepted as a code.
 
 const NUMBER = '9912345678';
-const CODE = '7412';
+const CODE = '741253';
 
 beforeEach(() => {
   process.env.PRODOTPTESTNUMBER = NUMBER;
@@ -120,10 +120,26 @@ describe('when it is not configured', () => {
   it('**is off for a code the verify endpoint would reject**', () => {
     // `auth.controller.ts` validates `^\d{4,8}$`. A configured code outside that is a
     // bypass that silently does not work, discovered during review.
-    for (const bad of ['123', '123456789', 'abcd', '12a4', '12.4']) {
+    for (const bad of ['123', '123456789', 'abcdef', '12a456', '12.456']) {
       process.env.PRODOTPFORTEST = bad;
       expect(reviewCodeFor(`91${NUMBER}`)).toBeNull();
     }
+  });
+
+  it('**is off for a 4- or 5-digit code, which the verify endpoint would accept**', () => {
+    // The one rule here that is deliberately *stricter* than the API's own, so it gets its own
+    // test. Everything about this account is rate-limited rather than secret — the number is in
+    // the store's review notes and the code never rotates — and at 5 challenges an hour with 5
+    // attempts each, 25 guesses an hour walks a 4-digit space in about eight days. Six digits
+    // makes that centuries and costs a reviewer nothing.
+    for (const short of ['7412', '74125']) {
+      process.env.PRODOTPFORTEST = short;
+      expect(reviewCodeFor(`91${NUMBER}`), `${short} must not enable the bypass`).toBeNull();
+    }
+
+    // And six is enough — this is a minimum, not a fixed width.
+    process.env.PRODOTPFORTEST = '741253';
+    expect(reviewCodeFor(`91${NUMBER}`)).toBe('741253');
   });
 
   it('is off for an unusable number', () => {
@@ -182,11 +198,11 @@ describe('reading the environment', () => {
     // taken at import — the trap this codebase has hit five times.
     expect(reviewCodeFor(`91${NUMBER}`)).toBe(CODE);
 
-    process.env.PRODOTPFORTEST = '9999';
-    expect(reviewCodeFor(`91${NUMBER}`)).toBe('9999');
+    process.env.PRODOTPFORTEST = '999999';
+    expect(reviewCodeFor(`91${NUMBER}`)).toBe('999999');
 
     process.env.PRODOTPTESTNUMBER = '9800000000';
     expect(reviewCodeFor(`91${NUMBER}`)).toBeNull();
-    expect(reviewCodeFor('919800000000')).toBe('9999');
+    expect(reviewCodeFor('919800000000')).toBe('999999');
   });
 });

@@ -2,6 +2,7 @@ import { PrismaClient, Prisma, UserRole } from '@prisma/client';
 import type { WorkflowDefinition } from '../src/modules/conversation-engine/domain/definition.js';
 import type { CapabilityContract } from '../src/modules/conversation-engine/domain/capability.js';
 import { validateWorkflowDefinition } from '../src/modules/conversation-engine/validation/definition-validator.js';
+import { assertSeedable } from './guard.js';
 
 // Acme Hospital — the conversation engine demo.
 //
@@ -494,6 +495,7 @@ const ROUTING_TESTS: Array<{ message: string; expect: string | null; decision: '
 ];
 
 const main = async () => {
+  assertSeedable({ script: 'seed-hospital' });
   // Idempotent, and scoped: only Acme Hospital is removed and rebuilt.
   await prisma.tenant.deleteMany({ where: { id: TENANT_ID } });
 

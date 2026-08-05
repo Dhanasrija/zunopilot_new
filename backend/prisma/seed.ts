@@ -1,4 +1,5 @@
 import { PrismaClient, UserRole, TemplateTrigger } from '@prisma/client';
+import { assertSeedable } from './guard.js';
 
 // The default demo workspace — the one `npm run prisma:seed` creates and the
 // READMEs point a new developer at.
@@ -12,6 +13,7 @@ const TENANT_ID = '00000000-0000-0000-0000-000000000001';
 const OWNER_PHONE = '15550000001';
 
 const main = async () => {
+  assertSeedable({ script: 'seed' });
   const existing = await prisma.tenant.findUnique({ where: { id: TENANT_ID } });
 
   const tenant = await prisma.tenant.upsert({

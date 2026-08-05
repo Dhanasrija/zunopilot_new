@@ -22,12 +22,19 @@ import { logger } from '../config/logger.js';
 //      exists.
 
 /**
- * The same rule the API applies to a submitted code (`auth.controller.ts`).
+ * Stricter than the rule the API applies to a submitted code (`auth.controller.ts` accepts
+ * 4 to 8 digits), and deliberately so.
  *
- * Checked here too, because a configured code the endpoint would reject is a bypass that
- * silently does not work — discovered during review, which is the worst possible time.
+ * Checked here at all because a configured code the endpoint would reject is a bypass that
+ * silently does not work — discovered during store review, which is the worst possible time.
+ *
+ * **Why six and not four.** Everything else about this account is rate-limited, not secret:
+ * the number is in the store's review notes and the code never rotates. At 5 challenges an
+ * hour with 5 attempts each, 25 guesses an hour walks a 4-digit space in about eight days.
+ * Six digits turns that into centuries, and costs a reviewer nothing. A 4- or 5-digit value
+ * now disables the feature with an error rather than quietly accepting a weak code.
  */
-const CODE_SHAPE = /^\d{4,8}$/;
+const CODE_SHAPE = /^\d{6,8}$/;
 
 /** India's calling code. The configured number may omit it; see `expectedPhones`. */
 const IN = '91';
@@ -68,8 +75,8 @@ const account = (): ReviewAccount | null => {
   if (!CODE_SHAPE.test(code)) {
     // Never log the code itself, even when rejecting it — only its shape.
     logger.error(
-      'PRODOTPFORTEST is not 4 to 8 digits, so the app-review login is DISABLED. '
-      + 'The verify endpoint would reject it anyway.',
+      'PRODOTPFORTEST is not 6 to 8 digits, so the app-review login is DISABLED. '
+      + 'A shorter code is guessable against the hourly attempt cap.',
       { length: code.length },
     );
     return null;

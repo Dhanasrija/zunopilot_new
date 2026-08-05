@@ -1,6 +1,7 @@
 import { PrismaClient, Prisma, UserRole } from '@prisma/client';
 import { templateById } from '../src/modules/conversation-engine/domain/templates.js';
 import { validateWorkflowDefinition } from '../src/modules/conversation-engine/validation/definition-validator.js';
+import { assertSeedable } from './guard.js';
 
 // Zuno Kitchen — the ordering demo for the conversation engine.
 //
@@ -74,6 +75,7 @@ const FAQS: Array<{ keywords: string[]; response: string }> = [
 ];
 
 const main = async () => {
+  assertSeedable({ script: 'seed-restaurant-engine' });
   const template = templateById('order_place');
   if (!template) throw new Error('The order_place template is missing');
 
