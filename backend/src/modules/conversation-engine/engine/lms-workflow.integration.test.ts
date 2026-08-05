@@ -5,9 +5,8 @@ import { prisma } from '../../../config/prisma.js';
 import { mockServices, type MockWhatsAppProvider } from '../providers/mock.js';
 import { parseDefinition } from '../domain/definition.js';
 import { validateWorkflowDefinition } from '../validation/definition-validator.js';
-import { startInstance } from './instance-manager.js';
-import { walk, type WalkDeps } from './walker.js';
-import { resumeWithUserInput } from './resume.js';
+import { type WalkDeps } from './walker.js';
+import { createJourneyDriver } from './journey-driver.js';
 
 // The class-cancellation journey, end to end.
 //
@@ -21,6 +20,7 @@ import { resumeWithUserInput } from './resume.js';
 const TENANT_ID = '66666666-6666-6666-6666-666666666666';
 
 let workflowId: string;
+let versionId: string;
 let conversationId: string;
 let deps: WalkDeps;
 let whatsapp: MockWhatsAppProvider;
@@ -59,6 +59,10 @@ beforeEach(async () => {
     where: { tenantId: TENANT_ID, slug: 'cancel_class' },
   });
   workflowId = workflow.id;
+  // The published version, which is what `startInstance` used to pin implicitly.
+  // Named explicitly now, so the "error branch" test below — which edits the newest
+  // version's definition in place — is unambiguous about which graph it changed.
+  versionId = workflow.publishedVersionId!;
   await openConversation('15550007001'); // Anita Sharma, two students
 });
 
@@ -77,28 +81,23 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-const current = () => prisma.workflowInstance.findFirstOrThrow({
-  where: { conversationId }, orderBy: { startedAt: 'desc' },
+// `begin`, `reply`, `rowsOf` and `current` used to be defined here. They now come
+// from `journey-driver.ts` so the generator's dry-run loop drives a draft with the
+// same code that drives this one — if the two diverged, the loop would be testing a
+// journey no customer takes. This suite passing unchanged is what proves the
+// extraction was faithful.
+//
+// The driver runs with `dryRun: false` here on purpose: this suite asserts on
+// `connectorCall` rows and on the mock LMS actually being asked to cancel a class,
+// which a dry run would suppress.
+const driver = () => createJourneyDriver({
+  tenantId: TENANT_ID, workflowId, versionId, conversationId, deps, whatsapp, dryRun: false,
 });
 
-const begin = async () => {
-  const { instance, definition } = await startInstance({
-    tenantId: TENANT_ID, workflowId, conversationId,
-  });
-  await walk({ instance, definition, deps });
-  return current();
-};
-
-const reply = async (text: string, id?: string) => {
-  const instance = await current();
-  return resumeWithUserInput({ instance, deps, answer: text, replyId: id ?? null });
-};
-
-const rowsOf = (index = 0) => {
-  const meta = whatsapp.sent[index]?.meta as
-    | { sections?: Array<{ rows: Array<{ id: string; title: string }> }> } | undefined;
-  return meta?.sections?.[0]?.rows ?? [];
-};
+const current = () => driver().current();
+const begin = () => driver().begin();
+const reply = (text: string, id?: string) => driver().reply(text, id);
+const rowsOf = (index = 0) => driver().rowsOf(index);
 
 const cancelCalls = () => prisma.connectorCall.count({
   where: { tenantId: TENANT_ID, operation: { key: 'cancel_class' } },

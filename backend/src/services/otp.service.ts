@@ -3,6 +3,10 @@ import { randomInt } from 'node:crypto';
 import { prisma } from '../config/prisma.js';
 import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/ApiError.js';
+import {
+  assertTemplateMatchesTtl, canSendTo, sendOtpSms, smsConfigured, SmsSendError,
+} from './sms.service.js';
+import { reviewCodeFor } from './review-login.js';
 
 // One-time login codes.
 //
@@ -129,10 +133,18 @@ export const countryFromPhone = (phone: string): string | null => {
 const generateCode = (): string => String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
 
 /**
- * Deliver a code. Swap the `sms` branch for a real provider.
+ * Deliver a code.
  *
- * Kept behind one function so plugging MSG91 or Twilio in later is a single edit
- * with nothing else to find, and so the echo path cannot leak into the real one.
+ * Three branches, in a deliberate order.
+ *
+ * **Echo first**, so a developer with `OTP_ECHO=true` never spends a real SMS or
+ * messages a real handset by accident — and so the seeded `+1 555` accounts, which no
+ * Indian gateway can reach, remain signable-in.
+ *
+ * **Then the real gateway.** TextSpeed, India only, with a DLT-registered body.
+ *
+ * **Then a loud refusal.** Pretending to have sent something is the worst of the three:
+ * a customer waiting for a code that was never dispatched has no way to tell.
  */
 const deliver = async (phone: string, code: string): Promise<OtpDelivery> => {
   if (echoAllowed()) {
@@ -142,10 +154,65 @@ const deliver = async (phone: string, code: string): Promise<OtpDelivery> => {
     return { channel: 'echo', code };
   }
 
-  // No provider is configured yet. Failing loudly beats pretending to have sent
-  // something: a customer waiting for a code that was never dispatched has no way
-  // to tell the difference.
-  logger.error('No SMS provider is configured, so the login code could not be sent', { phone });
+  // **A test run can never send a real text message.**
+  //
+  // The same rule `vitest.config.ts` already applies to Meta and OpenAI — "env.ts
+  // forces the mock adapters under NODE_ENV=test, so a test run can never reach Meta or
+  // OpenAI" — extended to SMS, which is the one provider where the cost of getting it
+  // wrong lands on a stranger's handset rather than on a bill.
+  //
+  // This is not hypothetical. `otp.integration.test.ts` requests codes for
+  // `919811122233`, a perfectly plausible Indian mobile, and relies on `OTP_ECHO=true`
+  // to stay harmless. One test that forgets to set it would text whoever owns that
+  // number. The guard is here rather than in `sendOtpSms` so the transport stays
+  // testable with a mocked `fetch`, while no route through the app can reach a handset.
+  if (process.env.NODE_ENV === 'test') {
+    throw ApiError.unprocessable(
+      'Refusing to send a real SMS from a test run. Set OTP_ECHO=true in the test.',
+    );
+  }
+
+  if (smsConfigured()) {
+    // Checked before the send, not after: the DLT body states ten minutes, and a TTL
+    // that disagrees would tell every customer something false about a code they are
+    // holding. Refusing is better than sending a lie.
+    assertTemplateMatchesTtl(TTL_MINUTES);
+
+    if (!canSendTo(phone)) {
+      // A number the gateway cannot reach. Said plainly, because the alternative is a
+      // gateway error the person reading it cannot act on — and because in production
+      // this is the one case where "no code arrived" has a knowable cause.
+      logger.error('OTP requested for a number the SMS gateway cannot reach', {
+        to: `${phone.slice(0, 4)}****${phone.slice(-2)}`,
+      });
+      throw ApiError.unprocessable(
+        'Login codes can currently only be sent to Indian mobile numbers.',
+      );
+    }
+
+    // Any failure short of a confirmed accept becomes a 422 the login screen can
+    // show, not a 500. `requestOtp`'s catch then deletes the challenge, so a gateway
+    // outage costs the customer neither their hourly quota nor their resend cooldown.
+    //
+    // The gateway's own words are kept out of the response on purpose: they are for
+    // the log, and "insufficient balance" is our operational problem to see, not
+    // something to put in front of someone trying to sign in.
+    try {
+      await sendOtpSms(phone, code);
+    } catch (err) {
+      if (err instanceof SmsSendError) {
+        throw ApiError.unprocessable(
+          'We could not send your code just now. Please try again in a moment.',
+        );
+      }
+      throw err;
+    }
+    return { channel: 'sms' };
+  }
+
+  logger.error('No SMS provider is configured, so the login code could not be sent', {
+    to: `${phone.slice(0, 4)}****${phone.slice(-2)}`,
+  });
   throw ApiError.unprocessable(
     'Login codes cannot be sent yet because no SMS provider is configured.',
   );
@@ -192,12 +259,38 @@ export const requestOtp = async (
     data: { expiresAt: now },
   });
 
-  const code = generateCode();
+  /**
+   * The app-review account, or null for everybody else.
+   *
+   * **This is the entire bypass**, and it is deliberately only two things: which code gets
+   * hashed, and whether an SMS is attempted. Everything that makes an OTP safe happens
+   * below and around it — the challenge row, the bcrypt hash, the attempt cap, single-use
+   * consumption, expiry, and the two limiters already applied above. `verifyOtp` is not
+   * touched and does not know this exists, so a reviewer's login is checked by exactly the
+   * same comparison as a customer's.
+   */
+  const reviewCode = reviewCodeFor(phone);
+
+  const code = reviewCode ?? generateCode();
   const expiresAt = new Date(now.getTime() + TTL_MINUTES * 60_000);
 
   const challenge = await prisma.otpChallenge.create({
     data: { phone, codeHash: await bcrypt.hash(code, 10), expiresAt, ip },
   });
+
+  if (reviewCode) {
+    // Warned, not info: a fixed-code login being issued in production is a
+    // security-relevant event and should be noticeable in a log tail. The number is
+    // masked and the code is never logged — it is a live credential.
+    logger.warn('Issued the app-review login code — no SMS was sent', {
+      to: `${phone.slice(0, 4)}****${phone.slice(-2)}`,
+      ip,
+    });
+    // No `code` in the result. That field is reserved for `OTP_ECHO`, and returning this
+    // one would put a permanent credential in an API response. The reviewer has it from
+    // the store's review notes.
+    return { channel: 'sms', expiresAt, resendAfterSeconds: RESEND_COOLDOWN_SECONDS };
+  }
 
   let delivery: OtpDelivery;
   try {

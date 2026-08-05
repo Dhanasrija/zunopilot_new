@@ -68,6 +68,19 @@ model Tenant {
   billingCountry      String?
   logoUrl             String?
   isActive            Boolean  @default(true)
+
+  /// Hide most of every customer's phone number from team members.
+  ///
+  /// Owners — and any role granted `customers:view_full_number` — always see the real
+  /// number. Everyone else gets the last four digits and nothing more, redacted **on the
+  /// server** before the response is sent, because masking in the browser would leave the
+  /// number in the JSON for anyone with a network tab.
+  ///
+  /// Off by default: turning it on is a decision a workspace makes, and defaulting it on
+  /// would silently change what every existing team can see.
+  ///
+  /// The stored numbers are untouched — they are how WhatsApp messages are addressed.
+  maskCustomerNumbers Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -129,6 +142,9 @@ model Tenant {
 
   // Module 25: uploaded media for template headers
   mediaAssets MediaAsset[]
+
+  // Module 23: notifications
+  notifications Notification[]
 }
 
 /// A file uploaded to fill a template's media header.
@@ -238,6 +254,11 @@ model User {
   leadEvents       LeadEvent[]   @relation("LeadEventActor")
   calls            CallLog[]     @relation("CallActor")
   reminders        Reminder[]    @relation("ReminderAssignee")
+
+  // Module 23: notifications
+  notifications          Notification[]          @relation("NotificationRecipient")
+  notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
 }
 
 // ---------------- Module 2: WhatsApp embedded signup ----------------
@@ -926,6 +947,17 @@ model WorkflowVersion {
   /// write. Kept as one document because the editor saves it atomically and
   /// nothing queries inside it.
   definition Json
+
+  /// Blocking issues a *generated* draft could not fix, as `ValidationIssue[]`.
+  ///
+  /// Null for every hand-authored version, which is why it is nullable rather than
+  /// defaulting to `[]`: null means "nothing generated this", `[]` means "generated
+  /// and came out clean", and the publish gate must not treat those the same when
+  /// deciding whether it is holding a graph back.
+  ///
+  /// Cleared when a person edits the version, so a hand-fixed graph is never held
+  /// hostage to what the generator originally produced.
+  unresolvedIssues Json?
 
   createdBy   String?
   createdAt   DateTime  @default(now())
@@ -2761,4 +2793,130 @@ model Enquiry {
 
   @@index([status, createdAt])
   @@index([createdAt])
+}
+
+// ---------------- Module 23: notifications ----------------
+
+/// Something that happened which someone should know about.
+///
+/// **Why a table and not just a live socket.** The whole reason this module exists is
+/// the case where nobody is looking: an inbound WhatsApp message arriving while the
+/// Inbox is closed produced no signal at all, because the only mechanism was the
+/// Inbox's own one-second poll. A row survives a closed tab, a reload and a logout,
+/// which is what makes "you missed three messages" possible.
+///
+/// **Recipient is nullable, and that is the important field.** `userId: null` means
+/// the whole workspace — a customer message belongs to whoever picks it up, not to
+/// one person, and a shared inbox where a message notifies only its assignee would
+/// go unanswered whenever that person is away. A null recipient is read by everyone
+/// with `inbox:read`; a set one is private to that user.
+model Notification {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Null means every member of the workspace. See the note above.
+  userId String?
+  user   User?   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  kind NotificationKind
+
+  /// One line, already rendered. Held as text rather than assembled at read time so
+  /// a notification says what was true when it fired — a customer renamed later does
+  /// not rewrite history.
+  title String
+  body  String
+
+  /// Where clicking it goes, e.g. `/inbox?c=<id>`. Relative, never absolute: an
+  /// absolute URL in a notification is an open-redirect waiting to be pasted in.
+  link String?
+
+  /// What it is about, for grouping and for opening the right thread.
+  conversationId String?
+
+  /// **The dedupe key, and the reason this is unique per tenant.**
+  ///
+  /// Both inbound paths — the webhook controller and the queue handler — can process
+  /// the same WhatsApp message, and pg-boss retries a failed job. Keyed on the
+  /// provider's message id, a retry collides instead of notifying twice. Nullable
+  /// because notifications raised by a person have nothing to dedupe on.
+  dedupeKey String?
+
+  /// Per-recipient read state. Null is unread.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, dedupeKey])
+  /// Covers the unread-count query, which runs on every poll of every open tab and
+  /// is by far the hottest read in this module.
+  @@index([tenantId, userId, readAt])
+  @@index([tenantId, createdAt])
+}
+
+enum NotificationKind {
+  /// A customer sent a WhatsApp message.
+  MESSAGE_RECEIVED
+  /// A workflow gave up and asked for a person. The urgent one.
+  HANDOFF_REQUESTED
+  /// An order was placed over WhatsApp.
+  ORDER_CREATED
+}
+
+/// What a person wants to be told, and how.
+///
+/// One row per user, created lazily on first read so an account that never opens
+/// Settings still behaves sensibly. Every channel and kind defaults to on except
+/// `push`, which cannot be on by default — it needs a browser subscription that only
+/// exists after the person grants permission on a specific device.
+model NotificationPreference {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The bell and the badge inside the app.
+  inApp   Boolean @default(true)
+  /// A desktop notification while the tab is open but not focused.
+  browser Boolean @default(true)
+  /// Web Push, which reaches a device with the app closed. Off until subscribed.
+  push    Boolean @default(false)
+
+  messageReceived  Boolean @default(true)
+  handoffRequested Boolean @default(true)
+  orderCreated     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One browser on one device, subscribed to Web Push.
+///
+/// **Per device, not per user.** Someone with a laptop and a phone has two rows, and
+/// revoking one must not silence the other. `endpoint` is the push service's URL and
+/// is globally unique, which makes it the natural key — re-subscribing the same
+/// browser updates rather than duplicating.
+///
+/// `failureCount` exists because push endpoints die silently. A 404 or 410 from the
+/// push service means the browser is gone for good and the row is deleted; anything
+/// else is counted, and a subscription that keeps failing is dropped rather than
+/// retried forever.
+model PushSubscription {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  endpoint String @unique
+  /// The subscription's public key and auth secret, from the browser's PushManager.
+  /// Not credentials of ours — they are useless without the VAPID private key.
+  p256dh   String
+  auth     String
+
+  /// For showing a person which devices are subscribed.
+  userAgent String?
+
+  failureCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
 }

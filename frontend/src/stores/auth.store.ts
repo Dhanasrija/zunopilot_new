@@ -21,6 +21,16 @@ export interface AuthTenant {
   category: string | null;
   categoryId: string | null;
   categoryLabel: string | null;
+  /**
+   * Whether this workspace hides most of a customer's phone number from team members.
+   *
+   * For wording a tooltip, not for deciding anything. The redaction happens on the server —
+   * a masked response has already had the digits removed before it reaches this store, so
+   * flipping this in devtools reveals nothing.
+   *
+   * Optional because a session minted before this field existed will not carry it.
+   */
+  maskCustomerNumbers?: boolean;
 }
 
 /** A permission key from the server's `config/permissions.ts`. */

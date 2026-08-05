@@ -26,6 +26,18 @@ export const PERMISSIONS = [
   // Customers, orders, catalogue
   'customers:read',
   'customers:write',
+  /**
+   * See a customer's real phone number rather than its masked form.
+   *
+   * Only consulted when the workspace has `maskCustomerNumbers` on — with the switch off
+   * everybody sees full numbers and this key is inert. It exists so a workspace can trust
+   * one manager with numbers without making them an owner.
+   *
+   * **Granted on the OWNER role only.** `isOwner` roles resolve to every permission, so
+   * existing owners gain it the moment it exists, while existing Agent and Manager rows do
+   * not — which is exactly the intent and is why no backfill is needed.
+   */
+  'customers:view_full_number',
   'orders:read',
   'orders:write',
   'catalogue:read',
@@ -190,6 +202,11 @@ const MANAGER: Permission[] = [
 
 const OWNER: Permission[] = [
   ...MANAGER,
+  // Seeing real customer numbers when the workspace has masking on. Here and not in
+  // MANAGER, because the whole point of the switch is that the people running the
+  // operation day to day cannot collect a contact list. A workspace that trusts a
+  // particular manager grants this on a custom role.
+  'customers:view_full_number',
   'workflows:delete',
   'templates:delete',
   'connectors:delete',
@@ -298,6 +315,16 @@ export const PERMISSION_GROUPS: Array<{
     permissions: [
       { key: 'customers:read', label: 'See customers' },
       { key: 'customers:write', label: 'Add and edit customers' },
+      {
+        // Listed here so a workspace with number masking on can grant it to one trusted
+        // role without promoting that person to owner. Inert while masking is off.
+        key: 'customers:view_full_number',
+        label: 'See full phone numbers',
+        hint: 'Only matters when number masking is on in Settings. Without it, this role '
+          + 'sees the last four digits of a customer\'s number.',
+        // Flagged: granting it undoes the masking the workspace deliberately turned on.
+        sensitive: true,
+      },
       { key: 'orders:read', label: 'See orders' },
       { key: 'orders:write', label: 'Create and update orders' },
     ],

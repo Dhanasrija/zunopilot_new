@@ -6,9 +6,11 @@ import { ApiError } from '../../../utils/ApiError.js';
 import { logger } from '../../../config/logger.js';
 import { tenantIdOf, userOf } from '../../../middleware/auth.js';
 import { capabilityContractSchema, type CapabilityContract } from '../domain/capability.js';
-import { validateWorkflowDefinition } from '../validation/definition-validator.js';
+import { validateWorkflowDefinition, type ValidationIssue } from '../validation/definition-validator.js';
 import { templateById, templateReadiness, templateSummaries } from '../domain/templates.js';
 import { generateWorkflow, GenerationFailedError } from '../generation/generate.js';
+import { driveJourney, type JourneyReport } from '../engine/journey-driver.js';
+import { clearPreviousRuns, simulatorConversation, simulatorDeps } from './simulator.js';
 import { assertCanPublishAutomation, assertFeatureAvailable } from '../../billing/limits.js';
 
 // Workflow authoring: definitions, versions, capability contracts, publishing.
@@ -435,6 +437,29 @@ export const publishWorkflow = asyncHandler(async (req: Request, res: Response) 
     );
   }
 
+  // A generated draft the repair loop gave up on.
+  //
+  // **Why the check above is not enough.** `valid` is false only for errors, and the
+  // largest generation fault — eight of twelve nodes unreachable — is a *warning*.
+  // A draft like that passed validation, published, and answered a real parent with
+  // its whole second half dead. So the surviving generation blockers are consulted
+  // separately, from the column written when the draft was created.
+  //
+  // **Nothing needs to clear this, and that is the nice part.** Versions are
+  // append-only — editing in the builder calls `createVersion`, which writes a new
+  // row whose `unresolvedIssues` is null. Publishing defaults to the newest version,
+  // so fixing the draft by hand lifts the refusal without any code that has to
+  // remember to reset a flag. The record of what the generator got wrong stays
+  // attached to the version it was actually wrong about.
+  const unresolved = version.unresolvedIssues as ValidationIssue[] | null;
+  if (Array.isArray(unresolved) && unresolved.length) {
+    throw ApiError.unprocessable(
+      'This generated draft still has problems that could not be fixed automatically. '
+      + 'Open it in the builder and resolve them, then publish.',
+      unresolved,
+    );
+  }
+
   const published = await prisma.$transaction(async (tx) => {
     await tx.workflowVersion.update({
       where: { id: version.id },
@@ -562,11 +587,62 @@ export const generateWorkflowFromPrompt = asyncHandler(async (req: Request, res:
         version: 1,
         definition: definition as unknown as Prisma.InputJsonValue,
         createdBy: userOf(req).id,
+        // Written here, in the same transaction as the version it describes, so a
+        // draft can never exist without the record of what is wrong with it. An
+        // empty array is meaningful and is stored as one: it says the generator
+        // produced this and it came out clean, which is different from the null
+        // that every hand-authored version carries.
+        unresolvedIssues: generated.unresolved as unknown as Prisma.InputJsonValue,
       },
     });
 
     return created;
   });
+
+  // Layer 3: walk the draft the way a customer would.
+  //
+  // **After the transaction, and advisory only.** Two deliberate choices.
+  //
+  // After, because the driver needs a persisted version to run —
+  // `startInstanceOnVersion` resolves one by id — and because a dry run that rolled
+  // back with the draft would leave the operator nothing to look at.
+  //
+  // Advisory, because the model wrote this graph and would be marking its own
+  // homework. Layers 1 and 2 are mechanical and they alone decide publishing; what
+  // the walk finds is reported so a person can judge it. It also cannot see data:
+  // under `dryRun` every connector returns its recorded sample, so this checks that
+  // the draft is *wired* to run, not that it behaves correctly.
+  //
+  // Failing to drive is not failing to generate. A workspace with no WhatsApp channel
+  // cannot build simulator deps at all, and refusing to hand over a usable draft over
+  // that would be absurd.
+  let dryRun: JourneyReport | null = null;
+  let dryRunSkipped: string | null = null;
+  try {
+    const version = await prisma.workflowVersion.findFirstOrThrow({
+      where: { workflowId: workflow.id }, orderBy: { version: 'desc' },
+    });
+    const { contact, conversation } = await simulatorConversation(
+      assistant.tenantId, assistant.id, `gen${workflow.id.slice(0, 6)}`,
+    );
+    await clearPreviousRuns(conversation.id);
+    const { deps, whatsapp } = await simulatorDeps(assistant.tenantId, conversation, contact, true);
+
+    dryRun = await driveJourney({
+      tenantId: assistant.tenantId,
+      workflowId: workflow.id,
+      versionId: version.id,
+      conversationId: conversation.id,
+      deps,
+      whatsapp,
+      dryRun: true,
+    });
+  } catch (err) {
+    dryRunSkipped = err instanceof Error ? err.message : 'The draft could not be test-run';
+    logger.warn('Generated draft could not be driven', {
+      workflowId: workflow.id, reason: dryRunSkipped,
+    });
+  }
 
   res.status(201).json({
     success: true,
@@ -574,6 +650,13 @@ export const generateWorkflowFromPrompt = asyncHandler(async (req: Request, res:
       workflow,
       gaps: generated.compiled.gaps,
       issues: generated.issues,
+      /** What the dry run saw, or null with a reason when it could not run. */
+      dryRun,
+      dryRunSkipped,
+      /** What each repair turn was asked to fix. Empty when the first plan worked. */
+      repairs: generated.repairs,
+      /** Still broken after the last attempt. Non-empty means publishing is refused. */
+      unresolved: generated.unresolved,
       model: generated.model,
       promptVersion: generated.promptVersion,
       latencyMs: generated.latencyMs,

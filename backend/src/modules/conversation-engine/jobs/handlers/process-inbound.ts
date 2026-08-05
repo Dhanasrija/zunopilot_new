@@ -7,6 +7,7 @@ import { routeInboundMessage } from '../../routing/index.js';
 import { enqueue, QUEUES, type ProcessInboundMessageJob } from '../queue.js';
 import { linkLeadToCustomer } from '../../../leads/lead.service.js';
 import { handleConsentKeyword } from '../../../marketing/consent.service.js';
+import { notifyInboundMessage } from '../../../notifications/notification.producers.js';
 
 // The inbound pipeline, running off the queue rather than in the request.
 //
@@ -197,6 +198,19 @@ const persistMessage = async (context: ResolvedContext, message: NormalisedInbou
   await prisma.conversation.update({
     where: { id: context.conversation.id },
     data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
+  });
+
+  // Only reached for a genuinely new message: the `existing` check above returns
+  // early on a pg-boss retry, so this does not re-ring. The dedupe key is belt and
+  // braces for the case where this path and the webhook controller both see one
+  // message — they key on the same wamid, so the second write collides.
+  await notifyInboundMessage({
+    tenantId: context.tenant.id,
+    conversationId: context.conversation.id,
+    customerName: context.contact.name,
+    waId: context.contact.waId,
+    body: message.text,
+    waMessageId: message.externalMessageId,
   });
 
   return created;

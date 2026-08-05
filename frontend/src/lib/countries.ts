@@ -80,13 +80,59 @@ export const countryByIso = (iso: string): Country | undefined => BY_ISO.get(iso
 export const DEFAULT_COUNTRY: Country = BY_ISO.get('IN' as CountryCode) ?? COUNTRIES[0];
 
 /**
- * Which country to preselect, from the browser's own locale.
+ * Where the person is, for the zones where the UI language reliably lies about it.
  *
- * **Only an explicit region moves off India.** This uses `new Intl.Locale(tag).region`
- * and deliberately *not* `.maximize()`, which would infer a region from the language
- * alone and turn a bare `en` browser — very common — into a US default. That is
- * exactly backwards for an India-first product, so an absent region keeps the India
- * default rather than guessing:
+ * **Deliberately short, and it is not trying to be a timezone database.** Its only
+ * job is to beat `navigator.language` in the places where the two disagree for a
+ * predictable reason: an English-language device used somewhere that is not an
+ * English-speaking country. Every entry below is a single-country zone in a market
+ * where `en-US` or `en-GB` is a normal thing to find on a phone. An unlisted zone
+ * falls through to the language, exactly as before.
+ *
+ * `Intl.Locale.prototype.getTimeZones` would make this derivable rather than typed
+ * out — it is the reverse lookup this needs — but it is not in the browsers we
+ * support yet, so the list is written down and kept small on purpose. Prefer adding
+ * a zone here over broadening the mechanism.
+ */
+const ZONE_COUNTRY: Record<string, string> = {
+  // `Asia/Calcutta` is the older alias and is still what many systems report —
+  // this Mac reports it. Both must be present or the entry does nothing.
+  'Asia/Kolkata': 'IN',
+  'Asia/Calcutta': 'IN',
+  'Asia/Karachi': 'PK',
+  'Asia/Dhaka': 'BD',
+  'Asia/Colombo': 'LK',
+  'Asia/Kathmandu': 'NP',
+  'Asia/Dubai': 'AE',
+  'Asia/Riyadh': 'SA',
+  'Asia/Qatar': 'QA',
+  'Asia/Kuwait': 'KW',
+  'Asia/Singapore': 'SG',
+  'Asia/Kuala_Lumpur': 'MY',
+  'Asia/Manila': 'PH',
+  'Asia/Jakarta': 'ID',
+  'Africa/Lagos': 'NG',
+  'Africa/Nairobi': 'KE',
+  'Africa/Johannesburg': 'ZA',
+};
+
+/**
+ * Which country to preselect.
+ *
+ * **The timezone is asked first, because it is the only signal here about where the
+ * person actually is.** `navigator.language` describes what language they want to
+ * read, and treating it as a location is how the owner of an India-first product
+ * running an `en-US` Mac got `+1` preselected, entered a ten-digit Indian number,
+ * and — because signing in doubles as signing up — created an empty second
+ * workspace instead of reaching his own. The locale said `US`; the clock said
+ * `Asia/Calcutta`. The clock was right.
+ *
+ * So the order is: timezone (if it is one we claim), then an explicit locale region,
+ * then India.
+ *
+ * The locale step uses `new Intl.Locale(tag).region` and deliberately *not*
+ * `.maximize()`, which would infer a region from the language alone and turn a bare
+ * `en` browser — very common — into a US default:
  *
  *   | locale  | `.region`      | `.maximize().region` |
  *   |---------|----------------|----------------------|
@@ -95,14 +141,21 @@ export const DEFAULT_COUNTRY: Country = BY_ISO.get('IN' as CountryCode) ?? COUNT
  *   | `en`    | none → India   | `US`  ← wrong        |
  *   | `hi`    | none → India   | `IN`                 |
  *
- * **This is a heuristic on UI language, not on location.** An Indian user with an
- * `en-US` browser gets `+1` preselected and has to change it. That is acceptable
- * precisely because the country is now a visible control one click away — the whole
- * point of replacing the typed `+91 ` prefix. It would *not* be acceptable as the
- * sole source of truth, which is why nothing downstream trusts it: the stored
- * country is still derived from the number the user actually confirms.
+ * **Still a guess, and still not trusted downstream.** A traveller gets the country
+ * they are standing in rather than the one they dial from, which is why the picker
+ * stays a visible control and why the stored country is derived from the number the
+ * person actually confirms — never from this.
  */
 export const detectCountry = (): Country => {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const fromZone = zone ? ZONE_COUNTRY[zone] : undefined;
+    const found = fromZone ? countryByIso(fromZone) : undefined;
+    if (found) return found;
+  } catch {
+    // No `Intl.DateTimeFormat`, or an environment with no resolvable zone.
+  }
+
   try {
     // `navigator.languages` is ordered by preference. `navigator.language` is the
     // fallback for the rare environment that lacks the list.

@@ -9,6 +9,9 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { whatsappProviderFor } from '../modules/conversation-engine/providers/whatsapp.js';
 import { recordOutboundMessage } from '../modules/conversation-engine/providers/mirror.js';
+import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
+import { maskContact } from '../utils/mask-number.js';
+import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
 
 // Gets-or-creates an OPEN conversation for the given customer.
 // Used by the CRM "Start conversation" button so agents can jump from a
@@ -53,10 +56,16 @@ export const listConversations = asyncHandler(async (req, res) => {
   // works from, so it needs to be one filter rather than a visual scan.
   if (queryBool(req.query.unassigned)) where.assignedAgentId = null;
 
+  // Resolved once for the whole page rather than per row: it is one tenant read, and
+  // computing it inside a map would run it a hundred times.
+  const seeFull = await maySeeFullNumbers(req);
+
   const conversations = await prisma.conversation.findMany({
     where,
     include: {
-      customer: true,
+      // An explicit select, not `customer: true`. The spread is what put the phone number
+      // on this screen in the first place, and it would ship the next new column too.
+      customer: { select: CUSTOMER_VIEW_SELECT },
       assignedAgent: { select: { id: true, fullName: true, email: true } },
       messages: { take: 1, orderBy: { createdAt: 'desc' } },
       // **The workflow occupying this conversation, if any.**
@@ -78,7 +87,14 @@ export const listConversations = asyncHandler(async (req, res) => {
     orderBy: { lastMessageAt: 'desc' },
     take: 100,
   });
-  res.json({ success: true, data: conversations });
+
+  res.json({
+    success: true,
+    data: conversations.map((conversation) => ({
+      ...conversation,
+      customer: maskContact(conversation.customer, seeFull),
+    })),
+  });
 });
 
 export const getConversation = asyncHandler(async (req, res) => {
@@ -86,13 +102,20 @@ export const getConversation = asyncHandler(async (req, res) => {
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId: tenantIdOf(req) },
     include: {
-      customer: true,
+      customer: { select: CUSTOMER_VIEW_SELECT },
       assignedAgent: { select: { id: true, fullName: true, email: true } },
       notes: { include: { author: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'desc' } },
     },
   });
   if (!conversation) throw ApiError.notFound('Conversation not found');
-  res.json({ success: true, data: conversation });
+
+  res.json({
+    success: true,
+    data: {
+      ...conversation,
+      customer: maskContact(conversation.customer, await maySeeFullNumbers(req)),
+    },
+  });
 });
 
 export const listMessages = asyncHandler(async (req, res) => {
@@ -183,6 +206,10 @@ export const sendAgentMessage = asyncHandler(async (req, res) => {
   const { body } = req.body;
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId: tenantIdOf(req) },
+    // **Left as a spread on purpose, and not masked.** This is the one `customer: true` in
+    // this file that never reaches a client: the response below is the created `Message`,
+    // and the row is loaded solely for `customer.waId` — the address the WhatsApp send is
+    // made to a few lines down. Masking here would send messages to a row of bullets.
     include: { customer: true },
   });
   if (!conversation) throw ApiError.notFound('Conversation not found');

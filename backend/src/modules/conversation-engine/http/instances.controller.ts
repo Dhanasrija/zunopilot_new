@@ -4,11 +4,10 @@ import { prisma } from '../../../config/prisma.js';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { ApiError } from '../../../utils/ApiError.js';
 import { tenantIdOf } from '../../../middleware/auth.js';
-import { parseDefinition } from '../domain/definition.js';
-import { cancelInstance, handOffToHuman, startInstance } from '../engine/instance-manager.js';
+import { cancelInstance, handOffToHuman, startInstanceOnVersion } from '../engine/instance-manager.js';
 import { resumeWithUserInput } from '../engine/resume.js';
-import { walk, type WalkDeps } from '../engine/walker.js';
-import { MOCK_INTEGRATIONS, MockHttpCaller, MockLlmProvider, MockWhatsAppProvider } from '../providers/mock.js';
+import { walk } from '../engine/walker.js';
+import { clearPreviousRuns, simulatorConversation, simulatorDeps } from './simulator.js';
 
 // Workflow instances: inspection, control, and the test simulator.
 
@@ -171,80 +170,6 @@ export const handoffConversation = asyncHandler(async (req: Request, res: Respon
 
 // ── Test simulator ────────────────────────────────────────────────────────────
 
-/**
- * Build a throwaway conversation for a test run.
- *
- * A dedicated contact per operator keeps simulator traffic out of the real
- * inbox and stops a test conversation colliding with a live one for the same
- * person. The `waId` is in the +1 555 range, which is reserved for fiction and
- * never routable — so even a misconfigured provider cannot reach anyone.
- */
-const simulatorConversation = async (tenantId: string, assistantId: string | null, key: string) => {
-  const waId = `1555${key.replace(/\D/g, '').slice(0, 7).padStart(7, '0')}`;
-
-  const contact = await prisma.customer.upsert({
-    where: { tenantId_waId: { tenantId, waId } },
-    update: { lastSeenAt: new Date() },
-    create: { tenantId, waId, name: 'Simulator', lastSeenAt: new Date() },
-  });
-
-  const existing = await prisma.conversation.findFirst({
-    where: { tenantId, customerId: contact.id, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
-    orderBy: { lastMessageAt: 'desc' },
-  });
-
-  const conversation = existing ?? await prisma.conversation.create({
-    data: {
-      tenantId,
-      customerId: contact.id,
-      assistantId,
-      status: 'OPEN',
-      externalConversationKey: `simulator:${key}`,
-      lastMessageAt: new Date(),
-    },
-  });
-
-  return { contact, conversation };
-};
-
-const simulatorDeps = async (
-  tenantId: string,
-  conversation: { id: string },
-  contact: { id: string },
-  dryRun: boolean,
-): Promise<{ deps: WalkDeps; whatsapp: MockWhatsAppProvider }> => {
-  const [tenant, channel, fullContact, fullConversation] = await Promise.all([
-    prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
-    prisma.whatsappAccount.findFirst({ where: { tenantId } }),
-    prisma.customer.findUniqueOrThrow({ where: { id: contact.id } }),
-    prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } }),
-  ]);
-  if (!channel) throw ApiError.badRequest('This workspace has no WhatsApp channel connected');
-
-  // Always the mock, never the tenant's real provider — a Test Flow button that
-  // messages a customer is the worst possible surprise.
-  const whatsapp = new MockWhatsAppProvider();
-
-  return {
-    whatsapp,
-    deps: {
-      tenant,
-      contact: fullContact,
-      conversation: fullConversation,
-      channel,
-      assistantId: fullConversation.assistantId,
-      services: {
-        whatsapp,
-        llm: new MockLlmProvider(),
-        http: new MockHttpCaller(),
-        integrations: MOCK_INTEGRATIONS,
-      },
-      latestMessage: null,
-      dryRun,
-    },
-  };
-};
-
 /** Run one workflow directly, bypassing routing. The builder's Test Flow. */
 export const testWorkflow = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = tenantIdOf(req);
@@ -254,6 +179,8 @@ export const testWorkflow = asyncHandler(async (req: Request, res: Response) => 
   });
   if (!workflow) throw ApiError.notFound('Workflow not found');
 
+  // The newest version when nothing is published — Test Flow on a draft is the
+  // main thing Test Flow is *for*.
   const version = workflow.publishedVersion ?? await prisma.workflowVersion.findFirst({
     where: { workflowId: workflow.id },
     orderBy: { version: 'desc' },
@@ -266,32 +193,37 @@ export const testWorkflow = asyncHandler(async (req: Request, res: Response) => 
     `wf${workflow.id.slice(0, 6)}`,
   );
 
-  // Clear any previous test run so repeated Test Flow presses start clean
-  // rather than tripping the one-active-instance index.
-  await prisma.workflowInstance.updateMany({
-    where: {
-      conversationId: conversation.id,
-      status: { in: ['PENDING', 'RUNNING', 'WAITING_FOR_USER', 'WAITING_FOR_APPROVAL', 'PAUSED'] },
-    },
-    data: { status: 'CANCELLED', error: 'Superseded by a new test run', completedAt: new Date() },
-  });
-  await prisma.conversation.update({
-    where: { id: conversation.id },
-    data: { activeWorkflowInstanceId: null },
-  });
+  await clearPreviousRuns(conversation.id);
 
   const { deps, whatsapp } = await simulatorDeps(tenantId, conversation, contact, req.body.dryRun);
 
-  const { instance } = await startInstance({
+  // `startInstanceOnVersion`, not `startInstance`, for two reasons.
+  //
+  // The published-only gate in `startInstance` threw before the draft fallback
+  // resolved above could ever be used, so Test Flow on an unpublished workflow
+  // failed with "has no published version" — on the one screen whose job is to
+  // try a graph before publishing it.
+  //
+  // And `startInstance` pins `publishedVersion` on the instance while the walk
+  // below used `version`. Whenever those differed the run's recorded version was
+  // not the version that actually executed. Passing the resolved version to both
+  // makes disagreeing unrepresentable.
+  const { instance, definition } = await startInstanceOnVersion({
     tenantId,
     workflowId: workflow.id,
     conversationId: conversation.id,
+    versionId: version.id,
     extractedInputs: req.body.inputs,
+    // `dryRun` is deliberately left at its default here, unchanged from before.
+    // At this level it controls only whether the conversation's
+    // `activeWorkflowInstanceId` pointer is claimed, and the lines above already
+    // clear that pointer on every press. `req.body.dryRun` is what suppresses
+    // real side effects, and it reaches the run through `simulatorDeps`.
   });
 
   const outcome = await walk({
     instance,
-    definition: parseDefinition(version.definition),
+    definition,
     deps: { ...deps, latestMessage: { id: 'sim', body: req.body.message, type: 'TEXT', payload: null } },
   });
 

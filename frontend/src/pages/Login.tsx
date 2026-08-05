@@ -10,7 +10,7 @@ import {
   detectCountry, fullNumber, nationalNumberProblem, type Country,
 } from '@/lib/countries';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
 
 // Signing in.
 //
@@ -42,7 +42,14 @@ export default function Login() {
   const navigate = useNavigate();
   const setSession = useAuthStore((s) => s.setSession);
 
-  const [step, setStep] = useState<'phone' | 'code'>('phone');
+  const [step, setStep] = useState<'phone' | 'code' | 'new'>('phone');
+
+  /**
+   * A verified session that has not been adopted yet, held back for confirmation.
+   *
+   * Only ever set when the server said `isNew` — see the note on the `'new'` step.
+   */
+  const [pending, setPending] = useState<VerifyResult | null>(null);
 
   /**
    * Country and national number are held apart, not as one prefilled string.
@@ -87,14 +94,32 @@ export default function Login() {
     onError: (err: Error) => setError(err.message),
   });
 
+  /** Adopt a verified session and go where the server says. */
+  const land = (result: VerifyResult) => {
+    setSession(result);
+    // The whole point of the flag: a workspace that has not been set up goes to
+    // the form, everyone else goes straight to work.
+    navigate(result.profileComplete ? '/dashboard' : '/onboarding', { replace: true });
+  };
+
   const verify = useMutation({
     mutationFn: () => api.post<{ data: VerifyResult }>('/auth/otp/verify', { phone, code })
       .then((r) => r.data.data),
     onSuccess: (result) => {
-      setSession(result);
-      // The whole point of the flag: a workspace that has not been set up goes to
-      // the form, everyone else goes straight to work.
-      navigate(result.profileComplete ? '/dashboard' : '/onboarding', { replace: true });
+      // `isNew` was read off the response and thrown away for as long as this flow
+      // has existed, which is how a wrong country code stayed silent: the owner of
+      // this product picked `+1` from the country list, entered his ten-digit Indian
+      // number, verified a code, and landed on an empty onboarding form for a
+      // workspace nobody meant to create. Nothing on screen said a new business had
+      // just been made. It read as "I cannot log in".
+      //
+      // So a brand-new account now has to be acknowledged before it is adopted.
+      if (result.isNew) {
+        setPending(result);
+        setStep('new');
+        return;
+      }
+      land(result);
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -114,9 +139,9 @@ export default function Login() {
               Sign in to <span className="text-accent-600">ZunoPilot</span>
             </h1>
             <p className="truncate text-caption text-muted-foreground">
-              {step === 'phone'
-                ? 'We will text you a code. No password to remember.'
-                : `Sent to ${phone.trim()}`}
+              {step === 'phone' && 'We will text you a code. No password to remember.'}
+              {step === 'code' && `Sent to ${phone.trim()}`}
+              {step === 'new' && 'Check the number before you go on.'}
             </p>
           </div>
         </div>
@@ -153,7 +178,7 @@ export default function Login() {
               Send me a code
             </Button>
           </form>
-        ) : (
+        ) : step === 'code' ? (
           <form
             className="space-y-3"
             onSubmit={(e) => { e.preventDefault(); setError(null); verify.mutate(); }}
@@ -215,15 +240,72 @@ export default function Login() {
               </button>
             </div>
           </form>
+        ) : (
+          // A workspace that nobody meant to create.
+          //
+          // **This confirms rather than prevents, and the wording has to be honest
+          // about that.** The account and the tenant are written during
+          // `/auth/otp/verify`, so by the time this renders the workspace exists —
+          // what is still in the visitor's hands is whether they adopt it. Holding
+          // the session in `pending` instead of calling `setSession` is the part
+          // that matters: choosing the other number leaves the app signed out
+          // rather than sitting inside the wrong business.
+          //
+          // Preventing it outright would mean splitting verify into "prove the
+          // number" and "create the workspace", which is a real change to the
+          // signup contract and not one to make while someone is locked out.
+          <div className="space-y-3">
+            <div className="rounded-lg border border-warning/40 bg-warning/15 px-3 py-2">
+              <p className="flex items-center gap-2 text-caption font-medium text-ink-900">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                This number has no workspace yet
+              </p>
+              <p className="mt-1 font-mono text-body text-ink-900">{phone.trim()}</p>
+              <p className="mt-1 text-caption leading-snug text-ink-900">
+                Signing in created a new, empty workspace for it. If you meant a different country
+                code, your existing workspace is still there under the right number.
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => pending && land(pending)}
+            >
+              Set up this new workspace
+            </Button>
+
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setPending(null);
+                setStep('phone');
+                // The number is kept and the code cleared: the fix is almost always
+                // the country, so leaving the digits typed puts the person one click
+                // from the picker instead of retyping ten digits to prove a point.
+                setCode('');
+                setDevCode(null);
+                setError(null);
+              }}
+            >
+              Check the country code
+            </Button>
+          </div>
         )}
 
-        <div className="mt-4 flex items-start gap-2 border-t pt-3">
-          <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <p className="text-caption leading-snug text-muted-foreground">
-            New here? Entering your number creates your workspace — there is nothing separate to sign
-            up for.
-          </p>
-        </div>
+        {/* Suppressed on the `new` step, where the panel above has just said the same
+            thing about a specific number and saying it twice reads as reassurance. */}
+        {step !== 'new' && (
+          <div className="mt-4 flex items-start gap-2 border-t pt-3">
+            <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <p className="text-caption leading-snug text-muted-foreground">
+              New here? Entering your number creates your workspace — there is nothing separate to
+              sign up for.
+            </p>
+          </div>
+        )}
 
         <p className="mt-3 text-center text-caption text-muted-foreground">
           <Link to="/pricing" className="underline">See plans and pricing</Link>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import SupportAccessBanner from './SupportAccessBanner';
+import { NotificationBell } from './NotificationBell';
+import { useNotifications } from '@/hooks/useNotifications';
 import { useAuthStore, type ModuleKey, type Permission } from '@/stores/auth.store';
 import { useUiStore } from '@/stores/ui.store';
 import { cn } from '@/lib/utils';
@@ -93,6 +95,20 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
     && (module === undefined || modules.includes(module)));
 
   const logout = () => { clear(); nav2('/login'); };
+
+  /*
+   * Mounted here and nowhere else.
+   *
+   * This owns the polling, the tab title and the firing of desktop notifications, so a
+   * second call site would double the requests and show every popup twice. Both bells
+   * below are handed the result rather than calling the hook themselves.
+   */
+  const {
+    notifications, unread, markAllRead, open: openNotification,
+  } = useNotifications();
+
+  const unreadMessages = notifications
+    .filter((n) => !n.readAt && n.kind === 'MESSAGE_RECEIVED').length;
 
   const initials = user?.fullName
     ? user.fullName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -189,12 +205,40 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span className={cn('whitespace-nowrap', collapsed && 'lg:hidden')}>{label}</span>
+              {/*
+                Unread messages, on the Inbox item.
+                Counted from the loaded notifications rather than a second endpoint, and
+                filtered to the message kind: an unanswered handoff is urgent but it is
+                not "unread mail", and lumping them together makes the number mean
+                nothing. The list is the 30 most recent, so this saturates at "9+" well
+                before that cap could mislead anyone.
+              */}
+              {to === '/inbox' && unreadMessages > 0 && (
+                <span
+                  aria-label={`${unreadMessages} unread`}
+                  className={cn(
+                    'ml-auto rounded-full bg-danger px-2 text-caption font-medium text-surface-1',
+                    collapsed && 'lg:hidden',
+                  )}
+                >
+                  {unreadMessages > 9 ? '9+' : unreadMessages}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
 
         {/* Sidebar profile footer */}
         <div className="border-t border-ink-300 p-2">
+          {/* Above the profile row, so it sits with the other account-level controls
+              rather than among the places you can navigate to. */}
+          <NotificationBell
+            notifications={notifications}
+            unread={unread}
+            onOpen={openNotification}
+            onMarkAllRead={markAllRead}
+            collapsed={collapsed}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -287,6 +331,17 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
           <span className="truncate text-sm font-medium text-ink-900">
             {tenant?.businessName ?? 'ZunoPilot'}
           </span>
+          {/* Pushed right. On a phone the sidebar is behind a hamburger, so without
+              this the bell would be two taps away from the screen someone is on. */}
+          <div className="ml-auto shrink-0">
+            <NotificationBell
+              notifications={notifications}
+              unread={unread}
+              onOpen={openNotification}
+              onMarkAllRead={markAllRead}
+              collapsed
+            />
+          </div>
         </div>
 
         <SupportAccessBanner />

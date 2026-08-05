@@ -6,6 +6,9 @@ import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { dispatchOrderTemplate } from '../services/template.service.js';
+import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
+import { maskContact } from '../utils/mask-number.js';
+import { isTooShortToSearch, maySeeFullNumbers } from '../utils/may-see-numbers.js';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   NEW: ['ACCEPTED', 'CANCELLED'],
@@ -53,13 +56,23 @@ export const createOrder = asyncHandler(async (req, res) => {
       notes: notes || null,
       items: { create: orderItemsData },
     },
-    include: { items: true, customer: true },
+    include: { items: true, customer: { select: CUSTOMER_VIEW_SELECT } },
   });
 
   // Fire-and-forget ORDER_CREATED template to the customer
   dispatchOrderTemplate(order.id, 'NEW').catch(() => {});
 
-  res.status(201).json({ success: true, data: order });
+  // Masked like every other order response. Easy to overlook because the caller just
+  // supplied the customer — but "they already knew it" is not true of a colleague reading
+  // the same order later, and the response shape has to be consistent regardless.
+  const seeFull = await maySeeFullNumbers(req);
+  res.status(201).json({
+    success: true,
+    data: {
+      ...maskContact(order, seeFull),
+      customer: order.customer ? maskContact(order.customer, seeFull) : order.customer,
+    },
+  });
 });
 
 /**
@@ -108,6 +121,16 @@ const orderListWhere = (req: Parameters<typeof tenantIdOf>[0]): Prisma.OrderWher
 
 export const listOrders = asyncHandler(async (req, res) => {
   const where = orderListWhere(req);
+
+  // The same anti-probe floor the customers list applies. `contactPhone` is matched with
+  // `contains`, so without this a masked agent could reconstruct a number a digit at a time
+  // by watching which orders come back.
+  const search = queryString(req.query.search);
+  if (search && isTooShortToSearch(search, await maySeeFullNumbers(req))) {
+    res.json({ success: true, data: [], meta: { total: 0, take: queryInt(req.query.take, 50), skip: 0 } });
+    return;
+  }
+
   // Same shape the operator console has used since it was built: `data` plus a `meta`
   // carrying the real total, so a page-number control can be honest about how many
   // pages exist. See `listTenants` in super-admin.controller.ts.
@@ -127,7 +150,19 @@ export const listOrders = asyncHandler(async (req, res) => {
     }),
     prisma.order.count({ where }),
   ]);
-  res.json({ success: true, data: orders, meta: { total, take, skip } });
+
+  // **Both the order and its customer.** `Order.contactPhone` is a snapshot of the number
+  // taken at checkout, so masking only the nested customer would leave the number sitting
+  // one field away in the same object.
+  const seeFull = await maySeeFullNumbers(req);
+  res.json({
+    success: true,
+    data: orders.map((order) => ({
+      ...maskContact(order, seeFull),
+      customer: order.customer ? maskContact(order.customer, seeFull) : order.customer,
+    })),
+    meta: { total, take, skip },
+  });
 });
 
 /**
@@ -183,12 +218,21 @@ export const getOrder = asyncHandler(async (req, res) => {
   const order = await prisma.order.findFirst({
     where: { id, tenantId: tenantIdOf(req) },
     include: {
-      customer: true,
+      // Explicit, not `customer: true` — the spread is what put the number on this screen.
+      customer: { select: CUSTOMER_VIEW_SELECT },
       items: { include: { addons: true } },
     },
   });
   if (!order) throw ApiError.notFound();
-  res.json({ success: true, data: order });
+
+  const seeFull = await maySeeFullNumbers(req);
+  res.json({
+    success: true,
+    data: {
+      ...maskContact(order, seeFull),
+      customer: order.customer ? maskContact(order.customer, seeFull) : order.customer,
+    },
+  });
 });
 
 export const updateOrderStatus = asyncHandler(async (req, res) => {

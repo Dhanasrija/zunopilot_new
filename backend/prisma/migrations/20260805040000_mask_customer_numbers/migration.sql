@@ -1,0 +1,18 @@
+-- Per-workspace switch for hiding most of a customer's phone number from team members.
+--
+-- The redaction happens on the server, at the response boundary, because masking in the
+-- browser would leave the full number in the JSON — a network tab defeats it in one click.
+-- Owners, and any role granted `customers:view_full_number`, still see the real number.
+--
+-- **Off by default, deliberately.** Turning this on changes what every team member can see,
+-- so it has to be a decision a workspace makes rather than something that happens to them
+-- on deploy.
+--
+-- Purely additive: one boolean with a default, nothing altered or dropped, so the two
+-- hand-written partial unique indexes (WorkflowInstance_one_active_per_conversation and
+-- Price_one_active_per_plan_interval) are untouched.
+--
+-- Note what is NOT here: no change to how numbers are stored. `Customer.waId` remains the
+-- full E.164 value, because it is the address WhatsApp messages are sent to. This flag
+-- governs what leaves the server, never what is kept.
+ALTER TABLE "Tenant" ADD COLUMN "maskCustomerNumbers" BOOLEAN NOT NULL DEFAULT false;

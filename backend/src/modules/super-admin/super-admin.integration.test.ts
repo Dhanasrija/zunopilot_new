@@ -31,9 +31,24 @@ const wipe = async () => {
   await prisma.auditEvent.deleteMany({ where: { tenantId: { in: [TENANT_A, TENANT_B] } } });
   await prisma.superAdmin.deleteMany({ where: { email: EMAIL } });
   await prisma.tenant.deleteMany({ where: { id: { in: [TENANT_A, TENANT_B] } } });
-  // Catalog rows are global, not tenant-scoped, so the tenant cascade does not reach them.
+
+  // Catalog rows are global, not tenant-scoped, so neither the tenant cascade nor
+  // the tenant-scoped audit delete above reaches them or their audit trail.
+  //
+  // **Scoped by target id, and the order matters.** This was
+  // `deleteMany({ where: { targetType: 'ConnectorType' } })`, which is every
+  // connector-type audit row in the database — a suite wiping a real operator's
+  // audit history as a side effect of tidying up after itself. The ids have to be
+  // read before the types are deleted, because that is the only thing tying the
+  // audit rows back to this test.
+  const mine = await prisma.connectorType.findMany({
+    where: { key: { startsWith: 'sa_test_' } },
+    select: { id: true },
+  });
+  await prisma.auditEvent.deleteMany({
+    where: { targetType: 'ConnectorType', targetId: { in: mine.map((t) => t.id) } },
+  });
   await prisma.connectorType.deleteMany({ where: { key: { startsWith: 'sa_test_' } } });
-  await prisma.auditEvent.deleteMany({ where: { targetType: 'ConnectorType' } });
 };
 
 beforeEach(async () => {

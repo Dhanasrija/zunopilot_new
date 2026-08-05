@@ -13,6 +13,7 @@ import type { Request, Response } from 'express';
 import type { InboundMessage } from '../types/domain.js';
 import { linkLeadToCustomer } from '../modules/leads/lead.service.js';
 import { handleConsentKeyword } from '../modules/marketing/consent.service.js';
+import { notifyInboundMessage } from '../modules/notifications/notification.producers.js';
 
 /** The parts of a Meta inbound message object this handler reads. */
 interface MetaInteractiveReply {
@@ -376,6 +377,25 @@ export const receiveWebhook = asyncHandler(async (req, res) => {
             action: conversationAction,
             status: conversation.status,
             unreadCount: conversation.unreadCount,
+          });
+
+          // Tell someone. Sits here, after the duplicate-wamid `continue` above, so a
+          // webhook redelivery never rings twice — and awaited rather than floated so
+          // the notification is durable before this handler returns, since a process
+          // that exits mid-flight would otherwise drop it silently.
+          //
+          // It cannot throw: `notifyInboundMessage` guards its own failures. The
+          // customer's message is already stored and that is what matters.
+          await notifyInboundMessage({
+            tenantId: tenant.id,
+            conversationId: conversation.id,
+            customerName: customer.name,
+            waId: customer.waId,
+            // `mapped.body` is optional here rather than nullable — a media-only
+            // message simply has none, and `preview` renders that as "Sent an
+            // attachment".
+            body: mapped.body ?? null,
+            waMessageId: wm.id,
           });
 
           // "STOP" is answered before automation gets a look at the message.

@@ -56,6 +56,7 @@ const sessionView = async (user: {
   assignedRole: { isOwner: boolean; permissions: string[] } | null;
   tenant: {
     id: string; businessName: string; onboardingCompletedAt: Date | null;
+    maskCustomerNumbers: boolean;
     businessCategory: { id: string; key: string; label: string } | null;
   };
 }) => ({
@@ -75,6 +76,15 @@ const sessionView = async (user: {
     category: user.tenant.businessCategory?.key ?? null,
     categoryId: user.tenant.businessCategory?.id ?? null,
     categoryLabel: user.tenant.businessCategory?.label ?? null,
+    /**
+     * Whether this workspace hides most of a customer's phone number.
+     *
+     * Carried so the UI can *explain* a masked number rather than showing bullets with no
+     * reason. Combined with `customers:view_full_number` in `permissions` it also tells the
+     * client whether *this* person is affected. Neither is a security boundary — the
+     * redaction happens on the server, and this is only ever used to word a tooltip.
+     */
+    maskCustomerNumbers: user.tenant.maskCustomerNumbers,
   },
   permissions: resolvePermissions(user.assignedRole, user.role),
   modules: await enabledModulesFor(user.tenant.id),

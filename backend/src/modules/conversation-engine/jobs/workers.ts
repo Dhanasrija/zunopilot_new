@@ -14,9 +14,10 @@ import { parseDefinition } from '../domain/definition.js';
 import { handleProcessInboundMessage } from './handlers/process-inbound.js';
 import { sweepImpersonationGrants } from '../../super-admin/impersonation.js';
 import { sweepOtpChallenges } from '../../../services/otp.service.js';
+import { pushEnabled, pushNotification } from '../../notifications/push.service.js';
 import {
   QUEUES, registerWorker, scheduleMaintenance,
-  type ExecuteWorkflowInstanceJob, type SendWhatsAppMessageJob,
+  type DeliverPushNotificationJob, type ExecuteWorkflowInstanceJob, type SendWhatsAppMessageJob,
 } from './queue.js';
 
 // Worker registration.
@@ -223,6 +224,35 @@ const handleApplyPlanChanges = async () => {
   if (billed) logger.info('Billed AI overage', { billed });
 };
 
+/**
+ * Push one notification to its recipients' devices.
+ *
+ * **Re-reads the notification and gives up if it has been read.** A push is only worth
+ * sending while it is still news: between the enqueue and this job running, someone may
+ * have opened the Inbox and dealt with it, and buzzing their phone about a message they
+ * have already answered is the fastest way to get notifications turned off.
+ *
+ * Never throws for an absent notification either. The row can be gone — a tenant
+ * deleted, a conversation cascaded — and that is not a failure worth retrying.
+ */
+const handleDeliverPushNotification = async ({ notificationId }: DeliverPushNotificationJob) => {
+  if (!pushEnabled()) return;
+
+  const notification = await prisma.notification.findUnique({ where: { id: notificationId } });
+  if (!notification) return;
+  if (notification.readAt) {
+    logger.debug('Skipped a push for an already-read notification', { notificationId });
+    return;
+  }
+
+  const result = await pushNotification(notification);
+  if (result.sent || result.failed) {
+    logger.info('Pushed a notification', {
+      notificationId, kind: notification.kind, sent: result.sent, failed: result.failed,
+    });
+  }
+};
+
 let started = false;
 
 /** Register every worker. Idempotent, so a second call is a no-op. */
@@ -238,6 +268,9 @@ export const startWorkers = async (): Promise<void> => {
   await registerWorker(QUEUES.applyPlanChanges, handleApplyPlanChanges);
   await registerWorker(QUEUES.sweepDueReminders, handleSweepDueReminders);
   await registerWorker(QUEUES.sendCampaignBatches, handleSendCampaignBatches);
+  // Batched: a busy workspace's inbound burst produces one of these per message, and
+  // they are short, network-bound and independent.
+  await registerWorker(QUEUES.deliverPushNotification, handleDeliverPushNotification, { batchSize: 5 });
 
   await scheduleMaintenance();
 

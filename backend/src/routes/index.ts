@@ -17,6 +17,7 @@ import campaigns from '../modules/marketing/campaign.routes.js';
 import customerLists from '../modules/customer-lists/list.routes.js';
 import { mediaRoutes } from '../modules/media/media.routes.js';
 import { contactRoutes } from '../modules/enquiries/enquiry.routes.js';
+import notificationRoutes from '../modules/notifications/notification.routes.js';
 import {
   billingRoutes, publicPricingRoutes, razorpayWebhookRoutes,
 } from '../modules/billing/routes.js';
@@ -93,5 +94,9 @@ routes.use('/media', mediaRoutes);
 // defence. Enquiries are platform-level and are read only from the super admin
 // console; they are not tenant `Lead`s.
 routes.use('/contact', contactRoutes);
+
+// Notifications. Authenticated, personal, and deliberately behind no permission or
+// module gate — see the note at the top of its router for why both would be wrong.
+routes.use('/notifications', notificationRoutes);
 
 routes.use('/workflows', workflow);

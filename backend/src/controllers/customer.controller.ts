@@ -5,6 +5,8 @@ import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { moduleEnabled } from '../modules/modules/module.service.js';
+import { maskContact } from '../utils/mask-number.js';
+import { isTooShortToSearch, maySeeFullNumbers } from '../utils/may-see-numbers.js';
 
 /**
  * Whether this request may see that a customer is also a lead.
@@ -129,7 +131,22 @@ export const listCustomers = asyncHandler(async (req, res) => {
   const status = queryEnum(req.query.status, ['subscribed', 'pending', 'unsubscribed'] as const);
   const withLeads = await maySeeLeads(req);
   const isLead = withLeads ? queryBool(req.query.isLead) : undefined;
+  const seeFull = await maySeeFullNumbers(req);
   const where: Prisma.CustomerWhereInput = { tenantId: tenantIdOf(req) };
+
+  // A number search short enough to be a probe rather than a confirmation.
+  //
+  // Search stays available to masked users on purpose — an agent typing a number a customer
+  // has just read out is confirming it, and taking that away makes the Inbox painful. But an
+  // unbounded `contains` is an oracle: try `1`, then `12`, and reconstruct a number a digit
+  // at a time from which rows come back. Six digits means a query already carries most of a
+  // number. Answered as an empty page rather than an error, because there is nothing the
+  // person can usefully do about it and an error would confirm the rule exists.
+  if (search && isTooShortToSearch(search, seeFull)) {
+    res.json({ success: true, data: [], meta: { total: 0, take: queryInt(req.query.take, 50), skip: 0 } });
+    return;
+  }
+
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -191,8 +208,12 @@ export const listCustomers = asyncHandler(async (req, res) => {
     success: true,
     // Flattened, so the client reads one field instead of reaching into a one-element
     // array and rediscovering why it is an array.
+    //
+    // Masked here rather than via an explicit select, because unlike the nested
+    // `customer: true` spreads elsewhere this *is* the customers resource — returning its
+    // own columns is the point. What must not leave is the number.
     data: customers.map(({ conversations, ...customer }) => ({
-      ...customer,
+      ...maskContact(customer, seeFull),
       lastMessageAt: conversations[0]?.lastMessageAt ?? null,
     })),
     meta: { total, take, skip },
@@ -235,7 +256,18 @@ export const getCustomer = asyncHandler(async (req, res) => {
     },
   });
   if (!customer) throw ApiError.notFound();
-  res.json({ success: true, data: customer });
+
+  const seeFull = await maySeeFullNumbers(req);
+  res.json({
+    success: true,
+    data: {
+      ...maskContact(customer, seeFull),
+      // **The orders too.** Each carries `contactPhone`, a snapshot of the number taken at
+      // checkout — so masking the customer while its own order history showed the number in
+      // full would defeat the point on the very screen the feature is named after.
+      orders: customer.orders.map((order) => maskContact(order, seeFull)),
+    },
+  });
 });
 
 export const getCustomerMessages = asyncHandler(async (req, res) => {

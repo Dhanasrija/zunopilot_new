@@ -2,6 +2,7 @@ import { Prisma, type WorkflowInstance, type WorkflowInstanceStatus } from '@pri
 import { prisma } from '../../../config/prisma.js';
 import { logger } from '../../../config/logger.js';
 import { parseDefinition, type WorkflowDefinition } from '../domain/definition.js';
+import { notifyHandoffRequested } from '../../notifications/notification.producers.js';
 
 // Lifecycle of a workflow instance.
 //
@@ -67,19 +68,110 @@ export const startInstance = async ({
   if (!workflow) throw new WorkflowNotPublishedError(workflowId);
   // A draft must never answer a customer. This is the check that makes "publish"
   // mean something.
+  //
+  // It stays exactly here, on the path routing uses. `startInstanceOnVersion`
+  // below is the only way past it, and it is a separate exported name precisely
+  // so that "who can run an unpublished graph" is a question `grep` answers.
   if (workflow.status !== 'PUBLISHED' || !workflow.publishedVersion) {
     throw new WorkflowNotPublishedError(workflowId);
   }
 
-  const definition = parseDefinition(workflow.publishedVersion.definition);
+  return createInstance({
+    tenantId,
+    workflowId,
+    conversationId,
+    versionId: workflow.publishedVersion.id,
+    definition: parseDefinition(workflow.publishedVersion.definition),
+    extractedInputs,
+    dryRun,
+  });
+};
 
+/** Raised when a version does not belong to the workflow (or tenant) it was asked for. */
+export class VersionNotFoundError extends Error {
+  constructor(versionId: string) {
+    super(`Workflow version ${versionId} was not found on that workflow`);
+    this.name = 'VersionNotFoundError';
+  }
+}
+
+/**
+ * Start a workflow on **a named version, published or not**.
+ *
+ * **Why this exists, and why it is not a flag on `startInstance`.** The builder's
+ * Test Flow and the generator's dry-run driver both need to run a draft — that is
+ * the entire point of a draft. `startInstance` refuses one, correctly, because the
+ * conversation it is starting belongs to a customer. The simulator's conversation
+ * does not: `simulatorConversation` mints a synthetic contact per workflow.
+ *
+ * So the two callers want genuinely different things, and a `allowDraft: true`
+ * parameter would have put the decision inside the function that exists to make
+ * publishing mean something. A second exported name keeps the gate intact and
+ * makes every bypass visible at the call site.
+ *
+ * **This was silently broken.** `testWorkflow` already resolved a latest-version
+ * fallback for the unpublished case and then handed the *workflow* to
+ * `startInstance`, which threw `WorkflowNotPublishedError` before the fallback
+ * could ever be used — so pressing Test Flow on a generated draft failed with
+ * "has no published version" and no way to act on it.
+ *
+ * The version is looked up **scoped to the workflow and tenant**, so a caller
+ * holding a version id from somewhere else cannot run another tenant's graph.
+ */
+export const startInstanceOnVersion = async ({
+  tenantId, workflowId, conversationId, versionId, extractedInputs = {}, dryRun = false,
+}: {
+  tenantId: string;
+  workflowId: string;
+  conversationId: string;
+  versionId: string;
+  extractedInputs?: Record<string, unknown>;
+  dryRun?: boolean;
+}): Promise<StartedInstance> => {
+  // One query, joined on the workflow, rather than "find the version then check
+  // its workflowId" — the tenant check has to be part of the lookup or it is a
+  // check someone can forget to write.
+  const version = await prisma.workflowVersion.findFirst({
+    where: { id: versionId, workflowId, workflow: { tenantId } },
+  });
+  if (!version) throw new VersionNotFoundError(versionId);
+
+  return createInstance({
+    tenantId,
+    workflowId,
+    conversationId,
+    versionId: version.id,
+    definition: parseDefinition(version.definition),
+    extractedInputs,
+    dryRun,
+  });
+};
+
+/**
+ * The transaction both entry points share.
+ *
+ * Private on purpose: it takes an already-resolved version and therefore performs
+ * no authorisation of its own. Everything that decides *whether* this run is
+ * allowed lives in the two exported functions above.
+ */
+const createInstance = async ({
+  tenantId, workflowId, conversationId, versionId, definition, extractedInputs, dryRun,
+}: {
+  tenantId: string;
+  workflowId: string;
+  conversationId: string;
+  versionId: string;
+  definition: WorkflowDefinition;
+  extractedInputs: Record<string, unknown>;
+  dryRun: boolean;
+}): Promise<StartedInstance> => {
   try {
     const instance = await prisma.$transaction(async (tx) => {
       const created = await tx.workflowInstance.create({
         data: {
           tenantId,
           workflowId,
-          workflowVersionId: workflow.publishedVersion!.id,
+          workflowVersionId: versionId,
           conversationId,
           status: 'RUNNING',
           currentNodeId: definition.entryNodeId,
@@ -252,6 +344,27 @@ export const handOffToHuman = async ({
   });
 
   logger.info('Conversation handed to a human', { conversationId, instanceId, reason });
+
+  // The urgent notification.
+  //
+  // **Outside the transaction, on purpose.** A handoff that committed must not be
+  // rolled back because a notification could not be written — the customer has already
+  // been told a person will help, and the conversation is already paused. Notifying is
+  // the follow-up, not part of the state change.
+  //
+  // Loaded here rather than passed in because every caller has a conversationId and
+  // none of them has the customer's name.
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { customer: { select: { name: true, waId: true } } },
+  });
+  await notifyHandoffRequested({
+    tenantId,
+    conversationId,
+    customerName: conversation?.customer.name ?? null,
+    waId: conversation?.customer.waId ?? '',
+    reason,
+  });
 };
 
 /** Cancel a live instance, e.g. the customer said "cancel" or switched topic. */

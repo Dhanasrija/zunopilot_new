@@ -4,6 +4,8 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../../middleware/auth.js';
 import { queryInt, queryOffset } from '../../utils/query.js';
+import { maskContact } from '../../utils/mask-number.js';
+import { maySeeFullNumbers } from '../../utils/may-see-numbers.js';
 import {
   addMembers, allLists, createList, deleteList, listMembers, listOf, removeMembers,
   updateList,
@@ -76,7 +78,14 @@ export const getListMembers = asyncHandler(async (req: Request, res: Response) =
   const take = queryInt(req.query.take, 50);
   const skip = queryOffset(req.query.skip);
   const { members, total } = await listMembers(tenantIdOf(req), id, { take, skip });
-  res.json({ success: true, data: members, meta: { total, take, skip } });
+  // A curated list is exactly the shape someone exfiltrating contacts would reach for, so
+  // it is masked like everything else.
+  const seeFull = await maySeeFullNumbers(req);
+  res.json({
+    success: true,
+    data: members.map((member) => ({ ...member, customer: maskContact(member.customer, seeFull) })),
+    meta: { total, take, skip },
+  });
 });
 
 export const postListMembers = asyncHandler(async (req: Request, res: Response) => {

@@ -22,6 +22,14 @@ export const QUEUES = {
   generateConversationSummary: 'generate-conversation-summary',
   routeConversationMessage: 'route-conversation-message',
   retryFailedNode: 'retry-failed-node',
+  /**
+   * Deliver one notification to its recipients' subscribed devices.
+   *
+   * Queued rather than sent inline, for the reason every producer in this module is
+   * careful about: the inbound path's job is to store a customer's message, and it
+   * must not wait on — or be failed by — a push service having a bad minute.
+   */
+  deliverPushNotification: 'deliver-push-notification',
   // Maintenance
   expireStaleInstances: 'expire-stale-instances',
   applyPlanChanges: 'apply-scheduled-plan-changes',
@@ -73,6 +81,17 @@ export interface RetryFailedNodeJob {
   nodeExecutionId: string;
 }
 
+/**
+ * Just the id.
+ *
+ * The notification's text is deliberately *not* carried in the payload: a job payload
+ * is a snapshot, and by the time this runs the notification may have been read — in
+ * which case pushing it to a phone is noise. Loading it fresh lets the handler decide.
+ */
+export interface DeliverPushNotificationJob {
+  notificationId: string;
+}
+
 export interface JobPayloads {
   [QUEUES.processInboundMessage]: ProcessInboundMessageJob;
   [QUEUES.executeWorkflowInstance]: ExecuteWorkflowInstanceJob;
@@ -81,6 +100,7 @@ export interface JobPayloads {
   [QUEUES.routeConversationMessage]: RouteConversationMessageJob;
   [QUEUES.generateConversationSummary]: GenerateConversationSummaryJob;
   [QUEUES.retryFailedNode]: RetryFailedNodeJob;
+  [QUEUES.deliverPushNotification]: DeliverPushNotificationJob;
   [QUEUES.executeHttpRequest]: Record<string, unknown>;
   [QUEUES.expireStaleInstances]: Record<string, unknown>;
   [QUEUES.applyPlanChanges]: Record<string, unknown>;

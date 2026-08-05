@@ -5,6 +5,8 @@ import { prisma } from '../../config/prisma.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { holds, tenantIdOf, userOf } from '../../middleware/auth.js';
+import { maskContact } from '../../utils/mask-number.js';
+import { maySeeFullNumbers } from '../../utils/may-see-numbers.js';
 import { queryString } from '../../utils/query.js';
 import {
   CLOSED_STATUSES, addTicketNote, assignTicket, raiseTicket, sendTicketUpdate,
@@ -85,10 +87,14 @@ export const listTickets = asyncHandler(async (req: Request, res: Response) => {
     prisma.ticket.groupBy({ by: ['status'], where: { tenantId }, _count: { _all: true } }),
   ]);
 
+  const seeFull = await maySeeFullNumbers(req);
   res.json({
     success: true,
     data: {
-      tickets,
+      tickets: tickets.map((ticket) => ({
+        ...ticket,
+        customer: ticket.customer ? maskContact(ticket.customer, seeFull) : ticket.customer,
+      })),
       total,
       counts: Object.fromEntries(counts.map((row) => [row.status, row._count._all])),
     },
@@ -112,7 +118,15 @@ export const getTicket = asyncHandler(async (req: Request, res: Response) => {
     windowStateFor(tenantId, ticket.conversationId),
   ]);
 
-  res.json({ success: true, data: { ticket, events, window } });
+  const seeFullDetail = await maySeeFullNumbers(req);
+  res.json({
+    success: true,
+    data: {
+      ticket: { ...ticket, customer: ticket.customer ? maskContact(ticket.customer, seeFullDetail) : ticket.customer },
+      events,
+      window,
+    },
+  });
 });
 
 const raiseSchema = z.object({
@@ -130,6 +144,8 @@ export const postTicket = asyncHandler(async (req: Request, res: Response) => {
   const body = raiseSchema.parse(req.body);
 
   const ticket = await raiseTicket(tenantId, user.id, body);
+  // No masking here: this response is a bare `Ticket` with no customer relation loaded,
+  // so there is no number in it to redact.
   res.status(201).json({ success: true, data: ticket });
 });
 

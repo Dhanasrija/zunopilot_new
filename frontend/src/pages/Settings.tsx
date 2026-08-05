@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import NotificationSettings from '@/components/settings/NotificationSettings';
+import NumberMasking from '@/components/settings/NumberMasking';
 import { toast } from 'sonner';
 import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
 
@@ -219,27 +221,22 @@ export default function Settings() {
               </div>
             </div>
           </div>
+
+          {/* Privacy. Its own card at the foot of the profile tab, because it changes what
+              the rest of the team can see rather than anything about this business. */}
+          <NumberMasking />
         </TabsContent>
 
-        {/* Notifications Tab */}
+        {/*
+          Notifications.
+
+          This used to be a hardcoded empty state — "No notifications yet / You're all
+          caught up!" — with no query behind it, so it said that permanently while the
+          Dashboard linked people here. It is now the real thing: preferences, this
+          device's push subscription, and the actual list.
+        */}
         <TabsContent value="notifications" className="mt-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>Notifications</CardTitle>
-              <CardDescription>Stay updated with activity on your account.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="h-14 w-14 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <Bell className="h-7 w-7 text-muted-foreground" />
-                </div>
-                <h3 className="text-body font-medium text-ink-700">No notifications yet</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-                  You’re all caught up! Notifications about your orders, messages, and account activity will appear here.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <NotificationSettings />
         </TabsContent>
       </Tabs>
     </div>
