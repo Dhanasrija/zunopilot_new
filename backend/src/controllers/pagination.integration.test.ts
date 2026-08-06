@@ -28,6 +28,19 @@ let token: string;
 /** Set on 3 orders, to prove search reaches SQL rather than filtering a page. */
 const NEEDLE_NAME = 'Zzyzx Searchtarget';
 
+/**
+ * Shared by every seeded order, and deliberately kept out of the buyer names below.
+ *
+ * `search` ORs three branches — `customerName contains`, `contactPhone contains`, and an
+ * exact `orderNumber` — so anything numeric in the seed data can satisfy a branch the
+ * assertion did not intend. The buyer names are letters only for exactly that reason:
+ * `Buyer ${i}` meant a search for order #120 also matched the order placed by "Buyer 120",
+ * and the test then depended on which row happened to sort first. It passed locally and
+ * returned 2 in CI.
+ */
+const CONTACT_PHONE = '15557770099';
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
 const wipe = async () => {
   // Orders first. `OrderItem.itemId` points at `MenuItem` **without** a cascade, so
   // dropping the tenant tries to delete the menu items out from under rows that still
@@ -92,8 +105,8 @@ beforeAll(async () => {
         customerId: customers[i % customers.length]!.id,
         // A spread of statuses, with exactly 40 DELIVERED so the summary is checkable.
         status: i < 40 ? 'DELIVERED' : i < 80 ? 'NEW' : i < 120 ? 'PREPARING' : i < 160 ? 'ACCEPTED' : 'CANCELLED',
-        customerName: i < 3 ? NEEDLE_NAME : `Buyer ${i}`,
-        contactPhone: '15557770099',
+        customerName: i < 3 ? NEEDLE_NAME : `Buyer ${LETTERS[i % 26]}`,
+        contactPhone: CONTACT_PHONE,
         deliveryAddress: 'Somewhere',
         subtotal: new Prisma.Decimal(100),
         totalAmount: new Prisma.Decimal(100),
@@ -182,11 +195,18 @@ describe('GET /api/orders', () => {
   });
 
   it('searches by exact order number when the query is numeric', async () => {
-    const first = await get('/api/orders?take=1').expect(200);
-    const { orderNumber } = first.body.data[0];
-    const response = await get(`/api/orders?search=${orderNumber}&take=5`).expect(200);
+    const all = await get(`/api/orders?take=${ORDER_COUNT}`).expect(200);
+    const numbers: number[] = all.body.data.map((o: { orderNumber: number }) => o.orderNumber);
+
+    // Pick the number rather than taking whichever row sorts first. `contactPhone` is matched
+    // with `contains` and every order shares one, so a number that happens to be a substring
+    // of it — 155, in this phone — matches all 240 through that branch instead.
+    const target = numbers.find((n) => !CONTACT_PHONE.includes(String(n)));
+    expect(target).toBeDefined();
+
+    const response = await get(`/api/orders?search=${target}&take=5`).expect(200);
     expect(response.body.meta.total).toBe(1);
-    expect(response.body.data[0].orderNumber).toBe(orderNumber);
+    expect(response.body.data[0].orderNumber).toBe(target);
   });
 
   it('does not throw when a non-numeric search meets the Int column', async () => {

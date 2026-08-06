@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
 import request from 'supertest';
 import { buildApp } from '../../app.js';
@@ -887,6 +887,41 @@ describe('nobody pays without the details the invoice legally needs', () => {
    * in the seller's GSTR-1 and in the buyer's input credit. Invoices here are deliberately
    * immutable and cannot be regenerated, so the only place to catch it is before the charge.
    */
+
+  /*
+   * Every assertion here is about a REGISTERED seller.
+   *
+   * `assertBillableIdentity` requires the buyer's state only when
+   * `sellerTaxIdentity().registered` — an unregistered seller issues no tax invoice and so has
+   * no place of supply to name. That gate is deliberate: requiring `gstStateCode`
+   * unconditionally would deadlock checkout, because the state selector is only shown once the
+   * seller is registered.
+   *
+   * So the seller identity has to be set here rather than inherited. `sellerTaxIdentity()`
+   * reads `process.env` at the point of use precisely so it can be, and the same
+   * save/set/restore appears in `gst.test.ts` and `invoice-gst.integration.test.ts`.
+   *
+   * Leaving it ambient is what broke the pipeline: a developer machine has `COMPANY_GSTIN` in
+   * its `.env`, a fresh CI clone has no `.env` at all, so these two passed locally and failed
+   * on the first real run.
+   */
+  const TELANGANA_GSTIN = '36AABCU9603R1ZM';
+  let savedSeller: { gstin?: string; stateCode?: string };
+
+  beforeAll(() => {
+    savedSeller = { gstin: process.env.COMPANY_GSTIN, stateCode: process.env.COMPANY_STATE_CODE };
+    process.env.COMPANY_GSTIN = TELANGANA_GSTIN;
+    process.env.COMPANY_STATE_CODE = '36';
+  });
+
+  afterAll(() => {
+    // `delete` rather than assigning undefined: the latter leaves the key present with the
+    // string "undefined", which reads as configured.
+    if (savedSeller.gstin === undefined) delete process.env.COMPANY_GSTIN;
+    else process.env.COMPANY_GSTIN = savedSeller.gstin;
+    if (savedSeller.stateCode === undefined) delete process.env.COMPANY_STATE_CODE;
+    else process.env.COMPANY_STATE_CODE = savedSeller.stateCode;
+  });
 
   const withAddress = (over: Record<string, string | null> = {}) => prisma.tenant.update({
     where: { id: TENANT },
