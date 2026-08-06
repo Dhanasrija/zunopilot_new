@@ -53,11 +53,27 @@ esac
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 say "1/9  static bundles -> releases/${REL}"
+# tar over ssh, not rsync. `atlassian/default-image:4` ships an ssh client but no rsync, and
+# installing one would cost an apt-get on every deploy.
+#
+# Nothing is lost. rsync earns its keep by diffing against an existing tree, and there is never
+# one here: each release goes into a directory created empty moments earlier, so `--delete` had
+# nothing to delete and the delta algorithm nothing to compare. tar is one stream, one round
+# trip, and a dependency fewer.
+#
+# `set -o pipefail` is on, so a failure in either half of the pipe fails the deploy rather than
+# being masked by tar-on-the-far-end exiting 0.
 for pair in "frontend:frontend/dist" "ops:superadmin/dist"; do
   app="${pair%%:*}"; src="${pair##*:}"
+  test -d "${src}" || { echo "${src} is missing — did the build step publish its artifact?"; exit 1; }
   "${SSH[@]}" "mkdir -p ${ROOT}/${app}/releases/${REL}"
-  rsync -az --delete -e "ssh -o StrictHostKeyChecking=yes -o BatchMode=yes" \
-    "${src}/" "${USER}@${HOST}:${ROOT}/${app}/releases/${REL}/"
+  # COPYFILE_DISABLE stops macOS bsdtar emitting an AppleDouble `._name` sidecar for every
+  # file carrying an extended attribute — which every file checked out on a Mac does
+  # (com.apple.provenance). It is a no-op in CI, where tar runs on Linux; it matters only when
+  # someone runs this script by hand from a laptop, where it is the difference between the
+  # release directory holding 3 files and holding 8.
+  COPYFILE_DISABLE=1 tar -czf - -C "${src}" . \
+    | "${SSH[@]}" "tar -xzf - -C ${ROOT}/${app}/releases/${REL}"
 done
 
 say "2/9  backend source"
