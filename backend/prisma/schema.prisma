@@ -3,6 +3,20 @@
 
 generator client {
   provider = "prisma-client-js"
+
+  /// The query engine is a native binary, and `prisma generate` emits only the one for the
+  /// machine that ran it. That is fine while generate and run happen on the same host — and
+  /// wrong the moment CI builds the runtime tree and ships it to the server, which is exactly
+  /// what `deploy/deploy.sh` does.
+  ///
+  /// `native` keeps local development and the CI test step working; `debian-openssl-3.0.x`
+  /// covers both the `node:22` build image and the Ubuntu server (OpenSSL 3.5.5), which are
+  /// both linux-x64. The symptom of getting this wrong is a runtime error naming a missing
+  /// engine, at boot, only in production.
+  ///
+  /// If the server is ever moved to Graviton, this becomes `linux-arm64-openssl-3.0.x` and
+  /// the `npm ci` in the packaging step needs `--cpu=arm64 --os=linux` for esbuild too.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
