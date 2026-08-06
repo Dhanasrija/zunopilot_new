@@ -6,7 +6,7 @@ import {
 } from '../controllers/menu.controller.js';
 import { categoryValidator, itemValidator, addonGroupValidator } from '../validators/menu.validator.js';
 import { validate } from '../middleware/validate.js';
-import { requireAuth, requirePermission } from '../middleware/auth.js';
+import { requireAuth, requireModule, requirePermission } from '../middleware/auth.js';
 
 // Reads are gated too.
 //
@@ -16,6 +16,15 @@ import { requireAuth, requirePermission } from '../middleware/auth.js';
 // catalogue access could still list the whole catalogue.
 const router = Router();
 router.use(requireAuth);
+
+/*
+ * Selling is a module, so a workspace that does not sell cannot reach this at all.
+ *
+ * Mounted here rather than relying on the nav hiding the screen: a hidden menu item is a
+ * hint, not a control, and a typed URL or a stale bookmark would otherwise still work.
+ * Refuses with 404 rather than 403 — the same reasoning as every other module gate.
+ */
+router.use(requireModule('ECOMMERCE'));
 
 router.get('/categories', requirePermission('catalogue:read'), listCategories);
 router.post('/categories', requirePermission('catalogue:write'), categoryValidator, validate, createCategory);

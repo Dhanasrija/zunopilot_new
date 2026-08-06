@@ -62,8 +62,15 @@ export interface Overview {
   };
 }
 
-/** An optional module a workspace can be given. Mirrors the `ModuleKey` enum. */
-export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT';
+/**
+ * A module a workspace can be given or have taken away. Mirrors the `ModuleKey` enum.
+ *
+ * The first three are add-ons: off until an operator grants them. `AI_AGENT` and `ECOMMERCE`
+ * run the other way — on everywhere by default, and switched off to stop a workspace spending
+ * on model calls, or to hide selling from a workspace that does not sell. Same machinery,
+ * opposite direction.
+ */
+export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE';
 
 export interface ModuleSetting {
   module: ModuleKey;
@@ -206,6 +213,9 @@ export interface CategoryRow {
   key: string;
   label: string;
   description: string | null;
+  /** What this kind of business calls its catalogue, and one thing in it. Null = generic. */
+  catalogueNoun: string | null;
+  catalogueItemNoun: string | null;
   sortOrder: number;
   isActive: boolean;
   workspaces: number;
@@ -339,8 +349,11 @@ export const sa = {
 
   categories: {
     list: () => unwrap<CategoryRow[]>(api.get('/business-categories')),
-    create: (body: { key: string; label: string; description?: string; sortOrder?: number }) =>
-      unwrap<CategoryRow>(api.post('/business-categories', body)),
+    create: (body: {
+      key: string; label: string; description?: string; sortOrder?: number;
+      /** Omit either to leave it generic — the app reads "Catalogue" / "Item". */
+      catalogueNoun?: string; catalogueItemNoun?: string;
+    }) => unwrap<CategoryRow>(api.post('/business-categories', body)),
     update: (id: string, body: Record<string, unknown>) =>
       unwrap<CategoryRow>(api.patch(`/business-categories/${id}`, body)),
     remove: (id: string) => api.delete(`/business-categories/${id}`),

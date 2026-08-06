@@ -21,6 +21,19 @@ export interface AuthTenant {
   category: string | null;
   categoryId: string | null;
   categoryLabel: string | null;
+
+  /**
+   * What this business calls the things it sells — "Menu", "Products", "Services".
+   *
+   * Comes from the workspace's category, already defaulted by the server to "Catalogue" when
+   * that category has no word set, so callers never need a fallback of their own. Two nouns
+   * because the screen needs both: "Add Product" and "Product Category" cannot be derived from
+   * "Products" without pluralisation rules.
+   *
+   * Optional only because a session minted before this existed will not carry it.
+   */
+  catalogueNoun?: string;
+  catalogueItemNoun?: string;
   /**
    * Whether this workspace hides most of a customer's phone number from team members.
    *
@@ -31,13 +44,31 @@ export interface AuthTenant {
    * Optional because a session minted before this field existed will not carry it.
    */
   maskCustomerNumbers?: boolean;
+
+  /**
+   * Whether this workspace *wants* the AI agent answering customers.
+   *
+   * Only half the answer. The other half is `AI_AGENT` in `modules`, which is ours to grant and
+   * theirs to live with; both must be on for a model call to happen. Kept separate rather than
+   * merged so Settings can say which one is off — "we switched this off" and "you switched this
+   * off" are different sentences and only one of them is the workspace's problem.
+   *
+   * Optional because a session minted before this field existed will not carry it. Read it as
+   * `?? true`, matching the column default.
+   */
+  aiAgentEnabled?: boolean;
 }
 
 /** A permission key from the server's `config/permissions.ts`. */
 export type Permission = string;
 
-/** An optional module an operator has switched on for this workspace. */
-export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT';
+/**
+ * A module an operator controls for this workspace.
+ *
+ * The first three are add-ons, absent until granted. `AI_AGENT` and `ECOMMERCE` are the
+ * inverse: present for everyone, absent only where we have revoked them.
+ */
+export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE';
 
 interface AuthState {
   token: string | null;
@@ -117,4 +148,38 @@ export const useCan = (permission?: Permission): boolean => {
 export const useHasModule = (module?: ModuleKey): boolean => {
   const modules = useAuthStore((s) => s.modules);
   return module === undefined || modules.includes(module);
+};
+
+/**
+ * What this workspace calls the things it sells.
+ *
+ * One accessor so the sidebar and the catalogue page cannot drift apart again — they used to,
+ * with the page adapting on a hardcoded `grocery ? 'Products' : 'Menu'` while the nav said
+ * "Menu" to everyone. The server has already applied the generic fallback; the defaults here
+ * only cover a session persisted before the field existed.
+ */
+export const useCatalogueNouns = (): { noun: string; item: string; items: string } => {
+  const tenant = useAuthStore((s) => s.tenant);
+  const item = tenant?.catalogueItemNoun || 'Item';
+  return {
+    noun: tenant?.catalogueNoun || 'Catalogue',
+    item,
+    items: pluralise(item),
+  };
+};
+
+/**
+ * Enough English to pluralise an operator-chosen noun.
+ *
+ * Not a general pluraliser and not trying to be — it covers the shapes a catalogue noun
+ * actually takes (Item, Product, Service, Dish, Category) and would get "Person" wrong. The
+ * alternative was a third column asking an operator to type the plural of a word they just
+ * typed the singular of, which is a worse trade for a word that appears on one tab.
+ *
+ * If a category ever needs an irregular plural, that third column is the fix.
+ */
+const pluralise = (word: string): string => {
+  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/i.test(word)) return `${word}es`;
+  return `${word}s`;
 };

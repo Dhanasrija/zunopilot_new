@@ -3,7 +3,9 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import SupportAccessBanner from './SupportAccessBanner';
 import { NotificationBell } from './NotificationBell';
 import { useNotifications } from '@/hooks/useNotifications';
-import { useAuthStore, type ModuleKey, type Permission } from '@/stores/auth.store';
+import {
+  useAuthStore, useCatalogueNouns, type ModuleKey, type Permission,
+} from '@/stores/auth.store';
 import { useUiStore } from '@/stores/ui.store';
 import { cn } from '@/lib/utils';
 import {
@@ -39,8 +41,10 @@ const nav: Array<{
   // No permission: every signed-in member of a workspace has a dashboard.
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/inbox', label: 'Inbox', icon: MessageSquare, permission: 'inbox:read' },
-  { to: '/orders', label: 'Orders', icon: ShoppingCart, permission: 'orders:read' },
-  { to: '/menu', label: 'Menu', icon: BookOpen, permission: 'catalogue:read' },
+  { to: '/orders', label: 'Orders', icon: ShoppingCart, permission: 'orders:read', module: 'ECOMMERCE' },
+  // `label` is a placeholder: this entry is renamed per workspace below, because "Menu" is a
+  // restaurant word and a grocery or a consultancy is not a restaurant.
+  { to: '/catalogue', label: 'Catalogue', icon: BookOpen, permission: 'catalogue:read', module: 'ECOMMERCE' },
   { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
   { to: '/leads', label: 'Leads', icon: Target, permission: 'leads:read', module: 'LEADS' },
   { to: '/campaigns', label: 'Campaigns', icon: Megaphone, permission: 'campaigns:read', module: 'MARKETING' },
@@ -90,9 +94,21 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
     return () => document.removeEventListener('keydown', onKey);
   }, [drawerOpen]);
 
-  const visibleNav = nav.filter(({ permission, module }) =>
-    (permission === undefined || permissions.includes(permission))
-    && (module === undefined || modules.includes(module)));
+  const { noun: catalogueNoun } = useCatalogueNouns();
+
+  const visibleNav = nav
+    .filter(({ permission, module }) =>
+      (permission === undefined || permissions.includes(permission))
+      && (module === undefined || modules.includes(module)))
+    /*
+     * The catalogue is called whatever this business calls it.
+     *
+     * Renamed here rather than in the `nav` constant because the word depends on the signed-in
+     * workspace. Both this and the page itself read `useCatalogueNouns`, so the sidebar and the
+     * page cannot say different things — which they did until now, the page adapting for grocery
+     * while the nav said "Menu" to everyone.
+     */
+    .map((entry) => (entry.to === '/catalogue' ? { ...entry, label: catalogueNoun } : entry));
 
   const logout = () => { clear(); nav2('/login'); };
 

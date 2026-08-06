@@ -12,18 +12,28 @@ import { prisma } from '../../config/prisma.js';
 // Leads is on is a second place that can disagree with the first, and the
 // disagreement always surfaces as "the menu is there but the page 404s".
 
-export const MODULE_KEYS = ['MARKETING', 'LEADS', 'SUPPORT'] as const;
+export const MODULE_KEYS = ['MARKETING', 'LEADS', 'SUPPORT', 'AI_AGENT', 'ECOMMERCE'] as const;
 
 export type ModuleState = Record<ModuleKey, boolean>;
 
 /**
- * The default before any operator has said anything: **everything off**.
+ * The default before any operator has said anything.
  *
- * A workspace opts in; it never opts out. That direction is deliberate. A bug
- * that fails to enable a module leaves a customer without something they were
- * promised, and they tell us within the hour. A bug that fails to *disable* one
- * silently hands every workspace on the platform a module nobody sold them, and
- * nothing surfaces it.
+ * **Off for the add-ons.** A workspace opts in; it never opts out. That direction is
+ * deliberate. A bug that fails to enable a module leaves a customer without something they
+ * were promised, and they tell us within the hour. A bug that fails to *disable* one silently
+ * hands every workspace on the platform a module nobody sold them, and nothing surfaces it.
+ *
+ * **On for `AI_AGENT` and `ECOMMERCE`, which invert that reasoning rather than ignoring it.**
+ * Neither is an add-on nobody has yet: the agent is already answering customers in every
+ * workspace, and every workspace can already see Orders and Menu. Off-by-default would mute or
+ * strip all of them the moment this deploys, which is exactly the "silently hands/takes away"
+ * failure the rule above exists to prevent, pointing the other way. These are capabilities that
+ * get revoked, not ones that get granted.
+ *
+ * Expressed here rather than as backfilled rows in the migration on purpose: rows would only
+ * cover the workspaces that existed when it ran, and every future signup would arrive with no
+ * agent and no obvious reason why.
  *
  * This is also the seam for plan-driven defaults. If these ever become a paid
  * tier, the plan's entitlement is read here and the tenant's own row keeps
@@ -34,6 +44,8 @@ const defaultState = (): ModuleState => ({
   MARKETING: false,
   LEADS: false,
   SUPPORT: false,
+  AI_AGENT: true,
+  ECOMMERCE: true,
 });
 
 /** Every module's state for one workspace. */
@@ -61,6 +73,47 @@ export const moduleEnabled = async (tenantId: string, module: ModuleKey): Promis
 export const enabledModulesFor = async (tenantId: string): Promise<ModuleKey[]> => {
   const state = await moduleStateFor(tenantId);
   return MODULE_KEYS.filter((key) => state[key]);
+};
+
+/** Why the AI agent is off, when it is. */
+export type AiAgentDenial = 'DISABLED_BY_OPERATOR' | 'DISABLED_BY_OWNER';
+
+export type AiAgentGate =
+  | { allowed: true }
+  | { allowed: false; reason: AiAgentDenial };
+
+/**
+ * Whether this workspace may make an LLM call at all.
+ *
+ * **Both halves must agree.** The `AI_AGENT` module is the operator's ceiling — only the super
+ * admin console writes it — and `Tenant.aiAgentEnabled` is the workspace's own preference. Off
+ * at either level means no model is reached.
+ *
+ * The operator is checked first, so `DISABLED_BY_OPERATOR` wins when both are off. That
+ * ordering is the point rather than an accident: the owner's Settings page uses this reason to
+ * decide whether to say "your plan does not include this" or "you turned this off", and telling
+ * someone they turned off a thing they were never allowed to have is a confusing way to answer
+ * a support ticket.
+ *
+ * Two queries, not one join, because `moduleEnabled` is the single authority on module state
+ * (see the note at the top of this file) and going around it is how the menu ends up disagreeing
+ * with the page. Both are indexed point lookups; the caching seam, if this ever needs one, is
+ * the same one the rest of the hot path wants.
+ */
+export const aiAgentGate = async (tenantId: string): Promise<AiAgentGate> => {
+  if (!await moduleEnabled(tenantId, 'AI_AGENT')) {
+    return { allowed: false, reason: 'DISABLED_BY_OPERATOR' };
+  }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { aiAgentEnabled: true },
+  });
+  // A tenant that no longer exists gets no model call. Reached only in a race between deletion
+  // and an in-flight message, and refusing is the cheaper mistake.
+  if (!tenant?.aiAgentEnabled) return { allowed: false, reason: 'DISABLED_BY_OWNER' };
+
+  return { allowed: true };
 };
 
 export interface ModuleSetting {

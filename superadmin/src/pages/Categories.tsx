@@ -19,7 +19,10 @@ import { Badge, Button, Card, CardHeader, Empty, Input, Td, Th } from '../compon
 export default function Categories() {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ key: '', label: '', description: '', sortOrder: '100' });
+  const [draft, setDraft] = useState({
+    key: '', label: '', description: '', sortOrder: '100',
+    catalogueNoun: '', catalogueItemNoun: '',
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['categories'],
@@ -34,11 +37,18 @@ export default function Categories() {
       label: draft.label.trim(),
       description: draft.description.trim() || undefined,
       sortOrder: Number(draft.sortOrder) || 100,
+      // Blank is a real answer: the app falls back to "Catalogue"/"Item" rather than
+      // borrowing another category's word.
+      catalogueNoun: draft.catalogueNoun.trim() || undefined,
+      catalogueItemNoun: draft.catalogueItemNoun.trim() || undefined,
     }),
     onSuccess: () => {
       toast.success('Category added');
       setAdding(false);
-      setDraft({ key: '', label: '', description: '', sortOrder: '100' });
+      setDraft({
+        key: '', label: '', description: '', sortOrder: '100',
+        catalogueNoun: '', catalogueItemNoun: '',
+      });
       invalidate();
     },
     onError: (err: Error) => toast.error(err.message),
@@ -110,6 +120,36 @@ export default function Categories() {
               onChange={(v) => setDraft((d) => ({ ...d, description: v }))}
               placeholder="One line shown under the picker on the signup form"
             />
+            {/*
+              What this kind of business calls the things it sells.
+
+              "Menu" is a restaurant word; a grocery has Products and a consultancy has
+              Services. Left blank, the workspace reads "Catalogue" and "Item" — generic, which
+              is the right failure. Two fields because the screen needs both: "Add Product" and
+              "Product Category" cannot be derived from "Products".
+            */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Input
+                  value={draft.catalogueNoun}
+                  onChange={(v) => setDraft((d) => ({ ...d, catalogueNoun: v }))}
+                  placeholder="Menu / Products / Services"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  What they call the whole catalogue. Blank = &ldquo;Catalogue&rdquo;.
+                </p>
+              </div>
+              <div>
+                <Input
+                  value={draft.catalogueItemNoun}
+                  onChange={(v) => setDraft((d) => ({ ...d, catalogueItemNoun: v }))}
+                  placeholder="Item / Product / Service"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  One of them, singular. Blank = &ldquo;Item&rdquo;.
+                </p>
+              </div>
+            </div>
             <Input
               value={draft.sortOrder}
               onChange={(v) => setDraft((d) => ({ ...d, sortOrder: v.replace(/[^0-9]/g, '') }))}
@@ -137,7 +177,7 @@ export default function Categories() {
             <table className="w-full min-w-[46rem]">
               <thead className="border-b border-slate-100 bg-slate-50/60">
                 <tr>
-                  <Th>Key</Th><Th>Label</Th><Th>Description</Th>
+                  <Th>Key</Th><Th>Label</Th><Th>Description</Th><Th>Calls it</Th>
                   <Th className="text-right">Order</Th>
                   <Th className="text-right">Workspaces</Th>
                   <Th className="text-right">Actions</Th>
@@ -152,6 +192,10 @@ export default function Categories() {
                     </Td>
                     <Td className="font-medium">{row.label}</Td>
                     <Td className="max-w-[18rem] text-xs text-slate-500">{row.description ?? '—'}</Td>
+                    <Td className="text-xs text-slate-500">
+                      {row.catalogueNoun ?? 'Catalogue'}
+                      <span className="text-slate-400"> / {row.catalogueItemNoun ?? 'Item'}</span>
+                    </Td>
                     <Td className="text-right tabular-nums">{row.sortOrder}</Td>
                     <Td className="text-right tabular-nums">{row.workspaces}</Td>
                     <Td>

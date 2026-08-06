@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import NotificationSettings from '@/components/settings/NotificationSettings';
+import AiAgent from '@/components/settings/AiAgent';
 import NumberMasking from '@/components/settings/NumberMasking';
 import { toast } from 'sonner';
 import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
@@ -222,8 +223,10 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* Privacy. Its own card at the foot of the profile tab, because it changes what
-              the rest of the team can see rather than anything about this business. */}
+          {/* Two switches that change how the product behaves rather than what this business
+              is called, so they sit as their own cards at the foot of the tab: what the AI
+              does, then what the team can see. */}
+          <AiAgent />
           <NumberMasking />
         </TabsContent>
 

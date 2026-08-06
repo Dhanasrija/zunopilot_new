@@ -1,6 +1,5 @@
 import { channelForTenant } from '../services/whatsapp-account.service.js';
 import { tenantIdOf } from '../middleware/auth.js';
-import axios from 'axios';
 import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -10,6 +9,7 @@ import {
   exchangeShortTokenForLongToken,
   subscribeAppToWaba,
   registerPhoneNumber,
+  graphHttp,
 } from '../services/whatsapp.service.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -46,7 +46,7 @@ export const completeEmbeddedSignup = asyncHandler(async (req, res) => {
     // If the exchange fails, it might be a System User token or an already long-lived token.
     // Validate it against the Graph API first to ensure it's functional.
     try {
-      await axios.get(
+      await graphHttp.get(
         `https://graph.facebook.com/${env.meta.graphVersion}/${wabaId}`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
@@ -159,7 +159,7 @@ export const getWhatsappAccount = asyncHandler(async (req, res) => {
 
   let tokenExpired = false;
   try {
-    await axios.get(
+    await graphHttp.get(
       `https://graph.facebook.com/${env.meta.graphVersion}/${account.wabaId}`,
       { headers: { Authorization: `Bearer ${account.accessToken}` } }
     );
@@ -223,7 +223,7 @@ export const updateAccessToken = asyncHandler(async (req, res) => {
     // If the exchange fails, it might be a System User token or an already long-lived token.
     // Validate it against the Graph API first to ensure it's functional.
     try {
-      await axios.get(
+      await graphHttp.get(
         `https://graph.facebook.com/${env.meta.graphVersion}/${account.wabaId}`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );

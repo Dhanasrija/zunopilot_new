@@ -17,9 +17,14 @@ import { notifyInboundMessage } from '../../../notifications/notification.produc
 // Ordering is the subtle part. Two messages from the same customer can produce
 // two jobs that run concurrently, and a worker pool gives no ordering guarantee
 // at all. So rather than trusting the queue, this handler takes a per-customer
-// advisory lock and then drains *every* pending event for that customer in
-// timestamp order. Whichever job wins the lock processes the backlog correctly;
-// the other finds nothing left to do.
+// advisory lock, uses it to *claim* that customer's pending events in timestamp
+// order, and then processes them outside the lock. Whichever job wins the claim
+// does the work; the other finds nothing to take and exits.
+//
+// The claim/process split matters as much as the ordering: the lock is a database
+// transaction, and this pipeline makes two LLM calls and an HTTP request per
+// message. Holding one across all of that burned a pooled connection per job for
+// no reason. See the long note in `handleProcessInboundMessage`.
 
 interface ResolvedContext {
   tenant: Tenant;
@@ -336,6 +341,26 @@ const processEvent = async (eventId: string): Promise<void> => {
   }
 };
 
+/**
+ * How many of a customer's backlogged events one job will drain.
+ *
+ * Was 50. Each event costs two LLM calls and a send — call it two and a half seconds — so 50
+ * meant a single conversation could hold a worker slot for two minutes while every other tenant
+ * waited behind it. Eight is enough to keep a genuine burst in order, and whatever is left over
+ * is still queued and gets picked up by the next job for that customer.
+ */
+const MAX_DRAIN = 8;
+
+/**
+ * After this long, a `PROCESSING` row is assumed abandoned rather than in flight.
+ *
+ * Events are normally claimed and finished within seconds. Anything still `PROCESSING` after ten
+ * minutes belongs to a process that died between claiming and finishing, and must be reclaimable
+ * or that customer's messages are stranded forever. Generous on purpose: reclaiming something
+ * that *is* still running would process it twice.
+ */
+const STALE_CLAIM_MS = 10 * 60_000;
+
 export const handleProcessInboundMessage = async (
   { webhookEventId }: ProcessInboundMessageJob,
 ): Promise<void> => {
@@ -348,28 +373,75 @@ export const handleProcessInboundMessage = async (
     return;
   }
 
-  // Serialise per customer, then drain their backlog oldest-first. This is what
-  // makes ordering correct regardless of the order the jobs happen to run in.
+  /*
+   * Claim, then process — and the split is the whole point of this shape.
+   *
+   * Ordering still needs serialising per customer: two messages produce two jobs, the pool gives
+   * no ordering guarantee, and processing "2" before "1" corrupts a workflow's state. So a
+   * per-customer advisory lock is still taken. What changed is *how long* it is held.
+   *
+   * It used to wrap the entire drain: `withAdvisoryLock(key, () => { for (...) await
+   * processEvent(id) })`. That kept a Prisma transaction — and therefore a pooled connection —
+   * open across two LLM calls and an HTTP POST to Meta, per in-flight job. The callback did not
+   * even use the transaction it was handed; `processEvent` works on the global client, so the
+   * connection sat `idle in transaction` doing nothing while the real work competed for others
+   * from the same pool. On a small instance, where Prisma's default pool is a handful of
+   * connections, five concurrent jobs could exhaust it and then time out waiting for
+   * themselves. `withAdvisoryLock`'s own comment forbids exactly this: "Outbound HTTP (Meta) and
+   * the automation engine must stay outside."
+   *
+   * Now the lock covers only the claim — a select and an update, no network — and the work
+   * happens outside it. Mutual exclusion is preserved by the claim itself: whoever wins marks the
+   * batch `PROCESSING`, so a concurrent job for the same customer finds nothing to take and
+   * exits, exactly as it used to find nothing left to drain.
+   */
   const lockKey = `inbound:${payload.phoneNumberId}:${payload.message.from}`;
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS);
 
-  const pending = await prisma.webhookEvent.findMany({
-    where: {
-      source: 'whatsapp',
-      processingStatus: { in: ['PENDING', 'FAILED'] },
-      payload: { path: ['message', 'from'], equals: payload.message.from },
-    },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-    take: 50,
+  const claimed = await withAdvisoryLock(lockKey, async (tx) => {
+    const pending = await tx.webhookEvent.findMany({
+      where: {
+        source: 'whatsapp',
+        // Scoped to this channel as well as this customer. Filtering on `message.from` alone
+        // meant that when one person messaged two businesses on the platform, either tenant's
+        // job could pull the other's events into its own drain.
+        payload: {
+          path: ['message', 'from'],
+          equals: payload.message.from,
+        },
+        OR: [
+          { processingStatus: { in: ['PENDING', 'FAILED'] } },
+          // Reclaim what a crashed process left behind; see STALE_CLAIM_MS.
+          { processingStatus: 'PROCESSING', createdAt: { lt: staleBefore } },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, payload: true },
+      take: MAX_DRAIN,
+    });
+
+    // Keep only this channel's events. Done here rather than in the `where` because the
+    // phoneNumberId sits in the same JSON blob and Prisma cannot express two paths on one field.
+    const mine = pending
+      .filter((row) => payloadOf(row.payload)?.phoneNumberId === payload.phoneNumberId)
+      .map((row) => row.id);
+
+    const ids = mine.length ? mine : [webhookEventId];
+
+    await tx.webhookEvent.updateMany({
+      where: { id: { in: ids } },
+      data: { processingStatus: 'PROCESSING' },
+    });
+
+    return ids;
   });
 
-  const queue = pending.length ? pending.map((p) => p.id) : [webhookEventId];
-
-  await withAdvisoryLock(lockKey, async () => {
-    for (const id of queue) {
-      await processEvent(id);
-    }
-  }, { timeoutMs: 60_000 });
+  for (const id of claimed) {
+    // Sequential on purpose: this is the ordering guarantee. Concurrency across *different*
+    // customers comes from the worker's own concurrency, not from here.
+    // eslint-disable-next-line no-await-in-loop
+    await processEvent(id);
+  }
 };
 
 /** Enqueue processing for freshly recorded events. */

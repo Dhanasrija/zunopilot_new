@@ -994,12 +994,31 @@ const categoryCreateSchema = z.object({
   label: z.string().trim().min(2).max(80),
   description: z.string().trim().max(300).optional(),
   sortOrder: z.number().int().min(0).max(9999).default(100),
+  /*
+   * What this kind of business calls the things it sells, and one of them.
+   *
+   * Optional, and unset is a real answer: the app falls back to "Catalogue"/"Item", which is
+   * generic rather than another category's word. Short caps because these render in a sidebar
+   * entry and a tab, where a long word wraps and looks broken.
+   */
+  catalogueNoun: z.string().trim().min(2).max(24).nullish(),
+  catalogueItemNoun: z.string().trim().min(2).max(24).nullish(),
 });
 
 const categoryUpdateSchema = z.object({
   label: z.string().trim().min(2).max(80).optional(),
   description: z.string().trim().max(300).nullish(),
   sortOrder: z.number().int().min(0).max(9999).optional(),
+  /*
+   * What this kind of business calls the things it sells, and one of them.
+   *
+   * Optional, and unset is a real answer: the app falls back to "Catalogue"/"Item", which is
+   * generic rather than another category's word. Short caps because these render in a sidebar
+   * entry and a tab, where a long word wraps and looks broken.
+   */
+  catalogueNoun: z.string().trim().min(2).max(24).nullish(),
+  catalogueItemNoun: z.string().trim().min(2).max(24).nullish(),
+
   isActive: z.boolean().optional(),
 });
 
@@ -1017,6 +1036,8 @@ export const listBusinessCategories = asyncHandler(async (_req: Request, res: Re
       label: category.label,
       description: category.description,
       sortOrder: category.sortOrder,
+      catalogueNoun: category.catalogueNoun,
+      catalogueItemNoun: category.catalogueItemNoun,
       isActive: category.isActive,
       workspaces: category._count.tenants,
       createdAt: category.createdAt,
@@ -1036,6 +1057,8 @@ export const createBusinessCategory = asyncHandler(async (req: Request, res: Res
       label: body.label,
       description: body.description ?? null,
       sortOrder: body.sortOrder,
+      catalogueNoun: body.catalogueNoun ?? null,
+      catalogueItemNoun: body.catalogueItemNoun ?? null,
     },
   });
 
@@ -1073,6 +1096,9 @@ export const updateBusinessCategory = asyncHandler(async (req: Request, res: Res
       ...(body.label === undefined ? {} : { label: body.label }),
       ...(body.description === undefined ? {} : { description: body.description ?? null }),
       ...(body.sortOrder === undefined ? {} : { sortOrder: body.sortOrder }),
+      ...(body.catalogueNoun === undefined ? {} : { catalogueNoun: body.catalogueNoun ?? null }),
+      ...(body.catalogueItemNoun === undefined
+        ? {} : { catalogueItemNoun: body.catalogueItemNoun ?? null }),
       ...(body.isActive === undefined ? {} : { isActive: body.isActive }),
     },
   });

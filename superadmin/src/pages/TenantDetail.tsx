@@ -164,12 +164,27 @@ const MODULE_COPY: Record<ModuleKey, { label: string; blurb: string }> = {
     blurb: 'Tickets raised from conversations, assigned and resolved, with updates '
       + 'sent back to the customer.',
   },
+  ECOMMERCE: {
+    label: 'Selling',
+    blurb: 'The Orders screen and the Menu / catalogue, and their APIs. On for every workspace '
+      + 'by default — switch it off for one that does not sell anything, such as a clinic '
+      + 'booking appointments or an academy handling admissions, and both disappear from their '
+      + 'nav. Nothing is deleted: past orders and catalogue items are still there if you switch '
+      + 'it back on.',
+  },
+  AI_AGENT: {
+    label: 'AI agent',
+    blurb: 'The intent router, the AI answer, and AI nodes inside workflows. On for every '
+      + 'workspace by default — switch it off to stop this one spending on model calls. '
+      + 'Their bot keeps working from keyword rules, order flows and published workflows; '
+      + 'only the model is skipped. The workspace cannot turn this back on itself.',
+  },
 };
 
 /**
- * Which optional modules this workspace has.
+ * Which modules this workspace has.
  *
- * The only place any of them can be switched on — there is no customer-facing
+ * The only place any of them can be changed — there is no customer-facing
  * route, which is what makes this a rollout control rather than a setting a
  * workspace can help itself to.
  *
@@ -177,6 +192,12 @@ const MODULE_COPY: Record<ModuleKey, { label: string; blurb: string }> = {
  * and the menu item disappears, and switching it back on restores the workspace
  * exactly as it was. A rollout switch that deleted a customer's leads would be
  * one nobody could use.
+ *
+ * Two directions live in this one list. Marketing, Leads and Support are add-ons a workspace
+ * does not have until it is granted one. **The AI agent is the opposite**: on everywhere, and
+ * switched off here when a workspace is costing more in model calls than it is worth, or has
+ * stopped paying. The workspace has its own AI switch in Settings, but it only narrows this
+ * one — off here means off there, and they cannot lift it.
  */
 function Modules({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
@@ -204,7 +225,10 @@ function Modules({ tenantId }: { tenantId: string }) {
     <Card>
       <CardHeader
         title="Modules"
-        hint="Off by default. A workspace cannot switch these on itself."
+        // Not "off by default" any more: some of these are add-ons a workspace does not have
+        // until granted, and others are capabilities it has until taken away. What is true of
+        // all of them is who decides, which is the part an operator needs to know.
+        hint="Only you can change these. A workspace cannot grant itself one, or restore one you have taken away."
       />
       <div className="space-y-3 p-4">
         {isLoading ? <p className="text-sm text-slate-500">Loading…</p> : (

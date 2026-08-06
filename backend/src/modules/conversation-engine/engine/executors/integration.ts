@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NODE_CONFIG_SCHEMAS } from '../../domain/node-types.js';
 import { NodeConfigError, RetryableNodeError, type WorkflowNodeExecutor } from '../types.js';
+import { aiAgentGate } from '../../../modules/module.service.js';
 
 // Executors that reach outside the system.
 
@@ -10,13 +11,34 @@ type HttpRequestConfig = z.infer<typeof NODE_CONFIG_SCHEMAS.HTTP_REQUEST>;
 export const aiAgentExecutor: WorkflowNodeExecutor<AiAgentConfig, { reply: string; model?: string }> = {
   type: 'AI_AGENT',
   validateConfig: (config) => NODE_CONFIG_SCHEMAS.AI_AGENT.parse(config),
-  execute: async ({ config, contact, services, dryRun, logger }) => {
+  execute: async ({ config, contact, services, dryRun, logger, tenantId }) => {
     if (dryRun) {
       return {
         status: 'SUCCESS',
         output: { reply: '[dry run: AI reply suppressed]' },
         variablesPatch: { [config.outputVariable]: '[dry run]' },
       };
+    }
+
+    /*
+     * The third LLM call site, and the one a kill switch is easiest to forget.
+     *
+     * The router and the general response are both gated in `routing/index.ts`, but a published
+     * workflow can reach this node without passing through either — a deterministic keyword rule
+     * starts the workflow, and several nodes later it wants a model. Without this check, "AI is
+     * off" would still be billing the workspace for completions.
+     *
+     * Throwing rather than returning a quiet SUCCESS is deliberate. A thrown error is what the
+     * walker's `onErrorHandle` branch exists for, so an author who wired a non-AI path gets it
+     * taken automatically; and where nobody wired one, the walker now sends the workspace's own
+     * fallback text before it gives up, so the customer is never left mid-conversation with
+     * nothing. Returning SUCCESS with an empty variable would instead let the rest of the graph
+     * run on a value that was never computed.
+     */
+    const gate = await aiAgentGate(tenantId);
+    if (!gate.allowed) {
+      logger.info('AI agent node skipped: the agent is switched off', { reason: gate.reason });
+      throw new NodeConfigError(`the AI agent is switched off for this workspace (${gate.reason})`);
     }
 
     const completion = await services.llm.complete({

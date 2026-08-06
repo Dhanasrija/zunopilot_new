@@ -16,12 +16,12 @@ import type { KeywordRule } from '../types/domain.js';
 // language to interpret and the deterministic state machine is both cheaper and
 // safer for anything touching money.
 
-const client = env.openai.apiKey
+const client = env.llm.apiKey
   ? new OpenAI({
-      apiKey: env.openai.apiKey,
+      apiKey: env.llm.apiKey,
       // A customer is waiting on the other end, so fail fast and let the caller
       // fall back to keyword matching rather than leaving them hanging.
-      timeout: env.openai.timeoutMs,
+      timeout: env.llm.timeoutMs,
       maxRetries: 1,
     })
   : null;
@@ -138,7 +138,7 @@ export const routeMessage = async (
 
   try {
     const completion = await client.chat.completions.create({
-      model: env.openai.model,
+      model: env.llm.model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userContent },

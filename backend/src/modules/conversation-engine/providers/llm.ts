@@ -42,18 +42,61 @@ export interface LLMProvider extends LlmCompleter {
   completeStructured(request: StructuredRequest): Promise<StructuredResponse>;
 }
 
-// ── OpenAI ────────────────────────────────────────────────────────────────────
+// ── OpenAI-compatible ─────────────────────────────────────────────────────────
+
+/**
+ * A readable name for whoever is actually serving the model.
+ *
+ * `name` used to be the literal `'openai'`. With `baseUrl` pointed at Groq or Google, that made
+ * both the boot log and `RoutingDecision.model` claim OpenAI while somebody else answered —
+ * which would make the whole point of a latency comparison unreadable.
+ */
+/**
+ * Parse the reply, tolerating a code fence only where one is actually possible.
+ *
+ * Under strict `json_schema` the response is guaranteed to be bare JSON, so anything else is a
+ * real fault and `JSON.parse` should say so. Under `json_object` the model was merely *asked* to
+ * behave, and wrapping JSON in ```json fences despite being told not to is the single most common
+ * way smaller models disobey. Stripping that is not papering over a bug — the content is correct
+ * and the packaging is not.
+ *
+ * Nothing more forgiving than that. Hunting for the first `{` in a paragraph of prose would
+ * quietly accept a model that ignored the instruction entirely, and the router is better off
+ * treating that as no-match than routing a customer on a guess.
+ */
+const parseJsonReply = (content: string, strict: boolean): unknown => {
+  if (strict) return JSON.parse(content) as unknown;
+  const fenced = content.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/);
+  return JSON.parse(fenced ? fenced[1] : content) as unknown;
+};
+
+const providerNameFor = (baseUrl: string): string => {
+  if (!baseUrl) return 'openai';
+  try {
+    return new URL(baseUrl).hostname.replace(/^api\./, '');
+  } catch {
+    return 'openai-compatible';
+  }
+};
 
 export class OpenAIProvider implements LLMProvider {
-  readonly name = 'openai';
+  readonly name: string;
   private readonly client: OpenAI;
 
-  constructor(apiKey: string = env.openai.apiKey) {
+  /**
+   * The class keeps its name for history; it speaks to **any OpenAI-compatible endpoint**.
+   *
+   * Groq and Google both offer one, so switching vendor is `LLM_BASE_URL` plus `LLM_MODEL` and
+   * no new adapter. The SDK has always supported `baseURL` — this code simply never passed it.
+   */
+  constructor(apiKey: string = env.llm.apiKey) {
+    this.name = providerNameFor(env.llm.baseUrl);
     this.client = new OpenAI({
       apiKey,
+      ...(env.llm.baseUrl ? { baseURL: env.llm.baseUrl } : {}),
       // A customer is waiting on WhatsApp. Fail fast and let the caller fall
       // back rather than leaving them staring at a delivered tick.
-      timeout: env.openai.timeoutMs,
+      timeout: env.llm.timeoutMs,
       maxRetries: 1,
     });
   }
@@ -65,14 +108,15 @@ export class OpenAIProvider implements LLMProvider {
     temperature?: number;
   }) {
     const completion = await this.client.chat.completions.create({
-      model: env.openai.model,
+      model: env.llm.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       ...(temperature !== undefined ? { temperature } : {}),
-    });
+      ...env.llm.extraBody,
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
     return {
       text: completion.choices[0]?.message?.content ?? '',
@@ -87,31 +131,60 @@ export class OpenAIProvider implements LLMProvider {
 
   async completeStructured(request: StructuredRequest): Promise<StructuredResponse> {
     const startedAt = Date.now();
+    const strict = env.llm.structuredMode === 'json_schema';
+
+    /*
+     * Two ways to ask for JSON, because only one of them is portable.
+     *
+     * `json_schema` with `strict: true` is OpenAI's constrained decoding: the model *physically
+     * cannot* emit a shape that fails the schema, which is what makes it safe to route on the
+     * result instead of parsing prose. `routing/contract.ts` shapes the schema specifically for
+     * it — closed objects, every property required.
+     *
+     * Support for that elsewhere is model-dependent, so `json_object` is the fallback: ask for
+     * valid JSON and describe the shape in the prompt. Weaker, and honestly so — the model can
+     * now return well-formed JSON of the wrong shape. That is survivable here and nowhere else:
+     * `validateRouterOutput` already Zod-parses the reply, rejects a workflow id that was not
+     * offered, and returns null on anything malformed, which the router turns into a general
+     * response. The failure mode is a duller router, not a broken one, and it is visible as a
+     * shift in `RoutingDecision.reasonCode`.
+     *
+     * The schema goes in the **system** prompt, alongside the operator-authored instructions,
+     * never the user one — the user prompt carries the customer's own words, and a schema in
+     * there is one more thing a customer could try to talk over.
+     */
+    const systemPrompt = strict
+      ? request.systemPrompt
+      : `${request.systemPrompt}\n\n`
+        + 'Reply with JSON only — no prose, no code fences — matching this JSON Schema exactly:\n'
+        + `${JSON.stringify(request.jsonSchema)}`;
 
     const completion = await this.client.chat.completions.create({
-      model: env.openai.model,
+      model: env.llm.model,
       messages: [
-        { role: 'system', content: request.systemPrompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: request.userPrompt },
       ],
-      // Constrained decoding, not "please return JSON". The model physically
-      // cannot emit a shape that fails the schema, which is what makes it safe
-      // to route on the result instead of parsing prose.
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: request.schemaName, strict: true, schema: request.jsonSchema },
-      },
+      response_format: strict
+        ? {
+          type: 'json_schema',
+          json_schema: { name: request.schemaName, strict: true, schema: request.jsonSchema },
+        }
+        : { type: 'json_object' },
       // Routing should be reproducible: the same message with the same
       // capability contracts should not route differently run to run.
       temperature: request.temperature ?? 0,
       ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
-    }, request.timeoutMs ? { timeout: request.timeoutMs } : undefined);
+      // Vendor knobs; see `env.llm.extraBody`. Last, so they can override anything above.
+      ...env.llm.extraBody,
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+    request.timeoutMs ? { timeout: request.timeoutMs } : undefined);
 
     const content = completion.choices[0]?.message?.content;
     if (!content) throw new Error('Model returned no content for a structured request');
 
     return {
-      data: JSON.parse(content) as unknown,
+      data: parseJsonReply(content, strict),
       model: completion.model,
       tokenUsage: {
         prompt: completion.usage?.prompt_tokens ?? 0,
@@ -297,16 +370,22 @@ export const llmProvider = (): LLMProvider => {
   if (cached) return cached;
 
   const kind = env.engine.llmProvider;
-  if (kind === 'openai' && env.openai.apiKey) {
+  if (kind === 'openai' && env.llm.apiKey) {
     cached = new OpenAIProvider();
   } else {
     if (kind === 'openai') {
-      logger.warn('LLM_PROVIDER=openai but OPENAI_API_KEY is unset — using the mock router');
+      logger.warn('LLM_PROVIDER=openai but no LLM_API_KEY/OPENAI_API_KEY is set — using the mock router');
     }
     cached = new MockLLMProvider();
   }
 
-  logger.info('LLM provider selected', { provider: cached.name });
+  // The model and structured mode are logged too, because "which model answered" is the first
+  // question anyone asks about a latency or quality change, and `provider` alone cannot say.
+  logger.info('LLM provider selected', {
+    provider: cached.name,
+    model: cached.name === 'mock' ? null : env.llm.model,
+    structuredMode: cached.name === 'mock' ? null : env.llm.structuredMode,
+  });
   return cached;
 };
 

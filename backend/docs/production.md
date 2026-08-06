@@ -44,6 +44,133 @@ two things still genuinely depend on it:
 - **`OTP_ECHO`** is refused outright when this is `production`, and logged as an error if
   someone tries. That is a complete authentication bypass, so the refusal matters.
 
+## Choosing the language model
+
+The AI router is the slowest thing a customer waits on — measured from `RoutingDecision` rows,
+**p50 1.5–2.0 s and p95 3.1 s**, against ~2.65 s end to end per message. The model dominates, so
+it is worth choosing deliberately.
+
+Switching vendor needs no code. Any OpenAI-compatible endpoint works via `LLM_BASE_URL` plus
+`LLM_MODEL`; Groq and Google both provide one.
+
+**Two things that are easy to get wrong.**
+
+*Distance beats inference speed at this range.* Groq's raw inference is the fastest available, but
+from Mumbai a US endpoint costs ~200–250 ms of round trip before the first token arrives. A
+regionally closer model that generates more slowly can still reply sooner. Sub-250 ms total is not
+reachable from India regardless of vendor; 400–700 ms for the router is a realistic target.
+
+*Structured output is the portability catch.* The router asks for
+`response_format: { type: 'json_schema', strict: true }` — OpenAI's constrained decoding, which
+makes an invalid shape impossible. Support elsewhere is model-dependent, so set
+`LLM_STRUCTURED_MODE=json_object` for vendors without it: the schema moves into the prompt and the
+reply is Zod-validated instead. Weaker, and the failure mode is benign — malformed output becomes
+"no match" and the customer gets a general answer, so a worse model routes more dully rather than
+breaking.
+
+### Measured, 2026-08-05
+
+Same 30-message corpus, same workspace, back to back. End-to-end per message, so the figures
+include the second general-response call where one fired.
+
+| | OpenAI `gpt-4o-mini` | **Groq `llama-3.3-70b-versatile`** | Gemini 2.5 Flash (Vertex, Mumbai) |
+|---|---|---|---|
+| structured mode | `json_schema` (strict) | `json_object` | `json_object` |
+| p50 | 1702 ms | **595 ms** | 1319 ms |
+| p95 | 2624 ms | **848 ms** | 1987 ms |
+| min / max | 1134 / 2866 ms | 373 / 878 ms | 758 / 2774 ms |
+| `START_WORKFLOW` | 6 | 6 | 6 |
+| `HUMAN_HANDOFF` | 3 | 3 | 3 |
+| `NO_SUITABLE_WORKFLOW` | 2 | 1 | 15 |
+
+**Groq wins, by roughly 2.9× over OpenAI and 2.2× over Gemini at p50.** All three started the
+same six workflows and handed off the same three conversations, which is the comparison that
+matters — they recognised the same actionable requests. Individual Groq router calls were logged
+as low as 277 ms.
+
+`json_object` mode returned valid, parseable JSON on all 30 for both Groq and Gemini. That was the
+main portability risk and it did not materialise.
+
+**The Mumbai hypothesis was wrong, and worth recording as such.** The reason to try Vertex was
+that `asia-south1` removes the ~200–250 ms of transatlantic round trip Groq pays from India. It
+does — but the model available there generates slowly enough to give it all back. Being close
+did not beat being fast.
+
+Two findings from that attempt, both non-obvious:
+
+- **Only `gemini-2.5-flash` is served in `asia-south1`.** 2.0-flash, 2.0-flash-lite,
+  2.5-flash-lite and 1.5-flash-002 all return `NOT_FOUND` there. The region picks the model, not
+  the other way round.
+- **Gemini 2.5 Flash reasons before answering by default, and it dominates the latency.** Measured
+  on a single classification: 60 reasoning tokens to produce a 6-token answer, 1049 ms versus
+  598 ms with thinking disabled. Across the corpus it was p50 3073 ms with thinking on versus
+  1319 ms off — and thinking-on also produced the only hard failures. Anyone benchmarking a 2.5
+  model without setting `thinking_budget: 0` is measuring the wrong thing:
+
+  ```
+  LLM_EXTRA_BODY={"extra_body":{"google":{"thinking_config":{"thinking_budget":0}}}}
+  ```
+
+**One honest limit on the quality column.** `NO_SUITABLE_WORKFLOW` is counted as "unrouted", but
+for a genuinely off-topic message it is the *correct* answer — so Gemini's 15 overstates the gap.
+What it really shows is a different vocabulary for the middle ground: Gemini says "nothing
+matches" where OpenAI says `AMBIGUOUS_BETWEEN_WORKFLOWS` and Groq says `GENERAL_QUESTION`. All
+three then send a general response, so the customer sees much the same thing. Retune the
+per-assistant confidence thresholds after any switch; they were calibrated against OpenAI.
+
+**Caveats worth respecting: n=30, one workspace, one run each.** Vendor latency moves with time of
+day and load, and this says nothing about behaviour under concurrency or about rate limits at real
+volume — which matters, since `INBOUND_CONCURRENCY` is going up at the same time. Re-run before
+switching production, and re-run again after.
+
+**Measure before switching**, and read both numbers:
+
+```bash
+npx tsx scripts/llm-bench.ts --tenant "<business name>" --provider groq --yes
+```
+
+Credentials for several vendors coexist under their own prefix — `GROQ_LLM_API_KEY`,
+`GROQ_LLM_MODEL`, and so on — which is what makes a back-to-back comparison possible without
+editing `.env` between runs. `--provider groq` copies them onto the plain `LLM_*` names for that
+run only.
+
+It replays a fixed corpus through the router and prints latency percentiles beside the decision
+and reason-code distribution. Latency alone is a trap — the fastest possible router answers
+`NO_MATCH` to everything instantly — so the number to compare across vendors is the **share of
+unrouted messages**. A 2× latency win that routes 20% worse is not a win. The script makes live,
+billable calls and refuses to run without `--yes`.
+
+## Connection pool and worker concurrency
+
+**Set `connection_limit` in `DATABASE_URL` explicitly.** Prisma's default is
+`physical_cpus × 2 + 1`, which on a 2-vCPU instance — one core plus a hyperthread — is about 3.
+That is not a number anyone chose, and it silently changes when you resize the instance.
+
+```
+DATABASE_URL="postgresql://…/zunopilot?schema=public&connection_limit=20&pool_timeout=15"
+```
+
+The two knobs interact and must be sized together:
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `connection_limit` | `DATABASE_URL` | Prisma pool per process |
+| `INBOUND_CONCURRENCY` | env, default 4 | inbound poll loops per process |
+| `RDS max_connections` | derived from instance memory | server-side ceiling |
+
+Rule of thumb: keep `INBOUND_CONCURRENCY × 2` comfortably below `connection_limit`, and
+`connection_limit × (number of processes)` below `max_connections` with room to spare — pg-boss
+keeps its own separate pool of 10, and you want headroom for `psql`.
+
+The inbound work is almost entirely *waiting* — on Postgres, on OpenAI, on Meta — so concurrency
+is bounded by connections, not CPU. Raising `INBOUND_CONCURRENCY` past what the pool can feed
+converts throughput into pool timeouts.
+
+**Consider `QUEUE_DATABASE_URL`.** pg-boss currently shares the application database, and its
+`job_common` table is already the largest in the system, ahead of every customer table. Pointing
+the queue at its own database keeps its churn and vacuum load off customer queries and lets the
+two be sized independently.
+
 ## Storage
 
 **`MEDIA_DIR` must point at persistent storage.** It defaults to `.media` under the process

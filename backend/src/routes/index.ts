@@ -24,6 +24,7 @@ import {
 import analytics from './analytics.routes.js';
 import workflow from './workflow.routes.js';
 import { impersonationRoutes } from './impersonation.routes.js';
+import { logger } from '../config/logger.js';
 import {
   assistantRoutes, connectorRoutes, conversationEngineRoutes, engineWorkflowRoutes, instanceRoutes,
   templateRoutes,
@@ -37,7 +38,26 @@ routes.use('/whatsapp', whatsapp);
 routes.use('/webhook', webhook);
 routes.use('/automation', automation);
 routes.use('/inbox', inbox);
-routes.use('/menu', menu);
+/*
+ * The catalogue, served at both names.
+ *
+ * `/catalogue` is the real one — "menu" is a restaurant word and this platform also serves
+ * groceries and consultancies, which is the same reason the screen is no longer called Menu.
+ * The permission keys were `catalogue:*` all along.
+ *
+ * **`/menu` stays mounted, and not out of politeness.** The API and the frontend deploy
+ * separately, so for as long as any browser is holding the previous bundle it will call
+ * `/api/menu` against a backend that has already moved. Removing the alias in the same release
+ * as the rename would break exactly the people who had the app open at the time.
+ *
+ * It logs on use. When a release goes by with no `deprecated API path` line in the logs, no
+ * browser is still on the old bundle and this line can go.
+ */
+routes.use('/catalogue', menu);
+routes.use('/menu', (req, _res, next) => {
+  logger.warn('deprecated API path', { path: `/api/menu${req.path}`, use: '/api/catalogue' });
+  next();
+}, menu);
 routes.use('/orders', order);
 routes.use('/templates', template);
 routes.use('/customers', customer);

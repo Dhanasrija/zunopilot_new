@@ -124,6 +124,16 @@ export const env = {
     // Six-digit two-step PIN used to register onboarded numbers for Cloud API.
     // Optional: when unset, phone registration is skipped and reported as a warning.
     defaultPhonePin: process.env.META_DEFAULT_PHONE_PIN || '',
+    /**
+     * Ceiling on any single Graph API call.
+     *
+     * Axios has no default timeout, so before this existed a stalled socket to
+     * `graph.facebook.com` waited forever — and because sends happen inside the inbound job,
+     * one of those stopped the whole inbound queue for every tenant. Generous relative to
+     * Meta's normal sub-second response, because the cost of being wrong in the tight
+     * direction is a dropped customer reply.
+     */
+    timeoutMs: int('META_TIMEOUT_MS', 10_000),
   },
   /**
    * Razorpay.
@@ -173,13 +183,74 @@ export const env = {
       },
     } as Record<string, Record<string, string>>,
   },
-  openai: {
-    // The LLM intent router is enabled only when a key is present; without one
-    // automation falls back to the original keyword matching.
-    apiKey: process.env.OPENAI_API_KEY || '',
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  /**
+   * The language model, whoever is serving it.
+   *
+   * **Named `llm` rather than `openai` because it is frequently not OpenAI.** Groq and Google
+   * both expose OpenAI-compatible endpoints, so pointing this at either is a `baseUrl` and a
+   * model name — no new adapter. A config block called `openai` that talks to Groq is the kind
+   * of name that misleads whoever is reading it at 2am during an incident.
+   *
+   * The `OPENAI_*` variables are still honoured as aliases so no deployed `.env` breaks. New
+   * deployments should use `LLM_*`.
+   *
+   * Why this matters: the AI router is the slowest thing a customer waits on — measured at p50
+   * 1.5–2.0s and p95 3.1s against 2.65s end-to-end per message. The model dominates, so being
+   * able to change it without changing code is the point of this block.
+   */
+  llm: {
+    // The router is enabled only when a key is present; without one, automation falls back to
+    // the original keyword matching.
+    apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '',
+    model: process.env.LLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    /**
+     * An OpenAI-compatible endpoint, or empty for OpenAI's own.
+     *
+     * e.g. `https://api.groq.com/openai/v1`, or Google's OpenAI-compatibility path. Note that
+     * network distance usually matters more than raw inference speed here: from Mumbai, a US
+     * endpoint costs ~200–250ms of round trip before a single token, which is why the fastest
+     * model on paper is not automatically the fastest reply.
+     */
+    baseUrl: process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || '',
+    /**
+     * How structured output is requested — the one genuinely non-portable thing here.
+     *
+     * `json_schema` is OpenAI's strict constrained decoding, and it is what the router's schema
+     * in `routing/contract.ts` was shaped for. Support elsewhere is model-dependent, so
+     * `json_object` asks for valid JSON and puts the schema in the prompt instead. That is
+     * weaker, but the router already Zod-validates the reply and treats anything malformed as
+     * "no match" rather than an error, so the failure mode is a duller router, not a broken one.
+     */
+    structuredMode: (process.env.LLM_STRUCTURED_MODE === 'json_object'
+      ? 'json_object'
+      : 'json_schema') as 'json_schema' | 'json_object',
     // A customer is waiting on WhatsApp — fail fast rather than hang.
-    timeoutMs: int('OPENAI_TIMEOUT_MS', 8000),
+    timeoutMs: int('LLM_TIMEOUT_MS', int('OPENAI_TIMEOUT_MS', 8000)),
+    /**
+     * Vendor-specific request fields, as JSON, merged into every completion.
+     *
+     * An escape hatch, because "OpenAI-compatible" stops at the common fields and each vendor's
+     * most useful knob is its own. The one that prompted this: Gemini 2.5 Flash reasons before
+     * answering by default — measured at 60 reasoning tokens for a six-token classification, and
+     * 1049ms versus 598ms with it off. For a router doing classification that is latency spent
+     * on nothing.
+     *
+     *   LLM_EXTRA_BODY={"extra_body":{"google":{"thinking_config":{"thinking_budget":0}}}}
+     *
+     * Deliberately opaque and unvalidated beyond being JSON: the alternative is teaching this
+     * config every vendor's parameter set, which dates immediately. Malformed JSON fails loudly
+     * at boot rather than silently dropping the setting, because a knob that quietly does
+     * nothing is worse than one that is missing.
+     */
+    extraBody: (() => {
+      const raw = process.env.LLM_EXTRA_BODY;
+      if (!raw?.trim()) return {} as Record<string, unknown>;
+      try {
+        return JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        throw new Error('LLM_EXTRA_BODY is not valid JSON');
+      }
+    })(),
   },
 
   // ── Conversation engine (Module 12) ────────────────────────────────────────
@@ -197,7 +268,8 @@ export const env = {
      * decisions so the routing suite runs without a key or a bill.
      */
     llmProvider: process.env.LLM_PROVIDER
-      || (process.env.NODE_ENV === 'test' || !process.env.OPENAI_API_KEY ? 'mock' : 'openai'),
+      || (process.env.NODE_ENV === 'test'
+        || !(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY) ? 'mock' : 'openai'),
     /** Confidence at or above which the router starts the selected workflow. */
     highConfidence: float('ROUTER_HIGH_CONFIDENCE', 0.8),
     /** Confidence at or above which the router asks a clarifying question. */
@@ -214,6 +286,17 @@ export const env = {
     queueDatabaseUrl: process.env.QUEUE_DATABASE_URL || required('DATABASE_URL'),
     /** Run job workers in the API process. Off for a separate worker dyno. */
     runWorkersInApi: bool('RUN_WORKERS_IN_API', true),
+    /**
+     * Poll loops for the inbound queue.
+     *
+     * pg-boss defaults this to 1, which capped the whole platform at roughly 65 messages a
+     * minute regardless of `batchSize`. Raise it to raise throughput — but it must stay in
+     * proportion to the Prisma connection pool, because each in-flight message is mostly
+     * waiting on Postgres, OpenAI and Meta rather than on CPU. Four is a deliberately
+     * conservative default for a small instance; `docs/production.md` covers sizing it with
+     * `connection_limit`.
+     */
+    inboundConcurrency: int('INBOUND_CONCURRENCY', 4),
   },
 
   logLevel: process.env.LOG_LEVEL || 'info',

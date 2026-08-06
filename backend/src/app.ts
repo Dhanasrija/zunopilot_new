@@ -79,6 +79,9 @@ export const buildApp = (): Express => {
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan('dev', { stream: httpLoggerStream }));
 
+  /** The webhook has its own limiter below; `app.use` order alone would apply both. */
+  const isWebhook = (req: express.Request) => req.originalUrl.startsWith('/api/webhook');
+
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 300,
@@ -86,8 +89,48 @@ export const buildApp = (): Express => {
     legacyHeaders: false,
     // A test run fires hundreds of requests in seconds; rate limiting them
     // would only test the rate limiter.
-    skip: () => env.isTest,
+    //
+    // The webhook is excluded here rather than by mount order: middleware mounted at
+    // `/api/webhook` runs *in addition to* middleware mounted at `/api`, so without this the
+    // webhook would still be counted against the shared per-IP bucket it needs to escape.
+    skip: (req) => env.isTest || isWebhook(req),
   });
+
+  /*
+   * Meta's webhook gets its own limit, keyed per business number.
+   *
+   * **Why it cannot share the API limiter.** That one allows 300 requests a minute *per client
+   * IP*, and every tenant's webhook traffic arrives from Meta's own narrow IP range. So all
+   * tenants shared a single bucket, and the true volume is several times the message count:
+   * each reply produces further inbound POSTs for `sent`, `delivered` and `read`. A hundred
+   * busy conversations is comfortably past 300/min, and the consequence is not a slow tenant —
+   * it is 429s to Meta, which retries, then throttles delivery and can disable the
+   * subscription. Every tenant loses inbound messages at once, and the symptom points nowhere
+   * near the cause.
+   *
+   * Keyed on `phone_number_id` from the payload, so the limit does what a limit is for: contain
+   * one misbehaving channel instead of letting it starve the other ninety-nine. Falls back to
+   * the IP when the field is absent, which covers the GET handshake and anything malformed.
+   *
+   * The ceiling is high because this is a DoS backstop, not a shaping mechanism — real
+   * smoothing is the queue's job, and the queue is what absorbs the burst.
+   */
+  const webhookLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 3000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => env.isTest,
+    keyGenerator: (req) => {
+      const body = req.body as {
+        entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: string } } }> }>;
+      } | undefined;
+      const channel = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+      return channel ? `wa:${channel}` : `ip:${req.ip}`;
+    },
+  });
+
+  app.use('/api/webhook', webhookLimiter);
   app.use('/api', apiLimiter);
 
   /*

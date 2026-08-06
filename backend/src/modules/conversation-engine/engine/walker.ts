@@ -6,6 +6,7 @@ import { resolveNextNodeId, type WorkflowDefinition, type WorkflowNode } from '.
 import { metaFor, type NodeType } from '../domain/node-types.js';
 import { executorFor } from './executors/index.js';
 import { buildScope, interpolateDeep } from './scope.js';
+import { sendFallbackText } from '../routing/fallback.js';
 import {
   finishInstance, handOffToHuman, parkForUser, parkUntil, saveProgress,
 } from './instance-manager.js';
@@ -284,6 +285,31 @@ export const walk = async ({
           currentId = fallback;
           continue;
         }
+      }
+
+      /*
+       * The run is over and the customer is mid-conversation. Say something.
+       *
+       * `finish('FAILED')` marks the instance failed in the database, which is the right record
+       * — but on its own it is invisible to the person who just sent a message and is now
+       * waiting. Before this, a node throwing with no `onErrorHandle` wired ended the
+       * conversation in silence, which is the one outcome this codebase says three separate
+       * times a customer should never get.
+       *
+       * The workspace's own `FallbackRule` text, not a message about node failures: the customer
+       * does not need to know our graph broke, and the workspace has already written what to say
+       * when the bot cannot help.
+       *
+       * Skipped on a dry run — the simulator must not message a real person — and best-effort,
+       * because failing to send an apology must not replace a recorded failure with an
+       * unrecorded one.
+       */
+      if (!dryRun) {
+        await sendFallbackText({
+          tenantId: instance.tenantId,
+          waId: deps.contact.waId,
+          whatsapp: deps.services.whatsapp,
+        });
       }
 
       return finish('FAILED', `"${node.name ?? node.id}" failed: ${message}`);

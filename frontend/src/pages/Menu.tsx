@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth.store';
+import { useAuthStore, useCatalogueNouns } from '@/stores/auth.store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/utils';
 import {
-  Plus, Trash2, ShoppingBag, UtensilsCrossed, Search,
-  ChevronLeft, ChevronRight, LayoutGrid, PackageX, PackageCheck, Tag, Eye, Pencil,
+  BookOpen, ChevronLeft, ChevronRight, Eye, LayoutGrid, PackageCheck, PackageX, Pencil, Plus, Search, ShoppingBag, Tag, Trash2, UtensilsCrossed,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -148,25 +147,25 @@ function RestaurantItemsTab({ items, categories, isLoading, qc, addOpen, onAddOp
   }, [page, totalPages]);
 
   const create = useMutation({
-    mutationFn: async () => api.post('/menu/items', { ...form, basePrice: parseFloat(form.basePrice) }),
+    mutationFn: async () => api.post('/catalogue/items', { ...form, basePrice: parseFloat(form.basePrice) }),
     onSuccess: () => { setOpen(false); resetForm(); toast.success('Item added'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
   const toggleStock = useMutation({
     mutationFn: async ({ id, inStock }: { id: string; inStock: boolean }) => {
       const item = items.find((i) => i.id === id)!;
-      return api.patch(`/menu/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
+      return api.patch(`/catalogue/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   });
 
   const del = useMutation({
-    mutationFn: async (id: string) => api.delete(`/menu/items/${id}`),
+    mutationFn: async (id: string) => api.delete(`/catalogue/items/${id}`),
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
   const update = useMutation({
-    mutationFn: async () => api.patch(`/menu/items/${editItem!.id}`, { ...editForm, basePrice: parseFloat(editForm.basePrice) }),
+    mutationFn: async () => api.patch(`/catalogue/items/${editItem!.id}`, { ...editForm, basePrice: parseFloat(editForm.basePrice) }),
     onSuccess: () => { setEditItem(null); toast.success('Item updated'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
@@ -439,7 +438,7 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
   }, [page, totalPages]);
 
   const create = useMutation({
-    mutationFn: async () => api.post('/menu/items', {
+    mutationFn: async () => api.post('/catalogue/items', {
       categoryId: form.categoryId,
       name: form.name,
       description: form.description || undefined,
@@ -458,18 +457,18 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
   const toggleStock = useMutation({
     mutationFn: async ({ id, inStock }: { id: string; inStock: boolean }) => {
       const item = items.find((i) => i.id === id)!;
-      return api.patch(`/menu/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
+      return api.patch(`/catalogue/items/${id}`, { inStock, name: item.name, basePrice: item.basePrice });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   });
 
   const del = useMutation({
-    mutationFn: async (id: string) => api.delete(`/menu/items/${id}`),
+    mutationFn: async (id: string) => api.delete(`/catalogue/items/${id}`),
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['items'] }); },
   });
 
   const updateGrocery = useMutation({
-    mutationFn: async () => api.patch(`/menu/items/${editItem!.id}`, {
+    mutationFn: async () => api.patch(`/catalogue/items/${editItem!.id}`, {
       categoryId: editForm.categoryId,
       name: editForm.name,
       description: editForm.description || undefined,
@@ -765,11 +764,11 @@ function CategoriesTab({ label, categories, isLoading, qc }: {
 }) {
   const [name, setName] = useState('');
   const create = useMutation({
-    mutationFn: async () => api.post('/menu/categories', { name }),
+    mutationFn: async () => api.post('/catalogue/categories', { name }),
     onSuccess: () => { setName(''); toast.success(`${label} added`); qc.invalidateQueries({ queryKey: ['categories'] }); },
   });
   const del = useMutation({
-    mutationFn: async (id: string) => api.delete(`/menu/categories/${id}`),
+    mutationFn: async (id: string) => api.delete(`/catalogue/categories/${id}`),
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['categories'] }); },
   });
 
@@ -826,20 +825,32 @@ export default function MenuPage() {
 
   const { data: items = [], isLoading: loadingItems } = useQuery({
     queryKey: ['items'],
-    queryFn: async () => (await api.get<{ data: Item[] }>('/menu/items')).data.data,
+    queryFn: async () => (await api.get<{ data: Item[] }>('/catalogue/items')).data.data,
   });
   const { data: categories = [], isLoading: loadingCats } = useQuery({
     queryKey: ['categories'],
-    queryFn: async () => (await api.get<{ data: Category[] }>('/menu/categories')).data.data,
+    queryFn: async () => (await api.get<{ data: Category[] }>('/catalogue/categories')).data.data,
   });
 
-  const pageTitle = grocery ? 'Products' : 'Menu';
-  const pageDesc = grocery
-    ? 'Manage your product catalog, categories, and inventory.'
-    : 'Manage categories, items and add-on groups.';
-  const categoryLabel = grocery ? 'Product Category' : 'Menu Category';
-  const addLabel = grocery ? 'Add Product' : 'Add Item';
-  const Icon = grocery ? ShoppingBag : UtensilsCrossed;
+  /*
+   * The words come from the workspace's category, not from a guess here.
+   *
+   * This block used to be `grocery ? 'Products' : 'Menu'`, which told an IT consultancy it had
+   * a Menu and — worse — disagreed with the sidebar, which said "Menu" to everybody. Both now
+   * read `useCatalogueNouns`, so they cannot drift apart again.
+   *
+   * Note what is deliberately *not* driven by the noun: `grocery` still decides which stats and
+   * which item editor to show. Stock quantities and add-on groups are different features, not
+   * different words for the same one, and collapsing that distinction into a label would give a
+   * grocery an add-on group editor.
+   */
+  const { noun: pageTitle, item: itemNoun, items: itemsNoun } = useCatalogueNouns();
+  const pageDesc = `Manage your ${pageTitle.toLowerCase()}, categories and what is in stock.`;
+  const categoryLabel = `${itemNoun} Category`;
+  const addLabel = `Add ${itemNoun}`;
+  // Neutral on purpose: crossed cutlery for a consultancy is worse than no opinion, and this is
+  // the same icon the sidebar already uses for this entry.
+  const Icon = BookOpen;
 
   return (
     <div className="space-y-4">
@@ -867,8 +878,8 @@ export default function MenuPage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setAddOpen(false); }}>
         <TabsList>
-          <TabsTrigger value="items">{grocery ? 'Products' : 'Items'}</TabsTrigger>
-          <TabsTrigger value="categories">{grocery ? 'Product Categories' : 'Categories'}</TabsTrigger>
+          <TabsTrigger value="items">{itemsNoun}</TabsTrigger>
+          <TabsTrigger value="categories">Categories</TabsTrigger>
         </TabsList>
         <TabsContent value="items" className="mt-4">
           {grocery

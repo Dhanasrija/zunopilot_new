@@ -81,6 +81,26 @@ model Tenant {
   ///
   /// The stored numbers are untouched — they are how WhatsApp messages are addressed.
   maskCustomerNumbers Boolean  @default(false)
+
+  /// Whether this workspace wants the AI agent answering its customers.
+  ///
+  /// The workspace's own half of the switch; the operator's half is the `AI_AGENT` row in
+  /// `TenantModule`. **Both must be on for any LLM call to be made** — so an operator who
+  /// revokes the module sets a ceiling this field cannot lift, and the owner's Settings page
+  /// shows their switch as inert rather than pretending it still does something.
+  ///
+  /// Two flags rather than one because the two decisions are different. The operator's is about
+  /// cost, payment and abuse; the owner's is "I don't want a bot answering this week". Sharing
+  /// one field would let the owner undo an operator's decision on their next visit.
+  ///
+  /// **On by default**, unlike `maskCustomerNumbers` above. The opposite reasoning applies:
+  /// masking changes what a team can see, so it should not appear without being asked for,
+  /// whereas the agent is already answering customers everywhere and defaulting this off would
+  /// take that away.
+  ///
+  /// Turning it off does not silence the bot. Carts, keyword rules and published workflows keep
+  /// running; only the model is skipped. See `degradeToNonAi` in conversation-engine/routing.
+  aiAgentEnabled      Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -2072,6 +2092,20 @@ model BusinessCategory {
   label       String
   description String?
 
+  /// What this kind of business calls the things it sells, and one of them.
+  ///
+  /// "Menu" is a restaurant word. A grocery has Products, a consultancy has Services, and being
+  /// told you have a Menu is a small, constant signal that the product was built for somebody
+  /// else. Two nouns rather than one because the screen needs both — "Add Product" and "Product
+  /// Category" are not derivable from "Products" without pluralisation rules nobody wants.
+  ///
+  /// **Nullable on purpose: unset means generic, never wrong.** A category an operator adds
+  /// tomorrow reads "Catalogue" until they give it a better word, rather than silently
+  /// inheriting a restaurant's. Editable in the console, so a new category needs no deploy —
+  /// which is the reason these rows live in the database rather than in an enum.
+  catalogueNoun     String?
+  catalogueItemNoun String?
+
   /// Where it appears in the picker. Lower first.
   sortOrder Int @default(100)
 
@@ -2176,6 +2210,30 @@ enum ModuleKey {
   MARKETING
   LEADS
   SUPPORT
+
+  /// The AI agent: the intent router, the general answer, and `AI_AGENT` workflow nodes.
+  ///
+  /// **The one module that defaults ON**, and the only one that is revoked rather than granted
+  /// — see `defaultState()` in modules/module.service.ts. The other three are add-ons nobody
+  /// has until they buy them, so off-by-default is right for them. This one is switched on for
+  /// every workspace on the platform today, and shipping it off-by-default would silently mute
+  /// every live bot.
+  ///
+  /// This is the operator's half of the switch. The workspace's own half is
+  /// `Tenant.aiAgentEnabled`, and both must be on for a single LLM call to be made. An operator
+  /// turning this off is a ceiling the workspace cannot lift.
+  AI_AGENT
+
+  /// Selling things: the Orders screen, the Menu/catalogue, and their APIs.
+  ///
+  /// **Defaults ON, for the same reason as `AI_AGENT`** — every workspace can see Orders and
+  /// Menu today, so an off-by-default module would take them away from all of them on deploy.
+  /// Revoked, not granted.
+  ///
+  /// For workspaces that do not sell: a clinic booking appointments or an academy handling
+  /// admissions has no catalogue, and two permanently empty screens in the nav are clutter that
+  /// makes the product look like it was built for someone else.
+  ECOMMERCE
 }
 
 /// Whether one workspace has one module.

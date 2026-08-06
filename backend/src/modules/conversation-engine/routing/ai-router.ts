@@ -26,6 +26,20 @@ export interface AiRouteResult {
 }
 
 /**
+ * How many capability contracts the router prompt may carry.
+ *
+ * Every candidate contributes its purpose, description, `useWhen`, `doNotUseWhen`, both example
+ * lists, its inputs, preconditions and side effects — so this list *is* the prompt, and it used
+ * to be unbounded. A workspace with thirty published workflows paid for all thirty on every
+ * single message, which is latency and token cost that grows as a workspace gets more successful.
+ *
+ * Twelve is chosen to be comfortably above what any real workspace has today while still being a
+ * ceiling. Taken in `priority` order, which is what an operator already uses to say which
+ * workflow matters most, so the cut falls where they have already told us it should.
+ */
+const MAX_CANDIDATES = 12;
+
+/**
  * The workflows this assistant may route to.
  *
  * Published conversation workflows with a capability contract and a slug. A
@@ -45,9 +59,25 @@ export const candidateWorkflows = async (assistantId: string): Promise<RouterCap
     orderBy: { priority: 'desc' },
   });
 
-  return workflows.flatMap((workflow) => (workflow.capability
+  const views = workflows.flatMap((workflow) => (workflow.capability
     ? [toRouterView(workflow, workflow.capability)]
     : []));
+
+  // Say what was dropped. A silent truncation reads as "the router considered everything" — and
+  // the symptom, a workflow that never gets chosen no matter what the customer types, is
+  // otherwise almost impossible to attribute.
+  if (views.length > MAX_CANDIDATES) {
+    withContext({ assistantId }).warn(
+      'Too many candidate workflows for one router prompt; keeping the highest priority',
+      {
+        total: views.length,
+        kept: MAX_CANDIDATES,
+        dropped: views.slice(MAX_CANDIDATES).map((v) => v.workflowId),
+      },
+    );
+  }
+
+  return views.slice(0, MAX_CANDIDATES);
 };
 
 /** Recent turns, oldest first, for the router's context window. */
@@ -126,6 +156,19 @@ export const routeWithAi = async ({
       schemaName: 'workflow_routing_decision',
       jsonSchema: routerJsonSchema(),
       temperature: 0,
+      /*
+       * Bound the output on the hottest call in the product.
+       *
+       * This was unset, so generation time here was limited by nothing but the model's own
+       * stopping decision — on the one call every open-ended customer message waits for, measured
+       * at p50 1.5–2.0s. The output is a decision, a workflow id, a confidence and at most a
+       * short clarifying question; 512 tokens is several times what that needs.
+       *
+       * Deliberately generous rather than tight. Truncating a structured reply produces invalid
+       * JSON, which `validateRouterOutput` correctly treats as no-match — so a ceiling set too low
+       * would show up as a router that mysteriously stops routing, not as an error.
+       */
+      maxTokens: 512,
     });
 
     const output = validateRouterOutput(response.data, slugs);

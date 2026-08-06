@@ -17,6 +17,8 @@ import { startOrderingFlow } from '../../../services/ordering.service.js';
 import { routeWithAi } from './ai-router.js';
 import { applyConfidenceGate } from './confidence.js';
 import { checkAiAllowance, recordAiInteraction } from '../../billing/billing.service.js';
+import { aiAgentGate } from '../../modules/module.service.js';
+import { sendFallbackText } from './fallback.js';
 import type { NodeServices } from '../engine/types.js';
 
 // The routing chain — the thing that decides which single workflow, if any,
@@ -122,12 +124,44 @@ const recordDecision = async (
  */
 const sendConfiguredFallback = async (args: RouteArgs): Promise<void> => {
   if (args.dryRun) return;
-  const fallback = await prisma.fallbackRule.findUnique({ where: { tenantId: args.tenant.id } });
-  await servicesFor(args, false).whatsapp.sendText({
-    to: args.contact.waId,
-    body: fallback?.response
-      ?? "Sorry, I didn't quite catch that. Let me get a colleague to help.",
+  await sendFallbackText({
+    tenantId: args.tenant.id,
+    waId: args.contact.waId,
+    whatsapp: servicesFor(args, false).whatsapp,
   });
+};
+
+/**
+ * Answer without the model.
+ *
+ * Two different situations end up here — the workspace is over its spend cap, or the AI agent
+ * has been switched off — and both want the same behaviour, so it lives in one function rather
+ * than being written twice with a chance of drifting.
+ *
+ * It delegates to the legacy `handleInboundMessage`, which matches the tenant's own
+ * `KeywordRule` FAQs and otherwise sends their `FallbackRule` text. That is deliberately not a
+ * new customer-facing message: the workspace has already written what to say when the bot
+ * cannot answer, and inventing a second voice for "the AI is off" would be a worse product than
+ * using theirs. It also keeps the promise stated three times in this file — silence is the one
+ * outcome a customer should never get.
+ *
+ * `reasonCode` is free text on `RoutingDecision`, so the distinct reasons show up in the
+ * routing-decisions view without a migration, and "why did my bot stop using AI" is answerable
+ * from the console instead of from the logs.
+ */
+const degradeToNonAi = async (args: RouteArgs, reasonCode: string): Promise<RouteOutcome> => {
+  await handleInboundMessage({
+    tenant: args.tenant,
+    conversation: args.conversation,
+    customer: args.contact,
+    message: {
+      ...(args.message as unknown as Record<string, unknown>),
+      body: args.message.body,
+      payload: args.message.payload,
+    } as never,
+  });
+  await recordDecision(args, { source: 'FALLBACK', decision: 'NO_MATCH', reasonCode });
+  return { source: 'FALLBACK', decision: 'NO_MATCH', reasonCode, handled: true };
 };
 
 const walkDepsFor = (args: RouteArgs): WalkDeps => ({
@@ -400,6 +434,28 @@ export const routeInboundMessage = async (args: RouteArgs): Promise<RouteOutcome
   // is what the "AI usage above the included quota may incur additional
   // charges" disclosure promises. Cutting a real customer off mid-conversation
   // to enforce a soft quota would be a worse product than the overage.
+  /*
+   * The kill switch, checked before anything that could reach a model.
+   *
+   * Placed here rather than at the top of this function on purpose. Everything above — an
+   * in-flight cart, an active workflow instance, the human/cancel escape hatches, a
+   * deterministic keyword or button rule — is pure code and costs nothing, so switching the
+   * agent off must not switch *those* off too. A workspace that turns the AI agent off still
+   * wants its order flow to take orders.
+   *
+   * Two levels, both of which must be on: the `AI_AGENT` module is the operator's ceiling and
+   * `Tenant.aiAgentEnabled` is the workspace's own preference. See `aiAgentGate`.
+   */
+  // `agentGate`, not `gate` — the confidence gate below already owns that name.
+  const agentGate = await aiAgentGate(args.tenant.id);
+  if (!agentGate.allowed) {
+    logger.info('AI skipped: the agent is switched off', {
+      tenantId: args.tenant.id,
+      reason: agentGate.reason,
+    });
+    return degradeToNonAi(args, `AI_${agentGate.reason}`);
+  }
+
   const allowance = await checkAiAllowance(args.tenant.id);
 
   if (!allowance.allowed) {
@@ -408,20 +464,7 @@ export const routeInboundMessage = async (args: RouteArgs): Promise<RouteOutcome
     // going quiet would punish *their* customer for a spending limit they never
     // agreed to and cannot see.
     logger.info('AI skipped: usage cap reached', { reason: allowance.reason });
-    await handleInboundMessage({
-      tenant: args.tenant,
-      conversation: args.conversation,
-      customer: args.contact,
-      message: {
-        ...(args.message as unknown as Record<string, unknown>),
-        body: args.message.body,
-        payload: args.message.payload,
-      } as never,
-    });
-    await recordDecision(args, {
-      source: 'FALLBACK', decision: 'NO_MATCH', reasonCode: 'AI_CAP_REACHED',
-    });
-    return { source: 'FALLBACK', decision: 'NO_MATCH', reasonCode: 'AI_CAP_REACHED', handled: true };
+    return degradeToNonAi(args, 'AI_CAP_REACHED');
   }
 
   void recordAiInteraction(args.tenant.id, {

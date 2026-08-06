@@ -260,7 +260,34 @@ export const startWorkers = async (): Promise<void> => {
   if (started) return;
   started = true;
 
-  await registerWorker(QUEUES.processInboundMessage, handleProcessInboundMessage, { batchSize: 5 });
+  /*
+   * The inbound queue, and the only one whose throughput a customer feels directly.
+   *
+   * `batchSize: 5` alone was not what it looked like. pg-boss defaults `localConcurrency` to 1,
+   * so there was a single poll loop: five jobs, then a wait, then five more. With a measured
+   * ~2.6 s per message and a 2 s polling gap, the ceiling was roughly 65 messages a minute for
+   * the whole platform, however many tenants were sending. A hundred messages arriving together
+   * meant the last customer waited about two minutes.
+   *
+   * `localConcurrency` is what actually lifts it, and `burstWhenBatchFull` removes the sleep
+   * between full batches so a backlog drains continuously instead of in 2-second steps.
+   *
+   * **This is only safe because the advisory lock no longer spans the work.** Each job used to
+   * hold a pooled connection `idle in transaction` for its whole drain, so raising concurrency
+   * would have exhausted the pool faster rather than doing more — the jobs would have queued
+   * behind connections they were themselves holding. With the claim/process split, a job holds a
+   * connection only while it is using one.
+   *
+   * Sized against the connection pool, not against CPU: the work is almost entirely waiting on
+   * Postgres, OpenAI and Meta. Keep `INBOUND_CONCURRENCY × 2` comfortably under
+   * `connection_limit` — see `docs/production.md`, which is also where the pool is now pinned
+   * explicitly rather than inferred from the instance's core count.
+   */
+  await registerWorker(QUEUES.processInboundMessage, handleProcessInboundMessage, {
+    batchSize: 5,
+    localConcurrency: env.engine.inboundConcurrency,
+    burstWhenBatchFull: true,
+  });
   await registerWorker(QUEUES.executeWorkflowInstance, handleExecuteWorkflowInstance, { batchSize: 3 });
   await registerWorker(QUEUES.resumeDelayedWorkflow, handleResumeDelayedWorkflows);
   await registerWorker(QUEUES.sendWhatsAppMessage, handleSendWhatsAppMessage, { batchSize: 5 });

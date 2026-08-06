@@ -10,6 +10,32 @@ import { logger } from '../config/logger.js';
 
 const graphUrl = (path: string) => `https://graph.facebook.com/${env.meta.graphVersion}${path}`;
 
+/**
+ * One client for every Graph call, so all of them inherit a timeout.
+ *
+ * **Why this is not optional.** These calls used bare `axios.post`, and axios has no default
+ * timeout — a request whose TCP connection stalls rather than fails will wait forever, because
+ * nothing in Node will time it out. That matters more than it sounds: a send happens inside the
+ * inbound job, and the worker's batch handler awaits `Promise.all` over its jobs. A promise that
+ * never settles is not something `try/catch` can rescue, so one stalled socket to Meta used to
+ * stop the inbound queue fetching for **every tenant** until the process was restarted.
+ *
+ * `registerWorker` now also bounds each job independently, so this is one of two layers. Both
+ * are worth having: this one turns a hang into an ordinary error that the existing retry can
+ * handle, which is much better than a job killed from the outside halfway through.
+ */
+const http = axios.create({ timeout: env.meta.timeoutMs });
+
+/**
+ * The same client, for the onboarding controller's own Graph calls.
+ *
+ * Exported rather than letting that file reach for bare `axios`, so there is exactly one place
+ * the Graph timeout is decided. Those calls run in a request handler rather than a worker, so
+ * they cannot stall the queue — but a hung one still pins an Express connection and a database
+ * connection for as long as it lasts, which on a small pool is its own outage.
+ */
+export const graphHttp = http;
+
 const authHeaders = (accessToken: string) => ({
   headers: { Authorization: `Bearer ${accessToken}` },
 });
@@ -66,7 +92,7 @@ export const sendTextMessage = ({ accessToken, phoneNumberId, to, body }: Creden
   body: string;
 }): Promise<SendResponse> =>
   graphCall('sendTextMessage', async () => {
-    const { data } = await axios.post<SendResponse>(
+    const { data } = await http.post<SendResponse>(
       graphUrl(`/${phoneNumberId}/messages`),
       {
         messaging_product: 'whatsapp',
@@ -89,7 +115,7 @@ export const sendInteractiveList = ({
   sections: ListSection[];
 }): Promise<SendResponse> =>
   graphCall('sendInteractiveList', async () => {
-    const { data } = await axios.post<SendResponse>(
+    const { data } = await http.post<SendResponse>(
       graphUrl(`/${phoneNumberId}/messages`),
       {
         messaging_product: 'whatsapp',
@@ -115,7 +141,7 @@ export const sendInteractiveButtons = ({
   buttons: ReplyButton[];
 }): Promise<SendResponse> =>
   graphCall('sendInteractiveButtons', async () => {
-    const { data } = await axios.post<SendResponse>(
+    const { data } = await http.post<SendResponse>(
       graphUrl(`/${phoneNumberId}/messages`),
       {
         messaging_product: 'whatsapp',
@@ -148,7 +174,7 @@ export const sendLocationRequest = ({ accessToken, phoneNumberId, to, body }: Cr
   body: string;
 }): Promise<SendResponse> =>
   graphCall('sendLocationRequest', async () => {
-    const { data } = await axios.post<SendResponse>(
+    const { data } = await http.post<SendResponse>(
       graphUrl(`/${phoneNumberId}/messages`),
       {
         messaging_product: 'whatsapp',
@@ -174,7 +200,7 @@ export const sendTemplate = ({
   components?: TemplateComponent[];
 }): Promise<SendResponse> =>
   graphCall('sendTemplate', async () => {
-    const { data } = await axios.post<SendResponse>(
+    const { data } = await http.post<SendResponse>(
       graphUrl(`/${phoneNumberId}/messages`),
       {
         messaging_product: 'whatsapp',
@@ -197,7 +223,7 @@ export interface TokenResponse {
 
 /** Exchange the code from Embedded Signup for a long-lived access token. */
 export const exchangeCodeForToken = async (code: string): Promise<TokenResponse> => {
-  const { data } = await axios.get<TokenResponse>(graphUrl('/oauth/access_token'), {
+  const { data } = await http.get<TokenResponse>(graphUrl('/oauth/access_token'), {
     params: { client_id: env.meta.appId, client_secret: env.meta.appSecret, code },
   });
   return data;
@@ -205,7 +231,7 @@ export const exchangeCodeForToken = async (code: string): Promise<TokenResponse>
 
 /** Exchange a short-lived token for a long-lived one. */
 export const exchangeShortTokenForLongToken = async (shortLivedToken: string): Promise<TokenResponse> => {
-  const { data } = await axios.get<TokenResponse>(graphUrl('/oauth/access_token'), {
+  const { data } = await http.get<TokenResponse>(graphUrl('/oauth/access_token'), {
     params: {
       grant_type: 'fb_exchange_token',
       client_id: env.meta.appId,
@@ -223,7 +249,7 @@ export const exchangeShortTokenForLongToken = async (shortLivedToken: string): P
  */
 export const subscribeAppToWaba = ({ accessToken, wabaId }: { accessToken: string; wabaId: string }) =>
   graphCall('subscribeAppToWaba', async () => {
-    const { data } = await axios.post<{ success: boolean }>(
+    const { data } = await http.post<{ success: boolean }>(
       graphUrl(`/${wabaId}/subscribed_apps`),
       {},
       authHeaders(accessToken),
@@ -237,7 +263,7 @@ export const subscribeAppToWaba = ({ accessToken, wabaId }: { accessToken: strin
  */
 export const registerPhoneNumber = ({ accessToken, phoneNumberId, pin }: Credentials & { pin: string }) =>
   graphCall('registerPhoneNumber', async () => {
-    const { data } = await axios.post<{ success: boolean }>(
+    const { data } = await http.post<{ success: boolean }>(
       graphUrl(`/${phoneNumberId}/register`),
       { messaging_product: 'whatsapp', pin },
       authHeaders(accessToken),
@@ -246,7 +272,7 @@ export const registerPhoneNumber = ({ accessToken, phoneNumberId, pin }: Credent
   });
 
 export const fetchWabaInfo = async (accessToken: string): Promise<Record<string, unknown>> => {
-  const { data } = await axios.get<Record<string, unknown>>(graphUrl('/debug_token'), {
+  const { data } = await http.get<Record<string, unknown>>(graphUrl('/debug_token'), {
     params: { input_token: accessToken, access_token: `${env.meta.appId}|${env.meta.appSecret}` },
   });
   return data;
@@ -267,7 +293,7 @@ export interface MetaTemplate {
 
 export const fetchMetaTemplate = ({ accessToken, templateId }: { accessToken: string; templateId: string }) =>
   graphCall('fetchMetaTemplate', async () => {
-    const { data } = await axios.get<MetaTemplate>(graphUrl(`/${templateId}`), {
+    const { data } = await http.get<MetaTemplate>(graphUrl(`/${templateId}`), {
       ...authHeaders(accessToken),
       params: { fields: 'id,name,category,language,status,components,created_time,last_updated_time' },
     });
@@ -276,7 +302,7 @@ export const fetchMetaTemplate = ({ accessToken, templateId }: { accessToken: st
 
 export const fetchMetaTemplates = ({ accessToken, wabaId }: { accessToken: string; wabaId: string }) =>
   graphCall('fetchMetaTemplates', async () => {
-    const { data } = await axios.get<{ data: MetaTemplate[] }>(
+    const { data } = await http.get<{ data: MetaTemplate[] }>(
       graphUrl(`/${wabaId}/message_templates`),
       { ...authHeaders(accessToken), params: { limit: 100 } },
     );
@@ -294,7 +320,7 @@ export const createMetaTemplate = ({
   components: unknown[];
 }) =>
   graphCall('createMetaTemplate', async () => {
-    const { data } = await axios.post<{ id: string; status?: string; category?: string }>(
+    const { data } = await http.post<{ id: string; status?: string; category?: string }>(
       graphUrl(`/${wabaId}/message_templates`),
       { name, category, language, components },
       authHeaders(accessToken),
@@ -317,7 +343,7 @@ export const updateMetaTemplate = ({
   accessToken, templateId, components,
 }: { accessToken: string; templateId: string; components: unknown[] }) =>
   graphCall('updateMetaTemplate', async () => {
-    const { data } = await axios.post<{ success: boolean }>(
+    const { data } = await http.post<{ success: boolean }>(
       graphUrl(`/${templateId}`),
       { components },
       authHeaders(accessToken),

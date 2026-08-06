@@ -10,6 +10,7 @@ export const getProfile = asyncHandler(async (req, res) => {
 export const updateProfile = asyncHandler(async (req, res) => {
   const {
     businessName, category, contactNumber, address, website, logoUrl, maskCustomerNumbers,
+    aiAgentEnabled,
   } = req.body;
 
   /**
@@ -28,6 +29,21 @@ export const updateProfile = asyncHandler(async (req, res) => {
     ? undefined
     : maskCustomerNumbers === true || maskCustomerNumbers === 'true';
 
+  /**
+   * The workspace's half of the AI agent switch, on the same route for the same reason.
+   *
+   * **This writes only `Tenant.aiAgentEnabled`, never the `AI_AGENT` module row.** The module is
+   * the operator's ceiling and only the super admin console may touch it; if this route could
+   * write it, a workspace we had switched off could switch itself back on and the ceiling would
+   * be decoration. So setting this to `true` while the module is off is accepted and stored — it
+   * simply has no effect, and the Settings page says so rather than pretending otherwise.
+   *
+   * Same strict coercion as masking above, for the same `"false"` reason.
+   */
+  const aiAgent = aiAgentEnabled === undefined
+    ? undefined
+    : aiAgentEnabled === true || aiAgentEnabled === 'true';
+
   const tenant = await prisma.tenant.update({
     where: { id: tenantIdOf(req) },
     data: {
@@ -38,6 +54,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
       website,
       logoUrl,
       ...(masking === undefined ? {} : { maskCustomerNumbers: masking }),
+      ...(aiAgent === undefined ? {} : { aiAgentEnabled: aiAgent }),
     },
   });
   res.json({ success: true, data: tenant });

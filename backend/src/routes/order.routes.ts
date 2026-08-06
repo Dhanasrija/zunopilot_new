@@ -4,10 +4,19 @@ import {
 } from '../controllers/order.controller.js';
 import { createOrderValidator, updateStatusValidator } from '../validators/order.validator.js';
 import { validate } from '../middleware/validate.js';
-import { requireAuth, requirePermission } from '../middleware/auth.js';
+import { requireAuth, requireModule, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 router.use(requireAuth);
+
+/*
+ * Selling is a module, so a workspace that does not sell cannot reach this at all.
+ *
+ * Mounted here rather than relying on the nav hiding the screen: a hidden menu item is a
+ * hint, not a control, and a typed URL or a stale bookmark would otherwise still work.
+ * Refuses with 404 rather than 403 — the same reasoning as every other module gate.
+ */
+router.use(requireModule('ECOMMERCE'));
 
 // `orders:write` was in the vocabulary but nothing enforced it, so every member
 // could create an order and move its status. The seeded Agent role holds it —

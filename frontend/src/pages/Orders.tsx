@@ -138,7 +138,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
   const { data: menuItems } = useQuery<MenuItem[]>({
     queryKey: ['menu-items-list'],
-    queryFn: async () => (await api.get<{ data: MenuItem[] }>('/menu/items')).data.data,
+    queryFn: async () => (await api.get<{ data: MenuItem[] }>('/catalogue/items')).data.data,
     enabled: open,
   });
 

@@ -57,7 +57,11 @@ const sessionView = async (user: {
   tenant: {
     id: string; businessName: string; onboardingCompletedAt: Date | null;
     maskCustomerNumbers: boolean;
-    businessCategory: { id: string; key: string; label: string } | null;
+    aiAgentEnabled: boolean;
+    businessCategory: {
+      id: string; key: string; label: string;
+      catalogueNoun: string | null; catalogueItemNoun: string | null;
+    } | null;
   };
 }) => ({
   user: {
@@ -76,6 +80,19 @@ const sessionView = async (user: {
     category: user.tenant.businessCategory?.key ?? null,
     categoryId: user.tenant.businessCategory?.id ?? null,
     categoryLabel: user.tenant.businessCategory?.label ?? null,
+    /*
+     * What this business calls the things it sells.
+     *
+     * Carried so the sidebar and the catalogue page read the same word from the same place.
+     * They used to disagree: the page adapted with a hardcoded `grocery ? 'Products' : 'Menu'`
+     * while the nav said "Menu" unconditionally, so a grocery workspace saw one word in the menu
+     * and another on the page it opened.
+     *
+     * Defaulted here rather than in the browser, so every caller gets the same fallback and an
+     * unconfigured category reads "Catalogue" instead of a restaurant's word.
+     */
+    catalogueNoun: user.tenant.businessCategory?.catalogueNoun ?? 'Catalogue',
+    catalogueItemNoun: user.tenant.businessCategory?.catalogueItemNoun ?? 'Item',
     /**
      * Whether this workspace hides most of a customer's phone number.
      *
@@ -85,6 +102,16 @@ const sessionView = async (user: {
      * redaction happens on the server, and this is only ever used to word a tooltip.
      */
     maskCustomerNumbers: user.tenant.maskCustomerNumbers,
+    /**
+     * This workspace's own half of the AI agent switch.
+     *
+     * Sent **alongside** `AI_AGENT` in `modules` rather than combined with it, because the two
+     * off-states need different words. `modules` missing `AI_AGENT` means we switched it off and
+     * they cannot change that; this field being false means they chose to. Flattening them into
+     * one "AI is off" boolean would leave the Settings page unable to say which, and the honest
+     * answer to "why is my bot not using AI" is exactly that distinction.
+     */
+    aiAgentEnabled: user.tenant.aiAgentEnabled,
   },
   permissions: resolvePermissions(user.assignedRole, user.role),
   modules: await enabledModulesFor(user.tenant.id),
@@ -94,7 +121,13 @@ const sessionView = async (user: {
 const sessionInclude = {
   assignedRole: true,
   tenant: {
-    include: { businessCategory: { select: { id: true, key: true, label: true } } },
+    include: {
+      businessCategory: {
+        select: {
+          id: true, key: true, label: true, catalogueNoun: true, catalogueItemNoun: true,
+        },
+      },
+    },
   },
 } as const;
 

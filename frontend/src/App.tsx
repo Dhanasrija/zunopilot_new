@@ -81,9 +81,19 @@ export default function App() {
             <Route element={<AppLayout />}>
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="inbox" element={<Inbox />} />
-              <Route path="orders" element={<Orders />} />
-              <Route path="orders/:id" element={<OrderDetails />} />
-              <Route path="menu" element={<Menu />} />
+              {/* Selling. Behind the module gate as well as the permission, so a workspace
+                  that does not sell cannot reach these from a typed URL or a bookmark saved
+                  before it was switched off. The API refuses them independently. */}
+              <Route element={<RequireCapability module="ECOMMERCE" permission="orders:read" />}>
+                <Route path="orders" element={<Orders />} />
+                <Route path="orders/:id" element={<OrderDetails />} />
+              </Route>
+              <Route element={<RequireCapability module="ECOMMERCE" permission="catalogue:read" />}>
+                <Route path="catalogue" element={<Menu />} />
+              </Route>
+              {/* The old path. A staff bookmark or a link in a past support conversation should
+                  land on the page, not on a 404, and this costs one line to guarantee. */}
+              <Route path="menu" element={<Navigate to="/catalogue" replace />} />
               <Route path="customers" element={<Customers />} />
               {/* Module 20: leads. Behind the module gate as well as the
                   permission, so a workspace that was never given Leads cannot

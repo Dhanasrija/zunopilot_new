@@ -1,0 +1,22 @@
+-- An operator switch for selling: the Orders screen, the Menu/catalogue, and their APIs.
+--
+-- Not every workspace sells things. A clinic booking appointments or an academy handling
+-- admissions has no catalogue, and two permanently empty screens in the nav are clutter that
+-- makes the product look like it was built for somebody else.
+--
+-- **Defaults ON, which is the opposite of how modules normally work** — the same exception
+-- `AI_AGENT` makes, for the same reason. MARKETING, LEADS and SUPPORT are add-ons nobody has
+-- until they are granted one, so off-by-default protects us from handing out what was never
+-- sold. Orders and Menu are visible in every workspace right now, so off-by-default would take
+-- them away from all of them the moment this deploys.
+--
+-- That default lives in code — `defaultState()` in modules/module.service.ts — rather than as
+-- backfilled rows here, because rows would only cover the workspaces that exist tonight and
+-- every future signup would arrive with no Orders screen and no obvious reason why.
+--
+-- Purely additive: one enum value. Nothing is altered or dropped, so the two hand-written
+-- partial unique indexes (WorkflowInstance_one_active_per_conversation and
+-- Price_one_active_per_plan_interval) are untouched.
+
+-- AlterEnum
+ALTER TYPE "ModuleKey" ADD VALUE 'ECOMMERCE';

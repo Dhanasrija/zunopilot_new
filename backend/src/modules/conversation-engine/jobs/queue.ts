@@ -181,16 +181,63 @@ export const enqueue = async <K extends QueueName>(
 };
 
 /**
+ * Longest a single job may run before the worker stops waiting for it.
+ *
+ * Deliberately larger than any queue's `expireInSeconds`, so pg-boss's own expiry is what
+ * normally decides a job's fate. This is the backstop for the case pg-boss cannot see: a handler
+ * whose promise never settles at all.
+ */
+const HANDLER_DEADLINE_MS = 240_000;
+
+/**
+ * Reject if a handler never settles.
+ *
+ * The failure this exists for: `Promise.all` over a batch, inside a poll loop that awaits it.
+ * A `try/catch` catches a *rejected* promise; nothing catches one that simply never resolves. So
+ * a single socket stalled against an external service (Meta, OpenAI) used to stop the queue
+ * fetching **for every tenant** until the process was restarted, and `expireInSeconds` could not
+ * help — it marks the row expired in Postgres, which cannot cancel an `await` inside Node.
+ *
+ * The timer is `unref`'d so a pending deadline never holds the process open during shutdown, and
+ * cleared on the normal path so a long-lived worker does not accumulate timers.
+ */
+const withDeadline = async <T>(work: Promise<T>, label: string): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} did not settle within ${HANDLER_DEADLINE_MS}ms`)),
+      HANDLER_DEADLINE_MS,
+    );
+    timer.unref();
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+/**
  * Register a handler.
  *
  * pg-boss v12 hands the handler a batch. Each job is settled individually via
  * `perJobResults`, so one poison message cannot fail the whole batch and cause
  * its healthy neighbours to be retried.
+ *
+ * Note what the deadline does and does not do. It frees the *worker* so the queue keeps serving
+ * every other tenant; it cannot abort the orphaned work, which carries on until whatever it is
+ * waiting on gives up. That is why the individual clients have their own timeouts too — this is
+ * the layer that stops one tenant's stall becoming everyone's outage, not the primary control.
  */
 export const registerWorker = async <K extends QueueName>(
   queue: K,
   handler: (data: JobPayloads[K], job: Job<JobPayloads[K]>) => Promise<void>,
-  options: { batchSize?: number; pollingIntervalSeconds?: number } = {},
+  options: {
+    batchSize?: number;
+    pollingIntervalSeconds?: number;
+    localConcurrency?: number;
+    burstWhenBatchFull?: boolean;
+  } = {},
 ): Promise<void> => {
   const instance = await getBoss();
 
@@ -199,11 +246,18 @@ export const registerWorker = async <K extends QueueName>(
     {
       batchSize: options.batchSize ?? 1,
       pollingIntervalSeconds: options.pollingIntervalSeconds ?? 2,
+      // pg-boss defaults this to 1 — a single poll loop per queue, which is what capped inbound
+      // throughput regardless of `batchSize`. Callers that have somewhere to put the parallelism
+      // (and a connection pool sized for it) opt in.
+      ...(options.localConcurrency ? { localConcurrency: options.localConcurrency } : {}),
+      // Without this, a fetch that returns a full batch still waits the polling interval before
+      // the next one — so draining a backlog spent most of its time asleep.
+      ...(options.burstWhenBatchFull ? { burstWhenBatchFull: true } : {}),
       perJobResults: true,
     },
     async (jobs: Job<JobPayloads[K]>[]): Promise<JobResult[]> => Promise.all(jobs.map(async (job) => {
       try {
-        await handler(job.data, job);
+        await withDeadline(handler(job.data, job), `${queue} job ${job.id}`);
         return { id: job.id, status: 'completed' as const };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
