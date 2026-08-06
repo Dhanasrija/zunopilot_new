@@ -35,10 +35,16 @@ runs TypeScript through `tsx`), so it ships source plus a prebuilt runtime `node
 content-addressed by `sha256(package-lock.json + schema.prisma)` — a deploy that changes no
 dependency skips a ~65 MB upload.
 
+Those trees live at `shared/deps/<hash>/node_modules/`, and the trailing `node_modules`
+component is **required**. Node resolves `require` by walking up from a file's *real* path
+looking for a directory of exactly that name, and the release's `node_modules` symlink is
+followed to its target before the walk begins. Flatten the wrapper away and the prisma CLI
+cannot find `@prisma/engines` even though the package is sitting next to it.
+
 ## One-time server setup
 
 ```bash
-sudo mkdir -p /srv/zunopilot/{shared/node_modules,backend/releases,frontend/releases,ops/releases}
+sudo mkdir -p /srv/zunopilot/{shared/deps,backend/releases,frontend/releases,ops/releases}
 sudo mkdir -p /var/lib/zunopilot/media /var/log/zunopilot /var/www/certbot
 sudo chown -R ubuntu:ubuntu /srv/zunopilot /var/lib/zunopilot /var/log/zunopilot
 ```

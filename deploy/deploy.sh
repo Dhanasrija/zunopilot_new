@@ -25,6 +25,9 @@ USER="${DEPLOY_USER:?DEPLOY_USER is not set}"
 REL="${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
 DEPS="$(cat deps.sha)"
 ROOT=/srv/zunopilot
+# Content-addressed runtime trees: DEPS_ROOT/<hash>/node_modules/. The `node_modules` level is
+# load-bearing, not cosmetic — see step 3.
+DEPS_ROOT="${ROOT}/shared/deps"
 
 # StrictHostKeyChecking=yes, not `accept-new`: the fingerprint is pinned in Bitbucket via
 # Repository settings -> SSH keys -> Known hosts. A changed host key should stop the deploy,
@@ -84,23 +87,33 @@ scp -q -o StrictHostKeyChecking=yes backend-src.tgz "${USER}@${HOST}:/tmp/src-${
   rm -f /tmp/src-${REL}.tgz"
 
 say "3/9  runtime dependencies (${DEPS})"
-if "${SSH[@]}" "test -d ${ROOT}/shared/node_modules/${DEPS}"; then
+if "${SSH[@]}" "test -d ${DEPS_ROOT}/${DEPS}/node_modules"; then
   echo "    already present — skipping the upload"
 else
   scp -q -o StrictHostKeyChecking=yes backend-node_modules.tgz "${USER}@${HOST}:/tmp/nm-${DEPS}.tgz"
   # Unpack to a temp name and rename into place, so an interrupted upload can never leave a
   # half-populated tree that a later deploy would mistake for a complete one.
+  #
+  # **No --strip-components.** The tarball's top-level entry is `node_modules/`, and that
+  # directory must survive: node resolves `require` by walking up from a file's REAL path
+  # looking for a directory literally named `node_modules`. Stripping the wrapper left the
+  # packages as direct children of the hash directory, so the prisma CLI — reached through the
+  # release's symlink, then resolved to its realpath — walked past `deps/<hash>/` and found
+  # nothing. It failed with `Cannot find module '@prisma/engines'` while @prisma/engines sat
+  # right there on disk.
   "${SSH[@]}" "set -e
-    rm -rf ${ROOT}/shared/node_modules/.incoming-${DEPS}
-    mkdir -p ${ROOT}/shared/node_modules/.incoming-${DEPS}
-    tar -xzf /tmp/nm-${DEPS}.tgz -C ${ROOT}/shared/node_modules/.incoming-${DEPS} --strip-components=1
-    mv -T ${ROOT}/shared/node_modules/.incoming-${DEPS} ${ROOT}/shared/node_modules/${DEPS}
+    rm -rf ${DEPS_ROOT}/.incoming-${DEPS}
+    mkdir -p ${DEPS_ROOT}/.incoming-${DEPS}
+    tar -xzf /tmp/nm-${DEPS}.tgz -C ${DEPS_ROOT}/.incoming-${DEPS}
+    test -d ${DEPS_ROOT}/.incoming-${DEPS}/node_modules ||
+      { echo 'the dependency tarball has no top-level node_modules/ — refusing'; exit 1; }
+    mv -T ${DEPS_ROOT}/.incoming-${DEPS} ${DEPS_ROOT}/${DEPS}
     rm -f /tmp/nm-${DEPS}.tgz"
 fi
 
 say "4/9  wiring the release"
 "${SSH[@]}" "set -e
-  ln -sfn ${ROOT}/shared/node_modules/${DEPS} ${ROOT}/backend/releases/${REL}/node_modules
+  ln -sfn ${DEPS_ROOT}/${DEPS}/node_modules ${ROOT}/backend/releases/${REL}/node_modules
   ln -sfn ${ROOT}/shared/.env                 ${ROOT}/backend/releases/${REL}/.env
   test -f ${ROOT}/shared/.env || { echo 'shared/.env is missing — place it by hand first'; exit 1; }"
 
@@ -177,8 +190,11 @@ say "9/9  pruning"
   for app in frontend ops backend; do
     ls -1dt ${ROOT}/\$app/releases/*/ 2>/dev/null | tail -n +4 | xargs -r rm -rf
   done
-  keep=\$(readlink -f ${ROOT}/backend/current/node_modules)
-  find ${ROOT}/shared/node_modules -mindepth 1 -maxdepth 1 -type d \
+  # `current/node_modules` resolves to <hash>/node_modules, but the directories being pruned
+  # are the <hash> level above it — so compare against the PARENT. Without the dirname the
+  # exclusion never matches and this deletes the tree the live release is running from.
+  keep=\$(dirname \$(readlink -f ${ROOT}/backend/current/node_modules))
+  find ${DEPS_ROOT} -mindepth 1 -maxdepth 1 -type d \
     ! -path \"\$keep\" -mtime +7 -exec rm -rf {} + 2>/dev/null || true"
 
 echo
