@@ -374,16 +374,31 @@ export const llmProvider = (): LLMProvider => {
     cached = new OpenAIProvider();
   } else {
     if (kind === 'openai') {
-      logger.warn('LLM_PROVIDER=openai but no LLM_API_KEY/OPENAI_API_KEY is set — using the mock router');
+      /*
+       * Named a vendor and gave it no key.
+       *
+       * Worth its own message, because the fix is different: with `LLM_VENDOR=groq` set, the
+       * resolver reads only `GROQ_LLM_*` and deliberately will NOT borrow `OPENAI_API_KEY` —
+       * so the usual "add a key" advice points at the wrong variable.
+       */
+      logger.warn(
+        env.llm.vendor
+          ? `LLM_VENDOR=${env.llm.vendor} but ${env.llm.vendor}_LLM_API_KEY is not set — using the `
+            + 'mock router. Another vendor\'s key is deliberately NOT used as a fallback.'
+          : 'LLM_PROVIDER=openai but no LLM_API_KEY/OPENAI_API_KEY is set — using the mock router',
+      );
     }
     cached = new MockLLMProvider();
   }
 
-  // The model and structured mode are logged too, because "which model answered" is the first
-  // question anyone asks about a latency or quality change, and `provider` alone cannot say.
+  // The vendor, model and structured mode are all logged, because "which model answered" is the
+  // first question anyone asks about a latency, quality or billing change, and `provider` alone
+  // cannot say — it reads 'openai' for any OpenAI-compatible endpoint, Groq included.
   logger.info('LLM provider selected', {
     provider: cached.name,
+    vendor: env.llm.vendor || '(unprefixed LLM_*/OPENAI_*)',
     model: cached.name === 'mock' ? null : env.llm.model,
+    baseUrl: cached.name === 'mock' ? null : (env.llm.baseUrl || 'https://api.openai.com/v1'),
     structuredMode: cached.name === 'mock' ? null : env.llm.structuredMode,
   });
   return cached;

@@ -29,6 +29,54 @@ const bool = (key: string, fallback: boolean): boolean => {
   return raw === 'true' || raw === '1';
 };
 
+/**
+ * Which vendor's block of LLM settings is live, e.g. `groq`.
+ *
+ * Empty means "no vendor named", which selects the unprefixed `LLM_*` / `OPENAI_*` pair and is
+ * exactly the behaviour that existed before this was added.
+ */
+const llmVendor = (): string => (process.env.LLM_VENDOR || '').trim().toUpperCase();
+
+/**
+ * Resolve one LLM setting, honouring a vendor prefix.
+ *
+ * The problem this solves: keeping two vendors configured at once. Parking the inactive one's
+ * values in comments means they rot, and duplicating them under both a prefixed and an
+ * unprefixed name means two copies that can disagree — the failure mode that has appeared four
+ * times elsewhere in this codebase. So each vendor gets its own block and `LLM_VENDOR` picks one:
+ *
+ *   LLM_VENDOR=groq
+ *   GROQ_LLM_API_KEY=...        GROQ_LLM_MODEL=llama-3.3-70b-versatile
+ *   GROQ_LLM_BASE_URL=...       GROQ_LLM_STRUCTURED_MODE=json_object
+ *
+ *   OPENAI_API_KEY=...          OPENAI_MODEL=gpt-4o-mini
+ *
+ * Adding a vendor is a new prefixed block and one line; switching is one line and a restart.
+ *
+ * Two lookup shapes per vendor, because both conventions are already in use: `GROQ_LLM_API_KEY`
+ * and, for the one that predates this, `OPENAI_API_KEY`. So `LLM_VENDOR=openai` works against
+ * the names that are already deployed rather than requiring a rename.
+ *
+ * **A named vendor never falls back to a different vendor's credentials, and that is the whole
+ * point of the function.** Before this existed, putting a Groq key in `GROQ_LLM_API_KEY` left
+ * `LLM_API_KEY` empty, so resolution fell through to `OPENAI_API_KEY` and the router quietly ran
+ * on OpenAI — working, billable, and wrong. Falling back across vendors turns a typo into a
+ * silent vendor switch, so when `LLM_VENDOR` is set only that vendor's names are consulted.
+ * Unset it and the old unprefixed chain applies unchanged.
+ */
+const llmSetting = (suffix: string): string | undefined => {
+  const vendor = llmVendor();
+
+  if (vendor) {
+    // `GROQ_LLM_API_KEY`, then `GROQ_API_KEY`. Nothing else — see the note above.
+    const value = process.env[`${vendor}_LLM_${suffix}`] || process.env[`${vendor}_${suffix}`];
+    return value?.trim() ? value : undefined;
+  }
+
+  const value = process.env[`LLM_${suffix}`] || process.env[`OPENAI_${suffix}`];
+  return value?.trim() ? value : undefined;
+};
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isTest: process.env.NODE_ENV === 'test',
@@ -199,10 +247,12 @@ export const env = {
    * able to change it without changing code is the point of this block.
    */
   llm: {
+    /** Which vendor block is live. Empty means the unprefixed `LLM_*`/`OPENAI_*` pair. */
+    vendor: llmVendor(),
     // The router is enabled only when a key is present; without one, automation falls back to
     // the original keyword matching.
-    apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '',
-    model: process.env.LLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    apiKey: llmSetting('API_KEY') || '',
+    model: llmSetting('MODEL') || 'gpt-4o-mini',
     /**
      * An OpenAI-compatible endpoint, or empty for OpenAI's own.
      *
@@ -211,7 +261,7 @@ export const env = {
      * endpoint costs ~200–250ms of round trip before a single token, which is why the fastest
      * model on paper is not automatically the fastest reply.
      */
-    baseUrl: process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || '',
+    baseUrl: llmSetting('BASE_URL') || '',
     /**
      * How structured output is requested — the one genuinely non-portable thing here.
      *
@@ -221,11 +271,11 @@ export const env = {
      * weaker, but the router already Zod-validates the reply and treats anything malformed as
      * "no match" rather than an error, so the failure mode is a duller router, not a broken one.
      */
-    structuredMode: (process.env.LLM_STRUCTURED_MODE === 'json_object'
+    structuredMode: (llmSetting('STRUCTURED_MODE') === 'json_object'
       ? 'json_object'
       : 'json_schema') as 'json_schema' | 'json_object',
     // A customer is waiting on WhatsApp — fail fast rather than hang.
-    timeoutMs: int('LLM_TIMEOUT_MS', int('OPENAI_TIMEOUT_MS', 8000)),
+    timeoutMs: Number(llmSetting('TIMEOUT_MS')) || 8000,
     /**
      * Vendor-specific request fields, as JSON, merged into every completion.
      *
@@ -243,7 +293,7 @@ export const env = {
      * nothing is worse than one that is missing.
      */
     extraBody: (() => {
-      const raw = process.env.LLM_EXTRA_BODY;
+      const raw = llmSetting('EXTRA_BODY');
       if (!raw?.trim()) return {} as Record<string, unknown>;
       try {
         return JSON.parse(raw) as Record<string, unknown>;
@@ -268,8 +318,7 @@ export const env = {
      * decisions so the routing suite runs without a key or a bill.
      */
     llmProvider: process.env.LLM_PROVIDER
-      || (process.env.NODE_ENV === 'test'
-        || !(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY) ? 'mock' : 'openai'),
+      || (process.env.NODE_ENV === 'test' || !llmSetting('API_KEY') ? 'mock' : 'openai'),
     /** Confidence at or above which the router starts the selected workflow. */
     highConfidence: float('ROUTER_HIGH_CONFIDENCE', 0.8),
     /** Confidence at or above which the router asks a clarifying question. */
