@@ -124,7 +124,18 @@ Every `pg_dump` taken here contains **plaintext Meta access tokens** —
 
 - **`client_max_body_size` is 16m, not the 100m the API allows.** `multer.memoryStorage()`
   plus a 100 MB document ceiling means one upload is 100 MB+ of heap in the process that also
-  runs the pg-boss workers. Raise it only after uploads stream to disk.
+  runs the pg-boss workers.
+
+  **Media uploads are not in use, and the intended path is S3 rather than local disk**
+  (decided 2026-08-06). That makes this latent rather than live — but the 16m cap stays, both
+  because it is the thing keeping it latent and because it is a sane ceiling for any request
+  body. When S3 lands, the seam is `publicUrlFor()` / `storeUpload()` in
+  `backend/src/modules/media/media.service.ts`; nothing else touches the filesystem.
+
+  The same decision is why there is **no disk alarm**: `MEDIA_DIR` was the only unbounded
+  consumer on the box. Deploy artifacts are pruned to 3 releases and 2 dependency trees
+  (~400 MB, steady), and logs are rotated. If media ever does move to local disk, revisit both
+  this cap and the alarm.
 - **No backups exist yet.** Set RDS retention ≥ 7 days, confirm PITR, and the acceptance test
   is a **restore**, not a snapshot.
 - `/home/ubuntu/zuno-pilot-server` (the pre-TypeScript deploy) is archived, not deleted, until
