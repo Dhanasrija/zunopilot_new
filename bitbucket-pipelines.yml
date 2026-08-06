@@ -154,7 +154,8 @@ definitions:
     # ── deploy ───────────────────────────────────────────────────────────────
     - step: &deploy
         name: deploy to production
-        # The node image has no rsync or ssh client.
+        # For the ssh client, which the node image does not carry. Note it has no rsync
+        # either — deploy.sh streams the bundles with tar over ssh rather than assume one.
         image: atlassian/default-image:4
         deployment: production
         trigger: manual
