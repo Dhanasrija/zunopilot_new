@@ -243,6 +243,73 @@ const rememberBuyerTaxDetails = async (
   return tenant?.gstStateCode ?? null;
 };
 
+/**
+ * Refuse to take money without the details the invoice legally needs.
+ *
+ * A GST tax invoice must name a place of supply, and the buyer's state is what decides whether
+ * the tax is CGST+SGST or IGST. Neither was ever required: `checkoutSchema` marked `gstin` and
+ * `gstStateCode` optional, the Billing page collected no address at all, and so every invoice
+ * would have been issued with `placeOfSupply: null` and the inter-state default — charging IGST
+ * to a buyer in the seller's own state. The total would have been right and the tax heads wrong,
+ * in the seller's GSTR-1 and in the buyer's input credit.
+ *
+ * That is not recoverable after the fact. Invoices here are deliberately immutable and cannot be
+ * regenerated from anything else in the system, so the only place to catch it is before the
+ * charge. Hence a refusal rather than a warning.
+ *
+ * **GSTIN stays optional.** A customer without a GST registration is an ordinary customer; only
+ * the state is needed, because only the state changes the split. When a GSTIN *is* given its
+ * first two digits win over the typed state — the registration is the authority on where a
+ * business is.
+ *
+ * Called on both paths that can result in a charge. A gate on checkout alone would be bypassed
+ * by anyone who signed up on the free allowance and then changed plan.
+ */
+const assertBillableIdentity = async (tenantId: string): Promise<void> => {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: {
+      gstStateCode: true,
+      billingAddressLine1: true,
+      billingCity: true,
+      billingPostalCode: true,
+      billingCountry: true,
+    },
+  });
+  if (!tenant) throw ApiError.badRequest('Workspace not found');
+
+  /*
+   * The state is required **only when we are actually charging tax**, and that condition is
+   * load-bearing rather than a nicety.
+   *
+   * `getTaxDetails` returns `gst: null` when the seller has no GSTIN, and the Billing form hides
+   * the state selector in exactly that case — correctly, since with no tax there is no place of
+   * supply to record. Demanding the state unconditionally therefore asks for a value the UI never
+   * offers, and checkout deadlocks: refused forever, with no field on the page that could satisfy
+   * it. The first version of this function did precisely that.
+   *
+   * The address itself is always required. It appears on every invoice, taxable or not.
+   */
+  const taxable = sellerTaxIdentity().registered;
+
+  const missing = [
+    !tenant.billingAddressLine1 && 'address',
+    !tenant.billingCity && 'city',
+    !tenant.billingPostalCode && 'postal code',
+    !tenant.billingCountry && 'country',
+    taxable && !tenant.gstStateCode && 'state',
+  ].filter(Boolean) as string[];
+
+  if (missing.length) {
+    // A specific code, not just a message: the Billing page opens its address step on this
+    // rather than string-matching a sentence that will be reworded eventually.
+    throw ApiError.unprocessable(
+      `Add your billing ${missing.join(', ')} before paying — it goes on the GST invoice.`,
+      { code: 'BILLING_ADDRESS_REQUIRED', missing },
+    );
+  }
+};
+
 const taxDetailsSchema = z.object({
   /** Empty string clears it — a workspace can stop being registered. */
   gstin: z.string().trim().max(20),
@@ -365,6 +432,9 @@ export const startCheckout = asyncHandler(async (req: Request, res: Response) =>
   // already stored when the invoice is issued — possibly by a webhook that
   // arrives while the browser is still on the Razorpay modal.
   const buyerStateCode = await rememberBuyerTaxDetails(tenantId, body);
+  // After persisting whatever this request supplied, not before — the checkout step is
+  // allowed to be the moment the address arrives.
+  await assertBillableIdentity(tenantId);
 
   const planId = razorpayPlanIdFor(body.plan as PlanCode, body.interval as BillingInterval);
 
@@ -710,6 +780,10 @@ export const changePlan = asyncHandler(async (req: Request, res: Response) => {
   if (kind === 'NO_CHANGE') {
     throw ApiError.badRequest('That is already your current plan and billing period.');
   }
+
+  // The same gate as checkout. Without it, anyone who started on the free allowance could reach
+  // a charge through this route with no address on file.
+  await assertBillableIdentity(tenantId);
 
   let price;
   try {

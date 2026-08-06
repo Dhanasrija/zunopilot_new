@@ -1,5 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
+import request from 'supertest';
+import { buildApp } from '../../app.js';
+import { signToken } from '../../utils/jwt.js';
+import { ROLE_PERMISSIONS } from '../../config/permissions.js';
 import { prisma } from '../../config/prisma.js';
 import {
   BILLING_INTERVALS, DISCLOSURES, INTERVAL_META, PLANS, planByCode,
@@ -32,6 +36,9 @@ const TENANT = 'aaaaaaaa-0000-0000-0000-000000000001';
  * without this they leave a wrong price in whatever database the suite ran
  * against. That is not a hypothetical: it put ₹9,999 on the Starter card.
  */
+/** A signed session for the seeded owner, minted in `beforeEach`. */
+let ownerToken = '';
+
 const wipe = async () => {
   await prisma.invoice.deleteMany({ where: { tenantId: TENANT } });
   await prisma.payment.deleteMany({ where: { tenantId: TENANT } });
@@ -41,11 +48,18 @@ const wipe = async () => {
 
 beforeEach(async () => {
   await wipe();
-  await prisma.tenant.create({
+  const tenant = await prisma.tenant.create({
     data: {
       id: TENANT,
       businessName: 'Billing Test Co',
       category: 'RESTAURANT',
+      // An owner role, so the checkout route's `settings:write` is satisfied. Without it the
+      // billing-gate tests below would 403 before ever reaching the gate they are about.
+      roles: {
+        create: [{
+          name: 'Owner', permissions: [...ROLE_PERMISSIONS.OWNER], isOwner: true, isSystem: true,
+        }],
+      },
       users: {
         create: {
           email: 'owner@billingtest.example',
@@ -56,7 +70,13 @@ beforeEach(async () => {
         },
       },
     },
+    include: { roles: true, users: true },
   });
+  await prisma.user.update({
+    where: { id: tenant.users[0]!.id },
+    data: { roleId: tenant.roles[0]!.id },
+  });
+  ownerToken = signToken({ userId: tenant.users[0]!.id });
   await syncPriceCatalogue();
 });
 
@@ -428,6 +448,123 @@ describe('invoicing', () => {
   });
 });
 
+describe('a customer who signed up at the old price keeps it', () => {
+  /*
+   * Grandfathering, asserted rather than assumed.
+   *
+   * The business rule: raising a price must never reprice an existing subscriber. The tests
+   * above prove an *issued invoice* does not move, which is a different and weaker claim —
+   * it says history is immutable, not that the next renewal charges the old amount.
+   *
+   * Two mechanisms have to hold for that, and only one of them lives in this repository:
+   *
+   *   1. Here. `Subscription.priceId` pins a specific `Price` row, `syncPriceCatalogue()`
+   *      archives and inserts rather than editing, and `activePrice()` — the only way an
+   *      amount enters a payment — is called on checkout and on an explicit plan change, and
+   *      nowhere else. Nothing re-prices a subscription in the background.
+   *   2. Razorpay. A subscription is bound to the `razorpay_plan_id` it was created with, so
+   *      new plan ids do not touch existing subscriptions. Not testable from here, which is
+   *      exactly why the mechanism on this side is worth pinning down.
+   */
+
+  /** Put a tenant on the current Starter Quarterly price, as checkout would. */
+  const subscribeAtCurrentPrice = async () => {
+    const price = await activePrice('STARTER', 'QUARTERLY');
+    await prisma.subscription.create({
+      data: {
+        tenantId: TENANT,
+        plan: 'STARTER',
+        interval: 'QUARTERLY',
+        status: 'ACTIVE',
+        priceId: price.id,
+        razorpaySubscriptionId: 'sub_existing_customer',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 90 * 86_400_000),
+      },
+    });
+    return price;
+  };
+
+  /** Raise Starter Quarterly the way an operator would: edit the catalogue, re-run the sync. */
+  const raiseStarterQuarterlyTo = async (amountPaise: number) => {
+    const starter = PLANS.find((p) => p.code === 'STARTER')!;
+    const original = starter.prices.QUARTERLY;
+    starter.prices.QUARTERLY = amountPaise;
+    try {
+      await syncPriceCatalogue();
+    } finally {
+      starter.prices.QUARTERLY = original;
+    }
+  };
+
+  it('**still points at the price they agreed to after a rise**', async () => {
+    const signedUpAt = await subscribeAtCurrentPrice();
+    await raiseStarterQuarterlyTo(399_900);
+
+    const subscription = await prisma.subscription.findUniqueOrThrow({
+      where: { tenantId: TENANT },
+      include: { price: true },
+    });
+
+    expect(subscription.priceId).toBe(signedUpAt.id);
+    expect(subscription.price?.amountPaise).toBe(269_900);
+  });
+
+  it('keeps the old row readable rather than deleting it', async () => {
+    // Archiving, not deleting. A subscription pointing at a row that no longer exists would
+    // either break the foreign key or lose the amount — and the amount is the agreement.
+    const signedUpAt = await subscribeAtCurrentPrice();
+    await raiseStarterQuarterlyTo(399_900);
+
+    const old = await prisma.price.findUniqueOrThrow({ where: { id: signedUpAt.id } });
+    expect(old.amountPaise).toBe(269_900);
+    expect(old.archivedAt).not.toBeNull();
+  });
+
+  it('quotes the NEW price to somebody signing up today', async () => {
+    // The other half. Grandfathering that also froze the price for new customers would just
+    // be a price change that does not work.
+    await subscribeAtCurrentPrice();
+    await raiseStarterQuarterlyTo(399_900);
+
+    const today = await activePrice('STARTER', 'QUARTERLY');
+    expect(today.amountPaise).toBe(399_900);
+    expect(today.archivedAt).toBeNull();
+  });
+
+  it('**is not repriced by running the sync repeatedly**', async () => {
+    // The sync runs on deploy. If it were the thing that moved subscribers onto new prices,
+    // grandfathering would last exactly until the next release.
+    const signedUpAt = await subscribeAtCurrentPrice();
+    await raiseStarterQuarterlyTo(399_900);
+    await syncPriceCatalogue();
+    await syncPriceCatalogue();
+
+    const subscription = await prisma.subscription.findUniqueOrThrow({
+      where: { tenantId: TENANT },
+      include: { price: true },
+    });
+    expect(subscription.price?.amountPaise).toBe(269_900);
+  });
+
+  it('moves them to today’s price only when they choose a different plan', async () => {
+    /*
+     * The deliberate exception, and the one worth knowing about commercially: `changePlan`
+     * calls `activePrice()`, so a customer who switches plan or billing interval is quoted
+     * today's rate for what they are moving to. Their old price was for the old plan.
+     *
+     * The practical consequence: a long-standing customer on a cheap Growth Monthly who moves
+     * to Growth Yearly does NOT carry the old rate across. If that is ever not what you want,
+     * this is the test that will fail and tell you where to look.
+     */
+    await subscribeAtCurrentPrice();
+    await raiseStarterQuarterlyTo(399_900);
+
+    const quotedOnChange = await activePrice('STARTER', 'QUARTERLY');
+    expect(quotedOnChange.amountPaise).toBe(399_900);
+  });
+});
+
 describe('changing plan mid-period', () => {
   const march = (day: number) => new Date(Date.UTC(2026, 2, day));
 
@@ -736,5 +873,129 @@ describe('AI overage', () => {
     });
     expect(second.overagePaise).toBe(0);
     expect(second.totalPaise).toBe(price.amountPaise);
+  });
+});
+
+describe('nobody pays without the details the invoice legally needs', () => {
+  /*
+   * A GST tax invoice must name a place of supply, and the buyer's state decides CGST+SGST
+   * versus IGST. Neither was ever required: `checkoutSchema` marked both optional, the Billing
+   * page collected no address at all, and the frontend sent only `{ plan, interval }`.
+   *
+   * So every invoice would have been issued with `placeOfSupply: null`, and a buyer in the
+   * seller's own state charged IGST instead of CGST+SGST — right total, wrong tax heads, wrong
+   * in the seller's GSTR-1 and in the buyer's input credit. Invoices here are deliberately
+   * immutable and cannot be regenerated, so the only place to catch it is before the charge.
+   */
+
+  const withAddress = (over: Record<string, string | null> = {}) => prisma.tenant.update({
+    where: { id: TENANT },
+    data: {
+      billingAddressLine1: '12 Road No. 36, Jubilee Hills',
+      billingCity: 'Hyderabad',
+      billingPostalCode: '500033',
+      billingCountry: 'IN',
+      gstStateCode: '36',
+      ...over,
+    },
+  });
+
+  /**
+   * Attempt a real checkout over HTTP.
+   *
+   * Through the Express app rather than by calling the handler with a fake `req`: `tenantIdOf`
+   * reads `req.tenantId`, which the auth middleware sets, so a hand-rolled request object only
+   * ever produces a 401 and proves nothing about the gate. This also exercises the permission
+   * and the rate limiter that sit in front of it.
+   */
+  const attemptCheckout = () => request(buildApp())
+    .post('/api/billing/checkout')
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ plan: 'STARTER', interval: 'QUARTERLY' });
+
+  it('**refuses checkout when no billing address has ever been given**', async () => {
+    // The state this bug shipped in: a brand-new workspace, nothing captured, straight to pay.
+    const res = await attemptCheckout();
+    expect(res.status).toBe(422);
+    expect(res.body.details.code).toBe('BILLING_ADDRESS_REQUIRED');
+  });
+
+  it('names every field that is missing, so the form can ask once', async () => {
+    // Refusing five times in a row, one field at a time, is worse than not refusing at all.
+    const res = await attemptCheckout();
+    expect(res.body.details.missing).toEqual(['address', 'city', 'postal code', 'country', 'state']);
+  });
+
+  it('**refuses when the address is complete but the state is not**', async () => {
+    /*
+     * The case that makes this more than a form-validation nicety. A full postal address with
+     * no `gstStateCode` looks complete to a human and is useless to the invoice: the state is
+     * the only field that decides the tax split, and the address block has no state of its own.
+     */
+    await withAddress({ gstStateCode: null });
+    const res = await attemptCheckout();
+    expect(res.status).toBe(422);
+    expect(res.body.details).toMatchObject({ code: 'BILLING_ADDRESS_REQUIRED', missing: ['state'] });
+  });
+
+  it('refuses on each individually missing field', async () => {
+    const cases: Array<[string, Record<string, string | null>]> = [
+      ['address', { billingAddressLine1: null }],
+      ['city', { billingCity: null }],
+      ['postal code', { billingPostalCode: null }],
+      ['country', { billingCountry: null }],
+    ];
+    for (const [label, clear] of cases) {
+      // eslint-disable-next-line no-await-in-loop
+      await withAddress(clear);
+      // eslint-disable-next-line no-await-in-loop
+      const res = await attemptCheckout();
+      expect(res.body.details?.missing, `missing ${label}`).toEqual([label]);
+    }
+  });
+
+  it('**does not require a GSTIN** — an unregistered business is an ordinary customer', async () => {
+    /*
+     * Deliberate. Only the state changes the tax split; a GSTIN does not. Requiring one would
+     * turn away every small business that is not registered, which is a real part of the market.
+     * The address is set here and `gstin` left null, and the refusal must not fire.
+     */
+    await withAddress({ gstin: null });
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT } });
+    expect(tenant.gstin).toBeNull();
+    // Gets past the identity gate. It still fails afterwards, on Razorpay not being configured
+    // under test — a different error, which is exactly what proves the gate let it through.
+    const res = await attemptCheckout();
+    expect(res.body.details?.code).not.toBe('BILLING_ADDRESS_REQUIRED');
+  });
+
+  it('**does not demand a state when the seller charges no tax**', async () => {
+    /*
+     * The deadlock this nearly shipped with.
+     *
+     * `getTaxDetails` returns `gst: null` for a seller with no GSTIN, and the Billing form hides
+     * the state selector in that case — there is no place of supply to record when no tax is
+     * charged. An unconditional state requirement would then be unsatisfiable: refused forever,
+     * with no field anywhere on the page that could clear it.
+     *
+     * Skipped rather than faked when the test environment *is* registered, because the seller
+     * identity is read from the process environment and rewriting it here would make the rest of
+     * the suite depend on the order tests ran in.
+     */
+    const { sellerTaxIdentity } = await import('./gst.js');
+    if (sellerTaxIdentity().registered) {
+      expect(sellerTaxIdentity().stateCode).toBeTruthy();
+      return;
+    }
+
+    await withAddress({ gstStateCode: null });
+    const res = await attemptCheckout();
+    expect(res.body.details?.missing ?? []).not.toContain('state');
+  });
+
+  it('lets a complete address through', async () => {
+    await withAddress();
+    const res = await attemptCheckout();
+    expect(res.body.details?.code).not.toBe('BILLING_ADDRESS_REQUIRED');
   });
 });

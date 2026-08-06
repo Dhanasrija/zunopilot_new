@@ -9,6 +9,8 @@ import {
 } from '@/lib/pricing';
 import { Disclosures, IntervalSwitch, PlanCard } from '@/components/billing/PlanGrid';
 import TaxDetails from '@/components/billing/TaxDetails';
+import { BillingIdentityDialog } from '@/components/billing/BillingIdentityDialog';
+import { isBillable, isBillingAddressError, useBillingIdentity } from '@/components/billing/billing-identity';
 import SupportAccess from '@/components/billing/SupportAccess';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -102,6 +104,37 @@ export default function Billing() {
   const [interval, setInterval] = useState<BillingInterval>('QUARTERLY');
   const [choosing, setChoosing] = useState<PlanCode | null>(null);
 
+  /*
+   * The address step, between choosing a plan and paying.
+   *
+   * The server refuses a checkout without a billing address and — when tax is charged — a state,
+   * because a GST invoice must name a place of supply. Rather than let someone meet that 422
+   * with their card out, the plan choice is held here while the details are collected, then
+   * resumed automatically.
+   *
+   * `pendingChoice` is what makes it a step rather than a detour: the plan they clicked is
+   * remembered, so saving the address continues to payment instead of returning them to the grid
+   * to click it again.
+   */
+  const billingIdentity = useBillingIdentity();
+  const [pendingChoice, setPendingChoice] = useState<{ plan: PlanCode; interval: BillingInterval } | null>(null);
+
+  const startChange = (plan: PlanCode, chosen: BillingInterval) => {
+    setChoosing(plan);
+    changePlan.mutate({ plan, billingInterval: chosen });
+  };
+
+  const choosePlan = (plan: PlanCode, chosen: BillingInterval) => {
+    // Ask first when we already know something is missing. `isBillable` mirrors the server's
+    // rule; if the two ever disagree the 422 handler below opens the same dialog anyway, so the
+    // mismatch costs a round trip rather than correctness.
+    if (!isBillable(billingIdentity.data)) {
+      setPendingChoice({ plan, interval: chosen });
+      return;
+    }
+    startChange(plan, chosen);
+  };
+
   // Quarterly is the default, and it comes from the server rather than being
   // hardcoded in two places.
   useEffect(() => {
@@ -150,7 +183,14 @@ export default function Billing() {
       }
       qc.invalidateQueries({ queryKey: ['billing', 'subscription'] });
     },
-    onError: (err: Error) => {
+    onError: (err: Error, variables) => {
+      // The backstop for the pre-check in `choosePlan`. If the server refuses for want of an
+      // address — a stale cache, or another tab that changed it — open the same step and keep
+      // the plan they chose, rather than leaving a toast and a grid to click through again.
+      if (isBillingAddressError(err)) {
+        setPendingChoice({ plan: variables.plan, interval: variables.billingInterval });
+        return;
+      }
       if (err.message !== 'Payment cancelled') toast.error(err.message);
     },
     onSettled: () => setChoosing(null),
@@ -429,6 +469,23 @@ export default function Billing() {
 
         <TaxDetails canManage={manage} />
 
+        {/*
+          The address step. Rendered once at page level rather than per plan card, because it is
+          one dialog whose subject is `pendingChoice` — not fourteen of them.
+        */}
+        <BillingIdentityDialog
+          open={pendingChoice !== null}
+          onOpenChange={(next) => { if (!next) setPendingChoice(null); }}
+          canManage={manage}
+          onComplete={() => {
+            const resume = pendingChoice;
+            setPendingChoice(null);
+            // Straight on to payment. Saving the address was a step in buying something, not an
+            // errand — sending them back to the grid to find the plan again would make it one.
+            if (resume) startChange(resume.plan, resume.interval);
+          }}
+        />
+
         <SupportAccess />
 
         <Card className="lg:col-span-2">
@@ -501,10 +558,7 @@ export default function Billing() {
               busy={choosing === plan.code}
               currentInterval={subscription?.interval ?? null}
               pendingPlan={subscription?.pendingChange ?? null}
-              onChoose={manage ? (code, chosen) => {
-                setChoosing(code);
-                changePlan.mutate({ plan: code, billingInterval: chosen });
-              } : undefined}
+              onChoose={manage ? (code, chosen) => choosePlan(code, chosen) : undefined}
               onContactSales={() => {
                 window.location.href = 'mailto:sales@zunopilot.com?subject=Enterprise%20plan';
               }}
