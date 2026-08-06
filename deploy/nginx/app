@@ -27,7 +27,8 @@ server {
 
 # ── The customer app ─────────────────────────────────────────────────────────
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name zunopilot.com www.zunopilot.com;
 
     ssl_certificate     /etc/letsencrypt/live/zunopilot.com/fullchain.pem;
@@ -106,7 +107,8 @@ server {
 # Kept even though the app now calls /api same-origin: Meta's webhook target, Razorpay's, and
 # the absolute media URLs built from APP_URL all resolve here.
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name api.zunopilot.com;
 
     ssl_certificate     /etc/letsencrypt/live/zunopilot.com/fullchain.pem;
