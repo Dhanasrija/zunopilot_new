@@ -59,6 +59,25 @@ const base = {
   kill_timeout: 15000,
   time: true,
   merge_logs: true,
+
+  /**
+   * Trust the AWS RDS certificate authority.
+   *
+   * Prisma verifies RDS fine on its own, but pg-boss goes through node-postgres, and newer
+   * node-postgres treats `sslmode=require` as verify-the-chain rather than just encrypt. The
+   * RDS CA is not in the system trust store, so the conversation-engine workers died at boot
+   * with `self-signed certificate in certificate chain` — the API stayed up and healthy while
+   * every inbound WhatsApp message queued and was never processed.
+   *
+   * Passing `sslrootcert` in the connection string does not help: pg-boss builds its own pool
+   * options and drops it. This is the fix that keeps verification ON rather than turning it
+   * off — Node reads it at startup, which is also why it must come from pm2 and not from
+   * `.env` (dotenv runs long after the TLS context is built).
+   *
+   * Bundle installed by hand: /etc/ssl/rds/global-bundle.pem (108 certificates).
+   */
+  env: { NODE_EXTRA_CA_CERTS: '/etc/ssl/rds/global-bundle.pem' },
+
 };
 
 module.exports = {
@@ -67,7 +86,7 @@ module.exports = {
       ...base,
       name: 'zunopilot-api',
       args: 'src/server.ts',
-      env: { NODE_OPTIONS: '--max-old-space-size=768' },
+      env: { ...base.env, NODE_OPTIONS: '--max-old-space-size=768' },
       // Recycle before the kernel's OOM killer has to choose a victim — on a shared box it is
       // as likely to pick nginx as node.
       max_memory_restart: '1000M',
@@ -80,7 +99,7 @@ module.exports = {
       // Deliberately starts no workers, and serves a handful of operators rather than every
       // tenant's traffic — so it gets a much smaller share.
       args: 'src/superadmin-server.ts',
-      env: { NODE_OPTIONS: '--max-old-space-size=256' },
+      env: { ...base.env, NODE_OPTIONS: '--max-old-space-size=256' },
       max_memory_restart: '384M',
       out_file: '/var/log/zunopilot/sa.out.log',
       error_file: '/var/log/zunopilot/sa.err.log',

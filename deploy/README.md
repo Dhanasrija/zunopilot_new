@@ -49,6 +49,24 @@ sudo mkdir -p /var/lib/zunopilot/media /var/log/zunopilot /var/www/certbot
 sudo chown -R ubuntu:ubuntu /srv/zunopilot /var/lib/zunopilot /var/log/zunopilot
 ```
 
+**The RDS certificate authority.** Required, not optional:
+
+```bash
+sudo mkdir -p /etc/ssl/rds
+sudo curl -fsS -o /etc/ssl/rds/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+Prisma verifies RDS on its own, but pg-boss goes through node-postgres, which now treats
+`sslmode=require` as *verify the chain*. Without this bundle the conversation-engine workers
+die at boot with `self-signed certificate in certificate chain` — while `/health` stays green,
+because the API and the queue use different drivers. Every inbound WhatsApp message would
+queue and never be processed, with nothing failing loudly.
+
+`NODE_EXTRA_CA_CERTS` in `ecosystem.config.cjs` is what loads it. Putting it in `.env` does
+not work: Node reads that variable at startup, long before dotenv runs. Passing `sslrootcert`
+in the connection string does not work either — pg-boss builds its own pool options and drops
+it. Adding the CA is the fix; disabling verification is not.
+
 **Secrets never enter Bitbucket.** Copy `backend/.env.prod` by hand, once:
 
 ```bash
