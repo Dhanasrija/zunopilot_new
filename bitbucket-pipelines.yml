@@ -142,7 +142,7 @@ definitions:
           - >
             tar -czf backend-src.tgz
             backend/src backend/prisma backend/package.json backend/package-lock.json
-            backend/tsconfig.json backend/ecosystem.config.cjs
+            backend/tsconfig.json backend/ecosystem.config.cjs backend/pm2-exec.sh
           # Content address for the runtime tree, so a deploy that changes no dependency skips
           # re-uploading ~65 MB.
           - cat backend/package-lock.json backend/prisma/schema.prisma | sha256sum | cut -c1-16 > deps.sha

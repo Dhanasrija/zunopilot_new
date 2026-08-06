@@ -132,7 +132,12 @@ say "5/9  carrying previous assets forward"
 say "6/9  prisma migrate deploy"
 "${SSH[@]}" "cd ${ROOT}/backend/releases/${REL} && ./node_modules/.bin/prisma migrate deploy"
 
-PREV="$("${SSH[@]}" "readlink -f ${ROOT}/backend/current 2>/dev/null || true")"
+# `test -L` first. `readlink -f` on a path that does not exist still PRINTS that path, so on
+# the very first deploy this came back as `/srv/zunopilot/backend/current` — its own location.
+# The revert below then pointed `current` at itself, and every command after it died with
+# ELOOP: "Too many levels of symbolic links". A rollback that wedges the release pointer is
+# worse than no rollback at all.
+PREV="$("${SSH[@]}" "test -L ${ROOT}/backend/current && readlink -f ${ROOT}/backend/current || true")"
 
 # `mv -Tf` is rename(2) and atomic. `ln -sfn` over an existing symlink is unlink-then-symlink,
 # which leaves a window where `current` does not exist — nginx 404s into it.
@@ -172,9 +177,15 @@ if ! "${SSH[@]}" "
     for i in \$(seq 1 40); do healthy && exit 0; sleep 2; done
     exit 1"; then
   echo
-  echo "UNHEALTHY after 80s — reverting to ${PREV:-<none>}"
+  echo "UNHEALTHY after 80s"
   echo "NOTE: the migration is NOT reverted. Additive migrations are safe to leave applied."
-  if [ -n "${PREV}" ]; then
+  # Belt as well as braces: never point `current` at the release that just failed, and never
+  # at itself. On a first deploy there is simply nothing to go back to — say so and leave the
+  # pointer alone rather than inventing a target.
+  if [ -z "${PREV}" ] || [ "${PREV}" = "${ROOT}/backend/releases/${REL}" ] \
+     || [ "${PREV}" = "${ROOT}/backend/current" ]; then
+    echo "No previous release to revert to. Leaving current where it is; fix forward."
+  else
     "${SSH[@]}" "set -e
       ln -sfn ${PREV} ${ROOT}/backend/current.new
       mv -Tf  ${ROOT}/backend/current.new ${ROOT}/backend/current
