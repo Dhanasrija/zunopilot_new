@@ -31,6 +31,25 @@ ROOT=/srv/zunopilot
 # not be silently trusted.
 SSH=(ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${USER}@${HOST}")
 
+# Optional: restrict pm2 to one app. Set DEPLOY_ONLY=zunopilot-sa in the Bitbucket deployment
+# variables for the canary.
+#
+# The canary exists because port 4000 is not free until the cutover — the pre-TypeScript root
+# pm2 `server` still owns it. Starting `zunopilot-api` before then can only EADDRINUSE. Port
+# 4001 has never been used, so the superadmin process can be deployed against production for
+# real, and it proves the parts that are genuinely unproven: tsx under pm2, signal handling,
+# the shared .env, RDS reachability, the /sa proxy, and this script end to end.
+#
+# Static files are unaffected either way — they are swapped by symlink and nginx does not point
+# at them yet.
+ONLY="${DEPLOY_ONLY:-}"
+case "${ONLY}" in
+  '')             PM2_ONLY='';                HEALTH_PORTS='4000 4001'; HEALTH_APPS='zunopilot-api zunopilot-sa' ;;
+  zunopilot-sa)   PM2_ONLY='--only zunopilot-sa';  HEALTH_PORTS='4001';      HEALTH_APPS='zunopilot-sa' ;;
+  zunopilot-api)  PM2_ONLY='--only zunopilot-api'; HEALTH_PORTS='4000';      HEALTH_APPS='zunopilot-api' ;;
+  *) echo "DEPLOY_ONLY must be empty, zunopilot-sa or zunopilot-api (got '${ONLY}')"; exit 1 ;;
+esac
+
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 say "1/9  static bundles -> releases/${REL}"
@@ -95,16 +114,34 @@ say "7/9  atomic swap"
     mv -Tf  ${ROOT}/\$app/current.new     ${ROOT}/\$app/current
   done"
 
-say "8/9  restart and health gate"
-"${SSH[@]}" "cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env && pm2 save"
+say "8/9  restart and health gate${ONLY:+  (only ${ONLY})}"
+"${SSH[@]}" "cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env ${PM2_ONLY} && pm2 save"
 
-# /health on 4000 runs SELECT 1 and returns 503 on a dead pool, so this genuinely proves the
-# app reached the database rather than merely bound a port.
-if ! "${SSH[@]}" "for i in \$(seq 1 40); do
-      if curl -fsS -m 3 localhost:4000/health >/dev/null 2>&1 &&
-         curl -fsS -m 3 localhost:4001/health >/dev/null 2>&1; then exit 0; fi
-      sleep 2
-    done; exit 1"; then
+# Two independent checks, because either one alone can lie.
+#
+# `/health` runs SELECT 1 and 503s on a dead pool, so it proves the app reached the database
+# rather than merely bound a port. But it CANNOT prove *which* process answered. Until the
+# cutover, the pre-TypeScript root pm2 `server` still owns 4000 — so a new API that dies on
+# EADDRINUSE leaves the old one answering 200 and the deploy goes green over a corpse.
+#
+# So also ask pm2 whether the processes this deploy started are actually online. A crash loop
+# shows as `errored`, or as `online` with restart_time climbing between the two samples.
+if ! "${SSH[@]}" "
+    healthy() {
+      for p in ${HEALTH_PORTS}; do
+        curl -fsS -m 3 localhost:\$p/health >/dev/null 2>&1 || return 1
+      done
+      for a in ${HEALTH_APPS}; do
+        pm2 jlist 2>/dev/null | node -e '
+          let s=\"\"; process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{
+            const app=(JSON.parse(s||\"[]\")).find(x=>x.name===process.argv[1]);
+            process.exit(app && app.pm2_env.status===\"online\" ? 0 : 1);
+          });' \$a || return 1
+      done
+      return 0
+    }
+    for i in \$(seq 1 40); do healthy && exit 0; sleep 2; done
+    exit 1"; then
   echo
   echo "UNHEALTHY after 80s — reverting to ${PREV:-<none>}"
   echo "NOTE: the migration is NOT reverted. Additive migrations are safe to leave applied."
@@ -112,9 +149,9 @@ if ! "${SSH[@]}" "for i in \$(seq 1 40); do
     "${SSH[@]}" "set -e
       ln -sfn ${PREV} ${ROOT}/backend/current.new
       mv -Tf  ${ROOT}/backend/current.new ${ROOT}/backend/current
-      cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env"
+      cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env ${PM2_ONLY}"
   fi
-  "${SSH[@]}" "pm2 logs --nostream --lines 40 --raw" || true
+  "${SSH[@]}" "pm2 logs --nostream --lines 40 --raw ${ONLY}" || true
   exit 1
 fi
 

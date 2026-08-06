@@ -77,6 +77,8 @@ process). `copytruncate`, because pm2 keeps the fd open:
   `deploy.sh` uses `StrictHostKeyChecking=yes` on purpose — a changed host key should stop the
   deploy, not be trusted silently.
 - **Deployment variables** (environment `production`): `DEPLOY_HOST`, `DEPLOY_USER=ubuntu`.
+  Optionally `DEPLOY_ONLY=zunopilot-sa` for the canary — see below. Remove it before the
+  cutover, or the API will never be deployed.
 - **Never define a variable named `VITE_API_BASE_URL`.** Vite reads `VITE_*` from the
   environment, so it would be baked into the bundle and silently undo the same-origin
   decision — adding a CORS preflight to every authenticated request. The frontend step fails
@@ -101,9 +103,16 @@ Full ordering, rollback points and the maintenance-window script are in the appr
 1. Preflight and **the first backups this system has ever had** — `pg_dump appdb`, tar
    `/etc/nginx`, `/etc/letsencrypt`, `~root/.pm2/dump.pm2`. Download them.
 2. `ops.zunopilot.com` TLS (`nginx/ops`, two-phase). Re-check the tunnel.
-3. **Canary: deploy the superadmin process only.** Port 4001 is free, so this cannot touch the
-   live API — and it proves tsx-under-pm2 signal handling, the shared `.env`, RDS
-   reachability, the `/sa` proxy and the whole deploy script, for free.
+3. **Canary: deploy the superadmin process only** — set `DEPLOY_ONLY=zunopilot-sa` and run the
+   deploy step. Port 4001 is free, so this cannot touch the live API, and it proves
+   tsx-under-pm2 signal handling, the shared `.env`, RDS reachability, the `/sa` proxy and the
+   whole deploy script, for free.
+
+   **Do not run a full deploy before the cutover.** Port 4000 belongs to the old root pm2
+   `server` until then, so `zunopilot-api` can only `EADDRINUSE`. The health gate polls
+   `/health` *and* asks pm2 whether the processes it started are `online`, precisely because
+   curl alone cannot tell which process answered — the old one returns 200 on 4000 and would
+   have made a crash-looping deploy look green.
 4. Rehearse the `appdb` → RDS restore into a scratch RDS database. `pg_restore -e`
    (**`--exit-on-error`** — without it a partial restore exits 0 and you go live on a database
    quietly missing rows).
