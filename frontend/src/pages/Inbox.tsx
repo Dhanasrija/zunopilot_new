@@ -2,85 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { cn, formatDateTime } from '@/lib/utils';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
 import { useAuthStore, useHasModule } from '@/stores/auth.store';
-import {
-  Bot, LifeBuoy,
-} from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { PRIORITY_LABEL, TICKET_PRIORITIES, type TicketPriority } from '@/lib/tickets';
+import { ConversationList } from '@/components/inbox/ConversationList';
+import { ThreadHeader } from '@/components/inbox/ThreadHeader';
+import { MessageBubble } from '@/components/inbox/MessageBubble';
+import { Composer } from '@/components/inbox/Composer';
+import {
+  displayName, type Conversation, type Message, type Scope, type TeamMember,
+} from '@/components/inbox/types';
 
-interface Conversation {
-  id: string;
-  status: string;
-  automationPaused: boolean;
-  unreadCount: number;
-  lastMessageAt: string | null;
-  customer: { id: string; name?: string; waId: string };
-  assignedAgent?: { id: string; fullName: string; email: string } | null;
-  /**
-   * The workflow occupying this conversation, if one is.
-   *
-   * A conversation holds one active instance at a time, and while it does the router refuses
-   * every inbound message with `ACTIVE_WORKFLOW_BUSY`. `PAUSED` is the state a handoff node
-   * leaves behind — the flow has given up control and is waiting for a human, so it will sit
-   * there forever and the bot can never answer again until somebody clears it.
-   */
-  activeWorkflowInstance?: {
-    id: string;
-    status: string;
-    currentNodeId: string | null;
-    workflow: { name: string };
-  } | null;
-}
-
-type Scope = 'all' | 'mine' | 'unassigned';
-
-interface TeamMember { id: string; fullName: string; role: string; isActive: boolean }
-
-interface Message {
-  id: string;
-  direction: 'INBOUND' | 'OUTBOUND';
-  type: string;
-  body?: string | null;
-  payload?: unknown;
-  createdAt: string;
-  /**
-   * Who sent it. Null on an OUTBOUND message means the bot — the workflow
-   * engine or the assistant — which is exactly what a shared inbox has to make
-   * visible: a colleague's reply, your own, and an automated one all look
-   * identical without it.
-   */
-  sentByUser?: { id: string; fullName: string; role: string } | null;
-}
-
-interface OfferedOption { id: string; title: string }
-
-/**
- * The rows or buttons an outbound interactive message offered.
- *
- * Written by the engine's inbox mirror under `payload.outbound`. Read
- * defensively — `payload` also carries Meta's own inbound shapes, which this
- * must never try to interpret.
- */
-const outboundOptions = (message: Message): OfferedOption[] => {
-  const outbound = (message.payload as { outbound?: { options?: unknown } } | null)?.outbound;
-  if (!outbound || !Array.isArray(outbound.options)) return [];
-  return outbound.options.filter(
-    (o): o is OfferedOption => !!o && typeof (o as OfferedOption).title === 'string',
-  );
-};
+// The inbox page: state, queries and mutations. Everything that draws is in
+// `components/inbox/` — this file was 574 lines with the list rows, the header, the bubbles
+// and the composer all inlined, which is why two colour systems had been living in it side by
+// side (shadcn aliases on the scope tabs, brand tokens three lines below on the assignment
+// pills).
 
 /**
  * Raise a support ticket from the conversation the agent is already reading.
@@ -128,7 +74,7 @@ function RaiseFromConversation({ conversationId, customerName, open, onOpenChang
             <Label htmlFor="ib-priority">Priority</Label>
             <select
               id="ib-priority"
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              className="h-9 rounded-md border border-ink-400 bg-surface-1 px-2 text-sm text-ink-900"
               value={priority}
               onChange={(e) => setPriority(e.target.value as TicketPriority)}
             >
@@ -137,7 +83,7 @@ function RaiseFromConversation({ conversationId, customerName, open, onOpenChang
               ))}
             </select>
           </div>
-          <p className="text-caption text-muted-foreground">
+          <p className="text-caption text-ink-500">
             Linked to this conversation, so replies from the ticket reach them on
             WhatsApp.
           </p>
@@ -316,258 +262,79 @@ export default function Inbox() {
 
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100vh-var(--shell-offset))]">
-      {/* Page header */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div>
-          <h1 className="text-h2 font-semibold">Inbox</h1>
-          <p className="text-sm text-muted-foreground">Manage your WhatsApp conversations in real-time.</p>
-        </div>
+      <div className="shrink-0">
+        <h1 className="text-h2 font-semibold text-ink-900">Inbox</h1>
+        <p className="text-sm text-ink-500">Manage your WhatsApp conversations in real-time.</p>
       </div>
 
-      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
-      <Card className="col-span-4 flex flex-col min-h-0">
-        <CardHeader className="px-3 py-3 border-b shrink-0 space-y-2">
-          <CardTitle className="text-sm font-semibold">Conversations</CardTitle>
-          {/*
-            One queue, three views. "Unassigned" is the shared pool an agent
-            works from — without it, picking up what nobody has claimed means
-            visually scanning the whole list.
-          */}
-          <div className="flex gap-1">
-            {([
-              ['all', 'All'],
-              ['mine', 'Mine'],
-              ['unassigned', 'Unassigned'],
-            ] as Array<[Scope, string]>).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setScope(value)}
-                className={cn(
-                  'rounded-md px-2 py-1 text-caption font-medium transition-colors',
-                  scope === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent',
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-auto p-0">
-          {conversations.data?.length === 0 && (
-            <div className="p-4 text-sm text-muted-foreground">
-              {scope === 'mine' ? 'Nothing assigned to you.'
-                : scope === 'unassigned' ? 'Nothing waiting to be picked up.'
-                  : 'No conversations yet.'}
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
+        <Card className="col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-4">
+          <ConversationList
+            conversations={conversations.data}
+            isLoading={conversations.isLoading}
+            scope={scope}
+            onScopeChange={setScope}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            myId={myId}
+          />
+        </Card>
+
+        <Card className="col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-8">
+          {!conv ? (
+            <div className="grid flex-1 place-items-center p-6 text-sm text-ink-500">
+              Select a conversation
             </div>
-          )}
-          {conversations.data?.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelectedId(c.id)}
-              className={cn('w-full text-left p-3 border-b hover:bg-accent transition-colors', selectedId === c.id && 'bg-accent')}
-            >
-              <div className="flex justify-between items-start">
-                <div className="font-medium">{c.customer.name || c.customer.waId}</div>
-                {c.unreadCount > 0 && <Badge>{c.unreadCount}</Badge>}
-              </div>
-              <div className="text-caption text-muted-foreground mt-1 flex flex-wrap items-center gap-2">
-                {c.lastMessageAt ? formatDateTime(c.lastMessageAt) : 'No messages'}
-                {c.status === 'HUMAN_TAKEOVER' && <Badge variant="destructive" className="text-caption">HUMAN</Badge>}
-                {c.assignedAgent ? (
-                  <span className={cn(
-                    'rounded-full px-1 py-px text-caption',
-                    c.assignedAgent.id === myId ? 'bg-primary/10 text-primary' : 'bg-surface-0 text-ink-700',
-                  )}
-                  >
-                    {c.assignedAgent.id === myId ? 'You' : c.assignedAgent.fullName}
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-warning/15 px-1 py-px text-caption text-ink-900">
-                    Unassigned
-                  </span>
-                )}
-              </div>
-            </button>
-          )) || <div className="p-4 text-sm text-muted-foreground">Loading…</div>}
-        </CardContent>
-      </Card>
-
-      <Card className="col-span-8 flex flex-col min-h-0">
-        {!conv ? (
-          <CardContent className="flex-1 grid place-items-center text-muted-foreground">Select a conversation</CardContent>
-        ) : (
-          <>
-            <CardHeader className="border-b flex flex-row items-center justify-between shrink-0">
-              <div>
-                <CardTitle>{conv.customer.name || conv.customer.waId}</CardTitle>
-                <div className="text-caption text-muted-foreground">{conv.customer.waId}</div>
-              </div>
-              <div className="flex items-center gap-3 text-sm">
-                {/*
-                  Claiming is always allowed; handing to someone else needs
-                  `inbox:assign_others`, because two people silently swapping a
-                  live customer is how they get asked the same question twice.
-                */}
-                {conv.assignedAgent?.id === myId ? (
-                  <Button size="sm" variant="outline" className="h-7 text-caption"
-                    onClick={() => assign.mutate(null)}
-                  >
-                    Release
-                  </Button>
-                ) : !conv.assignedAgent ? (
-                  <Button size="sm" variant="outline" className="h-7 text-caption"
-                    onClick={() => assign.mutate(myId ?? null)}
-                  >
-                    Assign to me
-                  </Button>
-                ) : (
-                  <span className="text-caption text-muted-foreground">
-                    Assigned to <strong>{conv.assignedAgent.fullName}</strong>
-                  </span>
-                )}
-
-                {can('inbox:assign_others') && (
-                  <select
-                    className="h-7 rounded-md border bg-background px-1 text-caption"
-                    value={conv.assignedAgent?.id ?? ''}
-                    onChange={(e) => assign.mutate(e.target.value || null)}
-                  >
-                    <option value="">Unassigned</option>
-                    {(team.data ?? []).filter((m) => m.isActive).map((m) => (
-                      <option key={m.id} value={m.id}>{m.id === myId ? 'Me' : m.fullName}</option>
-                    ))}
-                  </select>
-                )}
-
-                {/*
-                  The bot is blocked. Shown only when something is actually holding the
-                  workflow slot, because the router refuses every inbound message while one
-                  is — and `PAUSED` means a handoff node parked it and nothing will ever move
-                  it on. An agent looking at an unanswered conversation had no way to see
-                  that, which made the handoff a one-way door.
-                */}
-                {conv.activeWorkflowInstance && (
-                  <Button
-                    size="sm"
-                    variant={conv.activeWorkflowInstance.status === 'PAUSED' ? 'default' : 'outline'}
-                    className="h-7 gap-1 text-caption"
-                    disabled={handBackToBot.isPending}
-                    title={conv.activeWorkflowInstance.status === 'PAUSED'
-                      ? `"${conv.activeWorkflowInstance.workflow.name}" handed this conversation to a person and is waiting. The bot cannot reply until it is cleared.`
-                      : `"${conv.activeWorkflowInstance.workflow.name}" is mid-conversation. Handing back cancels it, and the customer's next message starts fresh.`}
-                    onClick={() => {
-                      // A confirm only for a flow still in progress — cancelling that
-                      // abandons a customer mid-question, which is different from clearing
-                      // one that has already given up.
-                      const parked = conv.activeWorkflowInstance?.status === 'PAUSED';
-                      if (parked || window.confirm(
-                        `"${conv.activeWorkflowInstance?.workflow.name}" is still running. Cancel it and let the bot start fresh on the next message?`,
-                      )) {
-                        handBackToBot.mutate();
-                      }
-                    }}
-                  >
-                    <Bot className="h-3 w-3" />
-                    {conv.activeWorkflowInstance.status === 'PAUSED'
-                      ? 'Hand back to the bot'
-                      : 'Cancel the running flow'}
-                  </Button>
-                )}
-
-                {/*
-                  Raising from here rather than from the Support screen is the
-                  point: it carries the `conversationId`, which is what lets the
-                  ticket be replied to on WhatsApp at all. A ticket raised
-                  standalone has nobody to send an update to.
-                */}
-                {hasSupport && can('tickets:write') && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-caption"
-                    onClick={() => setRaisingTicket(true)}
-                  >
-                    <LifeBuoy className="mr-1 h-3 w-3" /> Raise ticket
-                  </Button>
-                )}
-
-                <span className="text-muted-foreground">Automation</span>
-                <Switch
-                  checked={!conv.automationPaused}
-                  onCheckedChange={(v) => toggleAutomation.mutate(!v)}
-                />
-              </div>
+          ) : (
+            <>
+              <ThreadHeader
+                conversation={conv}
+                team={team.data ?? []}
+                myId={myId}
+                canAssignOthers={can('inbox:assign_others')}
+                hasSupport={hasSupport}
+                canRaiseTicket={can('tickets:write')}
+                onAssign={(agentId) => assign.mutate(agentId)}
+                onHandBackToBot={() => handBackToBot.mutate()}
+                handingBack={handBackToBot.isPending}
+                onToggleAutomation={(paused) => toggleAutomation.mutate(paused)}
+                onRaiseTicket={() => setRaisingTicket(true)}
+              />
 
               <RaiseFromConversation
                 conversationId={conv.id}
-                customerName={conv.customer.name || conv.customer.waId}
+                customerName={displayName(conv.customer)}
                 open={raisingTicket}
                 onOpenChange={setRaisingTicket}
               />
-            </CardHeader>
-            <CardContent
-              ref={scrollRef}
-              onScroll={onScroll}
-              className="flex-1 overflow-y-auto min-h-0 space-y-2 py-4 bg-muted/20"
-            >
-              {messages.data?.map((m) => (
-                <div key={m.id} className={cn('max-w-[70%] rounded-lg p-2 px-3 text-sm', m.direction === 'OUTBOUND' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-background border')}>
-                  {/*
-                    Who said this. The whole point of a shared inbox: without it
-                    a colleague's reply, your own and the bot's all look the
-                    same, and nobody can tell whether a customer has already
-                    been answered.
-                  */}
-                  {m.direction === 'OUTBOUND' && (
-                    <div className="mb-px text-caption font-medium text-primary-foreground/70">
-                      {m.sentByUser
-                        ? (m.sentByUser.id === myId ? 'You' : m.sentByUser.fullName)
-                        : 'Bot'}
-                    </div>
-                  )}
-                  <div className="whitespace-pre-wrap">{m.body || `[${m.type}]`}</div>
-                  {/*
-                    The choices a list or button message offered. Without these
-                    the transcript shows the question but not the options, and
-                    the customer's next reply — a row id — looks like it came
-                    from nowhere.
-                  */}
-                  {outboundOptions(m).length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {outboundOptions(m).map((o) => (
-                        <span
-                          key={o.id}
-                          title={o.id}
-                          className={cn(
-                            'rounded-full border px-1 py-px text-caption',
-                            m.direction === 'OUTBOUND'
-                              ? 'border-primary-foreground/30 text-primary-foreground/90'
-                              : 'border-muted-foreground/30 text-muted-foreground',
-                          )}
-                        >
-                          {o.title}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className={cn('text-caption mt-1', m.direction === 'OUTBOUND' ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
-                    {formatDateTime(m.createdAt)}
-                  </div>
+
+              <div
+                ref={scrollRef}
+                onScroll={onScroll}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4"
+              >
+                {/*
+                  `mt-auto` bottom-aligns a thread shorter than the pane, so two messages sit
+                  above the composer instead of stranded at the top with a field of empty
+                  white beneath them. Once the thread overflows, `mt-auto` has no effect and
+                  the scroll behaviour above takes over unchanged.
+                */}
+                <div className="mt-auto space-y-2">
+                  {messages.data
+                    ? messages.data.map((m) => <MessageBubble key={m.id} message={m} myId={myId} />)
+                    : <p className="text-sm text-ink-500">Loading…</p>}
                 </div>
-              )) || <div className="text-sm text-muted-foreground">Loading…</div>}
-            </CardContent>
-            <div className="border-t p-3 flex gap-2 shrink-0">
-              <Input
+              </div>
+
+              <Composer
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Type a reply…"
-                onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) send.mutate(); }}
+                onChange={setDraft}
+                onSend={() => send.mutate()}
+                sending={send.isPending}
               />
-              <Button onClick={() => send.mutate()} disabled={!draft.trim() || send.isPending}>Send</Button>
-            </div>
-          </>
-        )}
-      </Card>
+            </>
+          )}
+        </Card>
       </div>
     </div>
   );

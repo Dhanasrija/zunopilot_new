@@ -15,7 +15,11 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-accent-100 text-accent-700',
+        // The one variant with a visible edge: the palette pairs its purple badge fill with
+        // a purple border, and `accent-100` is light enough that a badge on a white card
+        // otherwise has no shape at all. Decorative — a badge is not a control, so WCAG
+        // 1.4.11's 3:1 does not apply to this line.
+        default: 'border-accent-200 bg-accent-100 text-accent-700',
         secondary: 'border-ink-300 bg-surface-0 text-ink-700',
         destructive: 'border-transparent bg-danger/10 text-danger',
         outline: 'border-ink-300 text-ink-700',

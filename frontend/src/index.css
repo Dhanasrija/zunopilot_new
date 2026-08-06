@@ -18,43 +18,22 @@
 
 @layer base {
   /*
-   * §2.1 — the palette, as OKLCH custom properties.
+   * §2.1's palette is NOT restated here, deliberately.
    *
-   * These duplicate the values in `tailwind.config.js` on purpose: the config
-   * serves the utilities, and these serve anything that reaches a colour from
-   * plain CSS — keyframes, gradients, SVG fills. **The config is the authority.**
-   * If the two ever disagree, this block is the copy that is wrong.
+   * This block used to carry all sixteen colours as custom properties, duplicating
+   * `tailwind.config.js` "on purpose" so plain CSS could reach a colour. In practice
+   * exactly one rule ever did — the focus outline below — and during the 2026-08-06
+   * repalette this copy was missed and sat a full palette out of date, still serving
+   * the old warm surface and the old violet to anything that read it.
    *
-   * §2.3's dark mode is deferred, so there is one set. When it lands it is a
-   * second block under `:root.dark` and nothing else moves.
+   * That was the third such copy found in one afternoon (the contrast script held one
+   * too). A duplicate that nothing reads is invisible when it rots. So: the config is
+   * the only place colour is written, and CSS that needs a token uses `@apply`, which
+   * resolves against the config rather than against a hand-kept mirror.
+   *
+   * Non-colour tokens stay — they have no equivalent in the config and real consumers.
    */
   :root {
-    --ink-950: oklch(0.18 0.03 260);
-    --ink-900: oklch(0.22 0.03 260);
-    --ink-700: oklch(0.38 0.03 260);
-    --ink-500: oklch(0.55 0.02 260);
-    /* Decorative separators. See the note in tailwind.config.js — this is
-       intentionally below 3:1 and must not be used on a control edge. */
-    --ink-300: oklch(0.78 0.015 260);
-    /* Control borders, solved for 3:1 against --surface-0. */
-    --ink-400: oklch(0.655 0.015 260);
-
-    /* Warm off-white, deliberately not #FFFFFF — see §11. */
-    --surface-0: oklch(0.985 0.004 90);
-    --surface-1: oklch(1 0 0);
-
-    --accent-600: oklch(0.53 0.21 279);
-    --accent-700: oklch(0.45 0.20 279);
-    --accent-100: oklch(0.93 0.04 279);
-    --on-accent: oklch(1 0 0);
-
-    /* §2.2 — status only. See the note on `wa-green` in tailwind.config.js. */
-    --wa-green: oklch(0.72 0.19 150);
-    /* 0.52, not the 0.62 originally specified — that failed §2.4 at 3.27:1. */
-    --success: oklch(0.52 0.15 150);
-    --warning: oklch(0.75 0.15 75);
-    --danger: oklch(0.55 0.19 25);
-
     /* §4.3 */
     --radius-sm: 4px;
     --radius-md: 8px;
@@ -134,8 +113,10 @@
    * `:focus-visible` keeps it off mouse clicks.
    */
   :focus-visible {
-    outline: 2px solid var(--accent-600);
-    outline-offset: 2px;
+    /* `outline-style` is not something Tailwind's width utility sets, so it stays
+       explicit; the colour goes through `@apply` so it tracks the config. */
+    outline-style: solid;
+    @apply outline-2 outline-offset-2 outline-accent-600;
   }
 
   /*

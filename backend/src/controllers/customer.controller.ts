@@ -192,7 +192,25 @@ export const listCustomers = asyncHandler(async (req, res) => {
         conversations: {
           orderBy: { lastMessageAt: 'desc' },
           take: 1,
-          select: { lastMessageAt: true },
+          select: {
+            lastMessageAt: true,
+            /*
+             * The newest message's text, for the preview under the timestamp.
+             *
+             * A second `take: 1` inside the conversation rather than a join on the whole
+             * thread — this list can be 271 rows and pulling every message to read the last
+             * one is the classic way a list page gets slow as a workspace succeeds.
+             *
+             * Body only. Media messages have no text and come back null, which the client
+             * renders as an em dash rather than inventing "[image]" copy the operator never
+             * wrote.
+             */
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { body: true, direction: true },
+            },
+          },
         },
         // The lead behind this number, when there is one and this request may see it.
         // Spread so the key is absent rather than null when Leads is off — see `maySeeLeads`.
@@ -215,6 +233,12 @@ export const listCustomers = asyncHandler(async (req, res) => {
     data: customers.map(({ conversations, ...customer }) => ({
       ...maskContact(customer, seeFull),
       lastMessageAt: conversations[0]?.lastMessageAt ?? null,
+      lastMessage: conversations[0]?.messages[0]
+        ? {
+          body: conversations[0].messages[0].body,
+          direction: conversations[0].messages[0].direction,
+        }
+        : null,
     })),
     meta: { total, take, skip },
   });

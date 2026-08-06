@@ -21,8 +21,8 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-accent-600 text-on-accent hover:bg-accent-700',
         destructive: 'bg-danger text-on-accent hover:bg-danger/90',
-        outline: 'border border-ink-300 bg-surface-1 text-ink-900 hover:bg-accent-100/40',
-        secondary: 'border border-ink-300 bg-surface-0 text-ink-900 hover:bg-accent-100/40',
+        outline: 'border border-ink-350 bg-surface-1 text-ink-900 hover:bg-accent-100/40',
+        secondary: 'border border-ink-350 bg-surface-0 text-ink-900 hover:bg-accent-100/40',
         ghost: 'text-ink-700 hover:bg-accent-100/40 hover:text-ink-900',
         link: 'text-accent-600 underline-offset-4 hover:underline',
       },

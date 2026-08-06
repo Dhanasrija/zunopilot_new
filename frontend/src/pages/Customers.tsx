@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ListRail } from '@/components/customers/ListRail';
+import { EmptyListArt } from '@/components/customers/EmptyListArt';
 import { StatusPill, STATUS_OPTIONS, statusLabel, type ContactStatus } from '@/components/customers/ContactStatus';
 import { TagEditor } from '@/components/customers/TagEditor';
 import {
@@ -18,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn, formatCurrency, formatDateTime, initialsOf, timeAgo } from '@/lib/utils';
+import { tintFor } from '@/lib/categorical-tint';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
@@ -48,6 +50,13 @@ interface Customer {
   tags?: string[];
   /** Newest conversation's `lastMessageAt`, flattened by the API. Null if never messaged. */
   lastMessageAt?: string | null;
+  /**
+   * The newest message itself, for the preview under the timestamp.
+   *
+   * `body` is null on a media message — WhatsApp images and documents carry no text — so the
+   * cell shows the timestamp alone rather than inventing copy the operator never wrote.
+   */
+  lastMessage?: { body: string | null; direction: 'INBOUND' | 'OUTBOUND' } | null;
   marketingOptIn?: boolean;
   optedOutAt?: string | null;
   /**
@@ -80,6 +89,25 @@ const phoneLabel = (customer: Customer): string => {
   // international number rather than a bare run of digits.
   if (!parts) return raw.startsWith('+') ? raw : `+${raw}`;
   return `${parts.country.dialCode} ${parts.national} · ${parts.country.name}`;
+};
+
+/**
+ * The last message, as something a person would want to read.
+ *
+ * **Not every stored body is prose.** When a customer taps a list row or a button, some paths
+ * store the reply's payload id rather than its title — real rows in this database read
+ * `cat:18989181-4eff-468e-86e0-20ba57373749`. Rendering that in a preview column makes the
+ * screen look broken, and it is the kind of thing a mockup with invented data never shows.
+ *
+ * A media message has no body at all and comes back null. Both cases return null here and the
+ * cell falls back to the timestamp alone, rather than inventing copy the operator never wrote.
+ */
+const MACHINE_PAYLOAD = /^[a-z][a-z0-9_]*:[0-9a-f-]{8,}$/i;
+
+const previewOf = (message: Customer['lastMessage']): string | null => {
+  const body = message?.body?.trim();
+  if (!body || MACHINE_PAYLOAD.test(body)) return null;
+  return body;
 };
 
 /**
@@ -514,11 +542,29 @@ export default function Customers() {
                   </TableCell></TableRow>
                 ) : total === 0 ? (
                   <TableRow><TableCell colSpan={6}>
-                    <p className="py-8 text-center text-sm text-muted-foreground">
-                      {listId
-                        ? 'Nobody on this list yet — select contacts under All customers and use “Add to list”.'
-                        : 'No contacts match.'}
-                    </p>
+                    {/* Three different empty states, because they need three different
+                        answers. An empty list wants "add someone"; a search with no hits
+                        wants "clear the search", and offering "Add customer" there would be
+                        answering a question nobody asked. */}
+                    <div className="py-12 text-center">
+                      <EmptyListArt />
+                      <p className="mt-4 text-body font-semibold text-ink-900">
+                        {listId ? 'No customers on this list' : 'No customers match'}
+                      </p>
+                      <p className="mx-auto mt-1 max-w-sm text-sm text-ink-500">
+                        {listId
+                          ? 'Pick people under All customers and use “Add to list”, or add someone new.'
+                          : 'Try a different search, or clear the filters to see everyone.'}
+                      </p>
+                      {/* `openAdd`, the same handler the header button uses, and ungated for
+                          the same reason it is — a second, stricter rule here would mean the
+                          two Add buttons on one screen disagreed about who may click them. */}
+                      {listId && (
+                        <Button className="mt-4 gap-1" onClick={openAdd}>
+                          <UserPlus className="h-4 w-4" /> Add customer
+                        </Button>
+                      )}
+                    </div>
                   </TableCell></TableRow>
                 ) : rows.map((c) => (
                   <TableRow key={c.id} className="cursor-pointer" onClick={() => setSelected(c.id)}>
@@ -535,9 +581,17 @@ export default function Customers() {
 
                     <TableCell>
                       <div className="flex items-center gap-3">
+                        {/* Tinted per customer, stably — the same person is the same colour
+                            on every visit, which makes the avatar a weak recognition cue when
+                            scanning. Categorical hues, never semantic: a colour here must not
+                            read as "this customer is in a good or bad state", which is what
+                            StatusPill is for. See lib/categorical-tint.ts. */}
                         <span
                           aria-hidden
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-100 text-caption font-semibold text-accent-700"
+                          className={cn(
+                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-caption font-semibold',
+                            tintFor(c.name || c.waId),
+                          )}
                         >
                           {initialsOf(c.name, c.waId)}
                         </span>
@@ -571,16 +625,34 @@ export default function Customers() {
 
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
+                        {/* Tinted by tag name, so "VIP" is the same colour on every row and
+                            the eye can group by colour down the column rather than reading
+                            each pill. Same categorical scale as the avatars. */}
                         {(c.tags ?? []).length === 0
                           ? <span className="text-caption text-ink-500">—</span>
                           : c.tags!.map((t) => (
-                            <Badge key={t} variant="secondary">{t}</Badge>
+                            <span
+                              key={t}
+                              className={cn(
+                                'rounded-full px-2 py-1 text-caption font-medium',
+                                tintFor(t),
+                              )}
+                            >
+                              {t}
+                            </span>
                           ))}
                       </div>
                     </TableCell>
 
-                    <TableCell className="text-caption text-ink-500">
-                      {timeAgo(c.lastMessageAt)}
+                    {/* Message above, time below — the reference's shape, and the right one:
+                        what was said is what identifies the conversation, and when it was said
+                        is the qualifier. Truncated to one line so a long message cannot push
+                        the row height around and break the scan down the column. */}
+                    <TableCell className="max-w-[16rem]">
+                      {previewOf(c.lastMessage)
+                        ? <p className="truncate text-sm text-ink-900">{previewOf(c.lastMessage)}</p>
+                        : <p className="text-sm text-ink-500">—</p>}
+                      <p className="truncate text-caption text-ink-500">{timeAgo(c.lastMessageAt)}</p>
                     </TableCell>
 
                     <TableCell onClick={(e) => e.stopPropagation()} className="text-right">

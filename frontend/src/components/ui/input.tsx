@@ -29,7 +29,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           aria-describedby={describedBy}
           className={cn(
             'flex h-10 w-full rounded-md border bg-surface-1 px-3 py-2 text-sm text-ink-900',
-            'placeholder:text-ink-500 disabled:cursor-not-allowed disabled:opacity-50',
+            'placeholder:text-ink-450 disabled:cursor-not-allowed disabled:opacity-50',
             'transition-colors duration-micro',
             error ? 'border-danger' : 'border-ink-400 focus:border-accent-600',
             className

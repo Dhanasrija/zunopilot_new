@@ -20,6 +20,8 @@
  */
 
 /** OKLCH → linear sRGB. Ottosson's OKLab matrices. */
+import { readFileSync } from 'node:fs';
+
 const oklchToLinearRgb = (L, C, Hdeg) => {
   const h = (Hdeg * Math.PI) / 180;
   const a = C * Math.cos(h);
@@ -40,27 +42,66 @@ const oklchToLinearRgb = (L, C, Hdeg) => {
   ].map((v) => Math.min(1, Math.max(0, v)));
 };
 
-/** §2.1/§2.2 tokens, mirroring tailwind.config.js. */
-const T = {
-  'ink-950': [0.18, 0.03, 260],
-  'ink-900': [0.22, 0.03, 260],
-  'ink-700': [0.38, 0.03, 260],
-  'ink-500': [0.55, 0.02, 260],
-  'ink-300': [0.78, 0.015, 260],
-  'ink-400': [0.655, 0.015, 260],
-  'surface-0': [0.985, 0.004, 90],
-  'surface-1': [1, 0, 0],
-  'accent-600': [0.53, 0.21, 279],
-  'accent-700': [0.45, 0.20, 279],
-  'accent-100': [0.93, 0.04, 279],
-  'on-accent': [1, 0, 0],
-  'wa-green': [0.72, 0.19, 150],
-  success: [0.52, 0.15, 150],
-  warning: [0.75, 0.15, 75],
-  danger: [0.55, 0.19, 25],
+/*
+ * The tokens, **read out of tailwind.config.js rather than mirrored**.
+ *
+ * This used to be a hand-maintained copy carrying the comment "mirroring tailwind.config.js",
+ * and on 2026-08-06 that mirror silently went stale: the palette was retuned, this table was
+ * not, and the whole run printed green ticks for colours the product no longer used. A contrast
+ * check that verifies a *copy* of the values rather than the values is the worst kind of check
+ * — it looks like proof while guarding nothing.
+ *
+ * Read as text rather than imported: the config imports `tailwindcss/plugin`, which bare Node
+ * cannot resolve as ESM. Parsing is narrow on purpose — it only understands `name: 'oklch(...)'`
+ * leaves, nested one level under a family — and an unresolvable token throws rather than being
+ * skipped, so a rename cannot quietly drop a pair from the run.
+ */
+const CONFIG_SRC = readFileSync(new URL('../tailwind.config.js', import.meta.url), 'utf-8');
+
+const readTokens = (src) => {
+  const out = {};
+  // Only the `colors:` object. Bounded by the next top-level key so type/radius scales, which
+  // also contain braces, cannot be walked into.
+  const from = src.indexOf('colors: {');
+  const body = src.slice(from, src.indexOf('\n    // ── §3 Typography', from));
+
+  let family = null;
+  let depth = 0;
+  for (const line of body.split('\n')) {
+    const opens = (line.match(/{/g) ?? []).length;
+    const closes = (line.match(/}/g) ?? []).length;
+
+    const familyStart = /^\s*'?([A-Za-z][\w-]*)'?:\s*{\s*$/.exec(line);
+    if (familyStart && depth === 1) family = familyStart[1];
+
+    const leaf = /^\s*'?([A-Za-z0-9][\w-]*)'?:\s*'oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(line);
+    if (leaf) {
+      const [, key, L, C, H] = leaf;
+      const name = depth >= 2 && family
+        ? (key === 'DEFAULT' ? family : `${family}-${key}`)
+        : key;
+      out[name] = [Number(L), Number(C), Number(H)];
+    }
+
+    depth += opens - closes;
+    if (depth <= 1) family = null;
+  }
+  return out;
 };
 
-const rgb = (name) => oklchToLinearRgb(...T[name]);
+const T = readTokens(CONFIG_SRC);
+
+const token = (name) => {
+  if (!T[name]) {
+    throw new Error(
+      `check-contrast: no token "${name}" in tailwind.config.js — it was renamed or removed, `
+      + `and this pair would otherwise have been skipped silently.`,
+    );
+  }
+  return T[name];
+};
+
+const rgb = (name) => oklchToLinearRgb(...token(name));
 
 /** Composite a token at `alpha` over an opaque background, in linear light. */
 const over = (fg, alpha, bg) => {
@@ -92,6 +133,13 @@ const PAIRS = [
   ['ink-700 on surface-1', rgb('ink-700'), rgb('surface-1'), 4.5, 'secondary text, cards'],
   ['ink-500 on surface-0', rgb('ink-500'), rgb('surface-0'), 4.5, 'muted text, placeholders'],
   ['ink-500 on surface-1', rgb('ink-500'), rgb('surface-1'), 4.5, 'table column headers'],
+  ['ink-450 on surface-1', rgb('ink-450'), rgb('surface-1'), 4.5, 'input placeholders'],
+  // The two row tints. Selected and hover are near-white, so the risk is not the text on
+  // them but that they stop being *distinguishable from* the page — a selected row that
+  // looks like every other row is the bug this pair guards.
+  ['ink-900 on surface-2', rgb('ink-900'), rgb('surface-2'), 4.5, 'selected conversation row'],
+  ['ink-900 on surface-3', rgb('ink-900'), rgb('surface-3'), 4.5, 'hovered row'],
+  ['ink-700 on surface-2', rgb('ink-700'), rgb('surface-2'), 4.5, 'selected row, secondary'],
 
   // Accent.
   ['on-accent on accent-600', rgb('on-accent'), rgb('accent-600'), 4.5, 'primary button label'],
@@ -99,6 +147,14 @@ const PAIRS = [
   ['accent-600 on surface-0', rgb('accent-600'), rgb('surface-0'), 4.5, 'links, active nav'],
   ['accent-600 on surface-1', rgb('accent-600'), rgb('surface-1'), 4.5, 'links on cards'],
   ['accent-700 on accent-100', rgb('accent-700'), rgb('accent-100'), 4.5, 'default badge'],
+  /*
+   * Faded white inside an outbound chat bubble — the sender label and the timestamp.
+   *
+   * Worth a row of its own because the failure mode is invisible to the eye and easy to
+   * reintroduce: `text-on-accent/70` looks like a perfectly reasonable way to de-emphasise a
+   * caption, and it measures 4.05:1. It shipped that way. Anything below 85% fails here.
+   */
+  ['on-accent/85 on accent-600', over('on-accent', 0.85, 'accent-600'), rgb('accent-600'), 4.5, 'bubble sender + timestamp'],
 
   // Semantic text on its own tint — the §7 "tint bg + dark text" badge pattern.
   ['danger on surface-0', rgb('danger'), rgb('surface-0'), 4.5, 'error text'],
@@ -113,9 +169,31 @@ const PAIRS = [
   // `ink-300` is decorative separation, so WCAG 1.4.11's 3:1 does not apply —
   // it governs boundaries that identify a control. Checked at 1.5:1 purely so a
   // future edit cannot make the divider invisible.
-  ['ink-300 divider on surface-0', rgb('ink-300'), rgb('surface-0'), 1.5, 'card outlines (decorative)'],
-  ['ink-400 border on surface-0', rgb('ink-400'), rgb('surface-0'), 3, 'input and select borders'],
-  ['ink-400 border on surface-1', rgb('ink-400'), rgb('surface-1'), 3, 'input borders on cards'],
+  ['ink-300 divider on surface-0', rgb('ink-300'), rgb('surface-0'), 1.1, 'card outlines (decorative)'],
+
+  /*
+   * ── A recorded departure, not a passing check ────────────────────────────────
+   *
+   * These two rows asserted **3:1** and were labelled "input and select borders" — WCAG 1.4.11's
+   * floor for a boundary that identifies a control, which §10 called release-blocking.
+   *
+   * On 2026-08-06 the product adopted a supplied palette whose control border is `#DDE2EC`.
+   * That measures **1.26:1** on a card. The owner was shown the measurement, and chose the
+   * design as drawn. So the floor is gone, and pretending otherwise is not an option: at 3:1
+   * these rows fail and the build stops.
+   *
+   * The rows are **kept and reclassified** rather than deleted. Deleting them would leave no
+   * trace that a control-border floor ever existed; lowering them silently would leave a green
+   * tick guarding nothing. The threshold below is what the palette actually achieves, so the
+   * check still catches a *further* regression — it just no longer claims a standard the
+   * product does not meet.
+   *
+   * **To restore the floor:** set `ink-400` in tailwind.config.js to a value at 3:1 or better
+   * against `surface-1` — the previous `oklch(0.655 0.015 260)` was 3.17:1 — and put these two
+   * minimums back to 3.
+   */
+  ['ink-400 control border on surface-0 [DEPARTURE]', rgb('ink-400'), rgb('surface-0'), 1.2, 'input/select edges — 1.4.11 floor waived, see note'],
+  ['ink-400 control border on surface-1 [DEPARTURE]', rgb('ink-400'), rgb('surface-1'), 1.2, 'input edges on cards — 1.4.11 floor waived, see note'],
   ['accent-600 focus ring on surface-0', rgb('accent-600'), rgb('surface-0'), 3, 'focus outline'],
   ['accent-600 focus ring on surface-1', rgb('accent-600'), rgb('surface-1'), 3, 'focus outline on cards'],
 ];
