@@ -101,31 +101,46 @@ const suiteLimiter = rateLimit({
   },
 });
 
+/*
+ * **Every read here carries `reader`, and it did not always.**
+ *
+ * These three routers used to mount `requireAuth` and nothing else on their GETs, while the
+ * sibling `engineWorkflowRoutes` below gated its reads on `workflows:read`. So any authenticated
+ * member of a workspace — including a seat deliberately built with no permissions at all — could
+ * list the assistants, read the routing rules and prompts, and, worst of the three, read
+ * `GET /workflow-instances/:id`, whose `variables` accumulate whatever the flow collected from
+ * the customer: names, delivery addresses, order contents.
+ *
+ * Not a cross-tenant leak — the controllers scope by tenant — but a within-workspace one, and
+ * the same shape as the ungated connector reads fixed earlier. The frontend already hid all of
+ * these screens behind `workflows:read`, so the API was simply looser than its only client
+ * assumed; the gap was invisible for exactly that reason.
+ */
 export const assistantRoutes = Router();
 assistantRoutes.use(requireAuth);
 
-assistantRoutes.get('/', assistants.listAssistants);
-assistantRoutes.get('/:assistantId', validateParams(assistantIdParam), assistants.getAssistant);
+assistantRoutes.get('/', reader, assistants.listAssistants);
+assistantRoutes.get('/:assistantId', validateParams(assistantIdParam), reader, assistants.getAssistant);
 assistantRoutes.patch('/:assistantId', validateParams(assistantIdParam), author, validateBody(updateAssistantSchema), assistants.updateAssistant);
 
-assistantRoutes.get('/:assistantId/routing', validateParams(assistantIdParam), assistants.getRoutingConfig);
+assistantRoutes.get('/:assistantId/routing', validateParams(assistantIdParam), reader, assistants.getRoutingConfig);
 assistantRoutes.patch('/:assistantId/routing', validateParams(assistantIdParam), author, validateBody(updateRoutingConfigSchema), assistants.updateRoutingConfig);
 
-assistantRoutes.get('/:assistantId/rules', validateParams(assistantIdParam), assistants.listRoutingRules);
+assistantRoutes.get('/:assistantId/rules', validateParams(assistantIdParam), reader, assistants.listRoutingRules);
 assistantRoutes.post('/:assistantId/rules', validateParams(assistantIdParam), author, validateBody(createRoutingRuleSchema), assistants.createRoutingRule);
 assistantRoutes.patch('/:assistantId/rules/:ruleId', author, validateBody(updateRoutingRuleSchema), assistants.updateRoutingRule);
 assistantRoutes.delete('/:assistantId/rules/:ruleId', author, assistants.deleteRoutingRule);
 
-assistantRoutes.get('/:assistantId/routing-conflicts', validateParams(assistantIdParam), assistants.getRoutingConflicts);
-assistantRoutes.get('/:assistantId/candidates', validateParams(assistantIdParam), routing.getCandidates);
+assistantRoutes.get('/:assistantId/routing-conflicts', validateParams(assistantIdParam), reader, assistants.getRoutingConflicts);
+assistantRoutes.get('/:assistantId/candidates', validateParams(assistantIdParam), reader, routing.getCandidates);
 
 assistantRoutes.post('/:assistantId/route-test', validateParams(assistantIdParam), author, llmLimiter, validateBody(routeTestSchema), routing.routeTest);
-assistantRoutes.get('/:assistantId/routing-tests', validateParams(assistantIdParam), routing.listRoutingTests);
+assistantRoutes.get('/:assistantId/routing-tests', validateParams(assistantIdParam), reader, routing.listRoutingTests);
 assistantRoutes.post('/:assistantId/routing-tests', validateParams(assistantIdParam), author, validateBody(createRoutingTestSchema), routing.createRoutingTest);
 assistantRoutes.delete('/:assistantId/routing-tests/:testId', author, routing.deleteRoutingTest);
 assistantRoutes.post('/:assistantId/routing-tests/run', validateParams(assistantIdParam), author, suiteLimiter, routing.runRoutingTests);
 
-assistantRoutes.get('/:assistantId/workflows', validateParams(assistantIdParam), validateQuery(listWorkflowsQuery), workflows.listWorkflows);
+assistantRoutes.get('/:assistantId/workflows', validateParams(assistantIdParam), reader, validateQuery(listWorkflowsQuery), workflows.listWorkflows);
 assistantRoutes.post('/:assistantId/workflows', validateParams(assistantIdParam), author, validateBody(createWorkflowSchema), workflows.createWorkflow);
 assistantRoutes.post('/:assistantId/workflows/from-template', validateParams(assistantIdParam), author, validateBody(createFromTemplateSchema), workflows.createFromTemplate);
 // Generation costs a model call and produces a whole graph, so it sits behind
@@ -135,7 +150,7 @@ assistantRoutes.post('/:assistantId/workflows/generate', validateParams(assistan
 // The gallery is a read of a static registry, so it needs no assistant.
 export const templateRoutes = Router();
 templateRoutes.use(requireAuth);
-templateRoutes.get('/', workflows.listTemplates);
+templateRoutes.get('/', reader, workflows.listTemplates);
 
 // ── Workflows ─────────────────────────────────────────────────────────────────
 
@@ -163,9 +178,9 @@ engineWorkflowRoutes.post('/:workflowId/test', validateParams(workflowIdParam), 
 export const instanceRoutes = Router();
 instanceRoutes.use(requireAuth);
 
-instanceRoutes.get('/', validateQuery(listInstancesQuery), instances.listInstances);
-instanceRoutes.get('/:instanceId', instances.getInstance);
-instanceRoutes.get('/:instanceId/executions', instances.getInstanceExecutions);
+instanceRoutes.get('/', reader, validateQuery(listInstancesQuery), instances.listInstances);
+instanceRoutes.get('/:instanceId', reader, instances.getInstance);
+instanceRoutes.get('/:instanceId/executions', reader, instances.getInstanceExecutions);
 instanceRoutes.post('/:instanceId/cancel', author, validateBody(cancelInstanceSchema), instances.cancelInstanceHandler);
 
 // ── Conversation control ──────────────────────────────────────────────────────

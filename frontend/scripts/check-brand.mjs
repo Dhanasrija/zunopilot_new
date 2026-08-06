@@ -191,7 +191,20 @@ const stripComments = (source) => {
     .replace(/(^|[^:])\/\/[^\n]*/g, (match, lead) => lead + blank(match.slice(lead.length)));
 };
 
-const files = walk(SRC).filter((f) => /\.(tsx?|css)$/.test(f));
+/*
+ * Test files are not UI, so they are not scanned.
+ *
+ * Every rule here is about what reaches a customer's screen. A test asserts *about* those
+ * rules, which means it legitimately contains the very strings they forbid — the first
+ * frontend test to name `wa-green` was a `expect(classes).not.toMatch(/wa-green/)` proving the
+ * categorical tint never returns it, and the gate flagged the assertion that enforces the gate.
+ *
+ * Excluded by path rather than added to `ALLOW`: an allowlist entry is a permanent exception
+ * for one file, and this is a category. `src/test/` covers the shared harness.
+ */
+const isTestFile = (f) => /\.test\.tsx?$/.test(f) || /[\\/]src[\\/]test[\\/]/.test(f);
+
+const files = walk(SRC).filter((f) => /\.(tsx?|css)$/.test(f) && !isTestFile(f));
 const findings = [];
 
 for (const file of files) {

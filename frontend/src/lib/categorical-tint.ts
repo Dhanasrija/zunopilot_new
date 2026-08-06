@@ -19,6 +19,20 @@ const SCALE = 6;
  * FNV-1a rather than a sum of char codes: a plain sum gives anagrams the same
  * colour and clusters short names into the low buckets, so "Asha" and "Ashan"
  * would collide far more often than chance.
+ *
+ * **The bucket comes from the high bits, and that is not a style choice.** This
+ * used to end `(Math.abs(hash) % SCALE) + 1`, and `% 6` includes `% 2` — so it
+ * inherited FNV-1a's *lowest* bit, which is order-independent. The prime is odd,
+ * and parity survives an odd multiply unchanged, so the final low bit is just
+ * `parity(offset) XOR parity(c₁) XOR … XOR parity(cₙ)`: rearranging the
+ * characters cannot change it. Every set of anagrams therefore landed in only
+ * three of the six buckets and collided at 33% against a 17% baseline — the
+ * exact clustering the comment above says FNV-1a was chosen to avoid.
+ *
+ * Scaling the unsigned value by its full range uses the top bits instead, which
+ * do depend on order. Anagram collisions drop to 17.3%, and the spread over
+ * unrelated seeds is unchanged (it was always even — the flaw was correlation
+ * between related seeds, not a lumpy distribution).
  */
 const bucketFor = (seed: string): number => {
   let hash = 0x811c9dc5;
@@ -26,7 +40,7 @@ const bucketFor = (seed: string): number => {
     hash ^= seed.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return (Math.abs(hash) % SCALE) + 1;
+  return Math.floor(((hash >>> 0) / 0x100000000) * SCALE) + 1;
 };
 
 /**

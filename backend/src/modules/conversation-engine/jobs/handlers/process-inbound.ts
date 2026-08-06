@@ -426,7 +426,36 @@ export const handleProcessInboundMessage = async (
       .filter((row) => payloadOf(row.payload)?.phoneNumberId === payload.phoneNumberId)
       .map((row) => row.id);
 
-    const ids = mine.length ? mine : [webhookEventId];
+    /*
+     * The fallback: if the scan found nothing, fall back to the event this job names — but
+     * **only if that event is still claimable**.
+     *
+     * The filter is the whole point, and without it there was a duplicate-reply bug. pg-boss is
+     * at-least-once: a worker that finishes the work and then dies before acking gets the same
+     * job redelivered. On that redelivery the scan finds nothing (everything is `PROCESSED`), so
+     * the old unconditional fallback took the triggering id anyway and the `updateMany` below
+     * flipped it from `PROCESSED` back to `PROCESSING`. That defeated the terminal-state guard
+     * at the top of `processEvent`, which then routed the message a second time — and the
+     * customer received the same reply twice.
+     *
+     * `processEvent` cannot defend itself here: by the time it reads the row, this transaction
+     * has already overwritten the status it would have checked. So the claim has to be the thing
+     * that refuses, using the same claimability predicate as the scan above.
+     */
+    const ids = mine.length
+      ? mine
+      : (await tx.webhookEvent.findMany({
+        where: {
+          id: webhookEventId,
+          OR: [
+            { processingStatus: { in: ['PENDING', 'FAILED'] } },
+            { processingStatus: 'PROCESSING', createdAt: { lt: staleBefore } },
+          ],
+        },
+        select: { id: true },
+      })).map((row) => row.id);
+
+    if (!ids.length) return [];
 
     await tx.webhookEvent.updateMany({
       where: { id: { in: ids } },
