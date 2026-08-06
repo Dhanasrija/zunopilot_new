@@ -41,7 +41,10 @@ npm install
 npm run dev             # http://localhost:5173
 ```
 
-Login with **owner@demo.com / Password123!**
+Sign in with the demo owner's phone, **`15550000001`**. There are no passwords —
+customers sign in with a phone and a one-time code. Set `OTP_ECHO=true` in
+`backend/.env` and the login page shows the code; there is no SMS provider wired
+yet, so with it off no code can be sent.
 
 ### 3. WhatsApp webhook
 Configure Meta to call `POST /api/webhook` with verify token from `META_WEBHOOK_VERIFY_TOKEN`. Use ngrok / Cloudflare tunnel for local testing.

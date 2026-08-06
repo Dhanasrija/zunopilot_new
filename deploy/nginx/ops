@@ -1,0 +1,106 @@
+# /etc/nginx/sites-available/ops
+#
+# ops.zunopilot.com — the operator console.
+#
+# Its own certbot lineage, deliberately. Expanding the shared `zunopilot.com` certificate to
+# cover this host would put zunopilot.com, www and api at risk in one operation, and that
+# lineage renews through the nginx authenticator — which rewrites sites-available/app
+# mid-issuance, the very file we hand-edit. A separate lineage issued with `certonly
+# --webroot` never reads or writes nginx config at all. This mirrors what was already done for
+# the zunopilot-dev tunnel lineage.
+#
+# Two-phase install. Ship the :80 block, get the certificate, then add :443 — the :443 block
+# cannot load before the certificate files exist.
+#
+#   sudo mkdir -p /var/www/certbot
+#   sudo cp deploy/nginx/ops /etc/nginx/sites-available/ops   # with :443 commented out
+#   sudo ln -s /etc/nginx/sites-available/ops /etc/nginx/sites-enabled/ops
+#   sudo nginx -t && sudo systemctl reload nginx
+#   curl -I https://x.zunopilot.com && curl -I https://xapi.zunopilot.com   # tunnel unharmed?
+#
+#   sudo certbot certonly --webroot -w /var/www/certbot \
+#     -d ops.zunopilot.com --cert-name ops.zunopilot.com \
+#     --non-interactive --agree-tos -m <you>@zunopilot.com \
+#     --deploy-hook "systemctl reload nginx"
+#
+#   # uncomment the :443 block, then
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot certificates      # must still list THREE lineages
+#   sudo certbot renew --dry-run   # all three must pass
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ops.zunopilot.com;
+
+    # A server_name match always beats a default_server, so this captures nothing from the
+    # `app` site and nothing from zunopilot-dev — both of which also match by name.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ops.zunopilot.com;
+
+    ssl_certificate     /etc/letsencrypt/live/ops.zunopilot.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ops.zunopilot.com/privkey.pem;
+    include             /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /srv/zunopilot/ops/current;
+    index index.html;
+    gzip_static on;
+
+    # The console uploads nothing.
+    client_max_body_size 1m;
+
+    # This console reads every workspace and can reset any user's password. It should not be
+    # indexed, framed, or leak its URLs onward.
+    add_header X-Robots-Tag    "noindex, nofollow, noarchive" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # STRONGLY RECOMMENDED: uncomment and set to your office/VPN range.
+    # A strong SUPERADMIN_JWT_SECRET protects the session; it does nothing against someone
+    # credential-stuffing the login form. One password should not be the only thing between
+    # the open internet and every tenant's data.
+    # allow 203.0.113.0/24;
+    # deny all;
+
+    # superadmin/src/lib/api.ts hardcodes baseURL '/sa' with no env override, and
+    # superadmin-server.ts mounts its routes at '/sa'. No URI part on proxy_pass means the
+    # path is forwarded verbatim — the prefix must NOT be stripped.
+    location /sa {
+        proxy_pass http://127.0.0.1:4001;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # /health on 4001 sits outside /sa and is therefore deliberately not exposed here.
+    # Check it on the box: curl localhost:4001/health
+
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable" always;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

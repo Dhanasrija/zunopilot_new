@@ -11,8 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
-  ChevronLeft, AlertCircle, PlusCircle, RefreshCw, Eye, Send, FileText,
-  CheckCircle2, Clock, XCircle, MoreVertical,
+  AlertCircle, AlertTriangle, BadgeCheck, CheckCheck, CheckCircle2, ChevronLeft, Clock, Eye, FileText, MoreVertical, PlusCircle, RefreshCw, Send, XCircle,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -33,9 +32,9 @@ const LANG_LABEL: Record<string, string> = {
 };
 
 const CAT_ICON_BG: Record<string, string> = {
-  UTILITY:        'bg-emerald-100 text-emerald-600',
-  MARKETING:      'bg-orange-100  text-orange-600',
-  AUTHENTICATION: 'bg-blue-100    text-blue-600',
+  UTILITY:        'bg-success/10 text-success',
+  MARKETING:      'bg-warning/15  text-ink-900',
+  AUTHENTICATION: 'bg-accent-100    text-accent-600',
 };
 
 function getComp(t: MetaTemplate, type: string) { return t.components?.find((c) => c.type === type); }
@@ -56,8 +55,8 @@ function getVarsRatioError(text: string): string | null {
 
 function StatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase();
-  if (s === 'APPROVED') return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 gap-1"><CheckCircle2 className="w-3 h-3" />Approved</Badge>;
-  if (s === 'PENDING')  return <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1"><Clock className="w-3 h-3" />Pending</Badge>;
+  if (s === 'APPROVED') return <Badge className="bg-success/10 text-success border-success/30 gap-1"><CheckCircle2 className="w-3 h-3" />Approved</Badge>;
+  if (s === 'PENDING')  return <Badge className="bg-warning/15 text-ink-900 border-warning/40 gap-1"><Clock className="w-3 h-3" />Pending</Badge>;
   if (s === 'REJECTED') return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejected</Badge>;
   return <Badge variant="outline">{status}</Badge>;
 }
@@ -71,39 +70,39 @@ function WhatsappPreview({ header, body, footer, buttons }: {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-semibold">WhatsApp Preview</p>
-        <span className="text-slate-400 text-xs">Live</span>
+        <span className="text-ink-500 text-caption">Live</span>
       </div>
-      <div className="flex-1 bg-[#E5DDD5] rounded-xl overflow-hidden border border-slate-200 flex flex-col">
-        <div className="bg-[#075E54] px-3 py-2 flex items-center gap-2 shrink-0">
-          <ChevronLeft className="w-4 h-4 text-white" />
-          <div className="w-7 h-7 rounded-full bg-emerald-400 flex items-center justify-center text-xs font-bold text-white">Z</div>
+      <div className="flex-1 bg-wa-ui-chat rounded-lg overflow-hidden border border-ink-300 flex flex-col">
+        <div className="bg-wa-ui-header px-3 py-2 flex items-center gap-2 shrink-0">
+          <ChevronLeft className="w-4 h-4 text-on-accent" />
+          <div className="w-7 h-7 rounded-full bg-success flex items-center justify-center text-caption font-semibold text-on-accent">Z</div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-semibold truncate">Demo Biryani House</p>
-            <p className="text-emerald-200 text-[10px]">Business Account ✓</p>
+            <p className="text-on-accent text-caption font-semibold truncate">Demo Biryani House</p>
+            <p className="text-success text-caption inline-flex items-center gap-1">Business account <BadgeCheck className="h-3 w-3" aria-hidden /></p>
           </div>
-          <MoreVertical className="w-4 h-4 text-white" />
+          <MoreVertical className="w-4 h-4 text-on-accent" />
         </div>
         <div className="flex-1 p-3">
-          <div className="max-w-[90%] bg-white rounded-xl rounded-tl-none shadow-sm overflow-hidden text-xs">
-            {header && <div className="px-3 pt-2.5 pb-1 font-bold text-slate-900 border-b border-slate-100">{header}</div>}
+          <div className="max-w-[90%] bg-surface-1 rounded-lg rounded-tl-none shadow-none overflow-hidden text-caption">
+            {header && <div className="px-3 pt-2 pb-1 font-semibold text-ink-900 border-b border-ink-300">{header}</div>}
             {body ? (
-              <div className="px-3 py-2 text-slate-800 whitespace-pre-wrap leading-relaxed">{body}</div>
+              <div className="px-3 py-2 text-ink-700 whitespace-pre-wrap leading-relaxed">{body}</div>
             ) : (
-              <div className="px-3 py-2 text-slate-400 italic">Body text will appear here…</div>
+              <div className="px-3 py-2 text-ink-500 italic">Body text will appear here…</div>
             )}
-            {footer && <div className="px-3 pb-2 text-[10px] text-slate-400">{footer}</div>}
-            <div className="px-3 pb-1.5 text-right text-[9px] text-slate-400">10:30 AM ✓✓</div>
+            {footer && <div className="px-3 pb-2 text-caption text-ink-500">{footer}</div>}
+            <div className="px-3 pb-1 flex items-center justify-end gap-1 text-caption text-ink-500">10:30 AM <CheckCheck className="h-3 w-3 text-wa-ui-tick" aria-label="Read" /></div>
           </div>
           {buttons.filter((b) => b.text).length > 0 && (
             <div className="max-w-[90%] mt-1 space-y-1">
               {buttons.filter((b) => b.text).map((b, i) => (
-                <div key={i} className="bg-white rounded-xl text-center text-[11px] py-1.5 text-[#53BDEB] font-semibold shadow-sm">{b.text}</div>
+                <div key={i} className="bg-surface-1 rounded-lg text-center text-caption py-1 text-wa-ui-tick font-semibold shadow-none">{b.text}</div>
               ))}
             </div>
           )}
         </div>
       </div>
-      <p className="text-[10px] text-slate-400 text-center mt-2">Actual appearance may vary.</p>
+      <p className="text-caption text-ink-500 text-center mt-2">Actual appearance may vary.</p>
     </div>
   );
 }
@@ -211,21 +210,21 @@ export default function TemplateEdit() {
 
   if (isLoading && !template) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="w-6 h-6 animate-spin text-violet-500" />
+      <div className="flex items-center justify-center py-24">
+        <RefreshCw className="w-6 h-6 animate-spin text-accent-600" />
       </div>
     );
   }
   if (!template) {
     return (
-      <div className="py-20 text-center">
+      <div className="py-24 text-center">
         <p className="text-muted-foreground">Template not found.</p>
         <Button variant="outline" className="mt-4" onClick={() => navigate('/templates')}>Back</Button>
       </div>
     );
   }
 
-  const catIconCls = CAT_ICON_BG[template.category] || 'bg-slate-100 text-slate-600';
+  const catIconCls = CAT_ICON_BG[template.category] || 'bg-surface-0 text-ink-700';
 
   return (
     <div className="space-y-0 -mt-1">
@@ -233,20 +232,20 @@ export default function TemplateEdit() {
       <div className="flex items-center justify-between py-3 mb-1">
         <div className="flex items-center gap-2">
           <button onClick={() => navigate(`/templates/${id}/view`, { state: { template } })}
-            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors">
+            className="p-1 rounded-md hover:bg-surface-0 text-ink-500 hover:text-ink-700 transition-colors">
             <ChevronLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-xl font-semibold leading-none">Edit Template</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Modify the template components. Changes will be resubmitted to Meta for approval.</p>
+            <h1 className="text-h3 font-semibold leading-none">Edit Template</h1>
+            <p className="text-caption text-muted-foreground mt-px">Modify the template components. Changes will be resubmitted to Meta for approval.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5"
+          <Button variant="outline" size="sm" className="gap-1"
             onClick={() => navigate(`/templates/${id}/view`, { state: { template } })}>
             <Eye className="w-3.5 h-3.5" /> View Template
           </Button>
-          <Button size="sm" className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-white"
+          <Button size="sm" className="gap-1 bg-accent-600 hover:bg-accent-700 text-on-accent"
             disabled={!form.bodyText || !!ratioErr || updateMutation.isPending}
             onClick={() => updateMutation.mutate()}>
             {updateMutation.isPending ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving…</> : <><Send className="w-3.5 h-3.5" /> Save Changes</>}
@@ -255,58 +254,58 @@ export default function TemplateEdit() {
       </div>
 
       {/* Info strip */}
-      <div className="rounded-xl border bg-white shadow-sm px-5 py-3.5 mb-5 flex items-center gap-4 flex-wrap">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${catIconCls}`}>
+      <div className="rounded-lg border bg-surface-1 shadow-none px-4 py-3 mb-4 flex items-center gap-4 flex-wrap">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${catIconCls}`}>
           <FileText className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-slate-900">{template.name}</span>
+            <span className="font-semibold text-ink-900">{template.name}</span>
             <StatusBadge status={template.status} />
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-caption text-ink-500 mt-px">
             {template.category} · {LANG_LABEL[template.language] || template.language}
             {' · '}ID: <span className="font-mono">{template.id.slice(0, 16)}…</span>
           </p>
         </div>
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-xs">
-          ⚠️ Editing will reset status to <strong>Pending</strong> until Meta re-approves.
+        <p className="text-caption text-ink-900 bg-warning/15 border border-warning/40 rounded-lg px-3 py-2 max-w-xs">
+          <AlertTriangle className="mr-1 inline h-3 w-3" aria-hidden /> Editing will reset status to <strong>Pending</strong> until Meta re-approves.
         </p>
       </div>
 
       {/* Two-column layout */}
-      <div className="flex gap-5 items-start">
+      <div className="flex gap-4 items-start">
         {/* Form */}
-        <div className="flex-1 min-w-0 rounded-xl border bg-white shadow-sm p-6 space-y-5">
+        <div className="flex-1 min-w-0 rounded-lg border bg-surface-1 shadow-none p-6 space-y-4">
           <div>
             <p className="font-semibold text-sm">Template Components</p>
-            <p className="text-xs text-muted-foreground mt-0.5">The template name, category and language cannot be changed after creation.</p>
+            <p className="text-caption text-muted-foreground mt-px">The template name, category and language cannot be changed after creation.</p>
           </div>
 
           {/* Readonly fields */}
           <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Template Name</Label>
-              <Input value={template.name} disabled className="bg-slate-50 font-mono text-sm" />
+            <div className="space-y-1">
+              <Label className="text-caption">Template Name</Label>
+              <Input value={template.name} disabled className="bg-surface-0 font-mono text-sm" />
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Category</Label>
-              <Input value={template.category} disabled className="bg-slate-50 text-sm" />
+            <div className="space-y-1">
+              <Label className="text-caption">Category</Label>
+              <Input value={template.category} disabled className="bg-surface-0 text-sm" />
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Language</Label>
-              <Input value={LANG_LABEL[template.language] || template.language} disabled className="bg-slate-50 text-sm" />
+            <div className="space-y-1">
+              <Label className="text-caption">Language</Label>
+              <Input value={LANG_LABEL[template.language] || template.language} disabled className="bg-surface-0 text-sm" />
             </div>
           </div>
 
           <hr />
 
           {/* Header */}
-          <div className="space-y-3 rounded-lg border p-4 bg-slate-50/50">
+          <div className="space-y-3 rounded-lg border p-4 bg-surface-0/50">
             <div className="flex items-center justify-between">
               <div>
                 <Label className="font-semibold text-sm">Header (optional)</Label>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Short title at the top of the message.</p>
+                <p className="text-caption text-muted-foreground mt-px">Short title at the top of the message.</p>
               </div>
               <Switch checked={form.hasHeader} onCheckedChange={(v) => setForm({ ...form, hasHeader: v })} />
             </div>
@@ -314,28 +313,28 @@ export default function TemplateEdit() {
               <div className="relative">
                 <Input placeholder="e.g. Order Update" value={form.headerText} maxLength={60}
                   onChange={(e) => setForm({ ...form, headerText: e.target.value })} />
-                <span className="absolute right-3 top-2.5 text-[10px] text-slate-400">{form.headerText.length}/60</span>
+                <span className="absolute right-3 top-2.5 text-caption text-ink-500">{form.headerText.length}/60</span>
               </div>
             )}
           </div>
 
           {/* Body */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <Label className="text-sm">Body Text <span className="text-red-500">*</span></Label>
-              <span className="text-[10px] text-muted-foreground">Use {'{{1}}'}, {'{{2}}'} for dynamic variables</span>
+              <Label className="text-sm">Body Text <span className="text-danger">*</span></Label>
+              <span className="text-caption text-muted-foreground">Use {'{{1}}'}, {'{{2}}'} for dynamic variables</span>
             </div>
             <div className="relative">
               <Textarea
                 placeholder="Hello {{1}}, your order #{{2}} is now being prepared!"
                 value={form.bodyText} rows={5}
-                className={ratioErr ? 'border-red-400 focus-visible:ring-red-400 pr-16' : 'pr-16'}
+                className={ratioErr ? 'border-danger focus-visible:ring-danger pr-16' : 'pr-16'}
                 onChange={(e) => setForm({ ...form, bodyText: e.target.value })}
               />
-              <span className="absolute bottom-2 right-3 text-[10px] text-slate-400">{form.bodyText.length}/1024</span>
+              <span className="absolute bottom-2 right-3 text-caption text-ink-500">{form.bodyText.length}/1024</span>
             </div>
             {ratioErr && (
-              <p className="text-xs text-red-600 flex items-center gap-1.5">
+              <p className="text-caption text-danger flex items-center gap-1">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />{ratioErr}
               </p>
             )}
@@ -343,16 +342,16 @@ export default function TemplateEdit() {
 
           {/* Variable examples */}
           {extractVars(form.bodyText).length > 0 && (
-            <div className="space-y-3 rounded-lg border p-4 bg-amber-50/50 border-amber-200">
+            <div className="space-y-3 rounded-lg border p-4 bg-warning/15/50 border-warning/40">
               <div>
-                <Label className="text-sm font-semibold text-amber-800">Variable Example Values</Label>
-                <p className="text-[10px] text-amber-700 mt-0.5">Required by Meta — templates without examples get auto-rejected.</p>
+                <Label className="text-sm font-semibold text-ink-900">Variable Example Values</Label>
+                <p className="text-caption text-ink-900 mt-px">Required by Meta — templates without examples get auto-rejected.</p>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {extractVars(form.bodyText).map((v) => (
                   <div key={v} className="space-y-1">
-                    <Label className="text-[10px] font-mono text-amber-700">{'{{' + v + '}}'}</Label>
-                    <Input placeholder={`example for {{${v}}}`} className="h-8 text-xs"
+                    <Label className="text-caption font-mono text-ink-900">{'{{' + v + '}}'}</Label>
+                    <Input placeholder={`example for {{${v}}}`} className="h-8 text-caption"
                       value={form.bodyExamples[v] || ''}
                       onChange={(e) => setForm({ ...form, bodyExamples: { ...form.bodyExamples, [v]: e.target.value } })} />
                   </div>
@@ -362,11 +361,11 @@ export default function TemplateEdit() {
           )}
 
           {/* Footer */}
-          <div className="space-y-3 rounded-lg border p-4 bg-slate-50/50">
+          <div className="space-y-3 rounded-lg border p-4 bg-surface-0/50">
             <div className="flex items-center justify-between">
               <div>
                 <Label className="font-semibold text-sm">Footer (optional)</Label>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Light grey text shown at the bottom.</p>
+                <p className="text-caption text-muted-foreground mt-px">Light grey text shown at the bottom.</p>
               </div>
               <Switch checked={form.hasFooter} onCheckedChange={(v) => setForm({ ...form, hasFooter: v })} />
             </div>
@@ -374,28 +373,28 @@ export default function TemplateEdit() {
               <div className="relative">
                 <Input placeholder="e.g. Reply STOP to unsubscribe" value={form.footerText} maxLength={60}
                   onChange={(e) => setForm({ ...form, footerText: e.target.value })} />
-                <span className="absolute right-3 top-2.5 text-[10px] text-slate-400">{form.footerText.length}/60</span>
+                <span className="absolute right-3 top-2.5 text-caption text-ink-500">{form.footerText.length}/60</span>
               </div>
             )}
           </div>
 
           {/* Buttons */}
-          <div className="space-y-3 rounded-lg border p-4 bg-slate-50/50">
+          <div className="space-y-3 rounded-lg border p-4 bg-surface-0/50">
             <div className="flex items-center justify-between">
               <div>
                 <Label className="font-semibold text-sm">Buttons (optional)</Label>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Quick replies or call-to-action buttons (max 10).</p>
+                <p className="text-caption text-muted-foreground mt-px">Quick replies or call-to-action buttons (max 10).</p>
               </div>
               <Switch checked={form.hasButtons} onCheckedChange={(v) => setForm({ ...form, hasButtons: v })} />
             </div>
             {form.hasButtons && (
               <div className="space-y-3">
                 {form.buttons.map((btn, i) => (
-                  <div key={i} className="p-3 border rounded bg-white space-y-2">
+                  <div key={i} className="p-3 border rounded bg-surface-1 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-violet-500">Button #{i + 1}</span>
+                      <span className="text-caption font-semibold text-accent-600">Button #{i + 1}</span>
                       <button type="button" onClick={() => removeButton(i)}
-                        className="text-red-400 hover:text-red-600 p-0.5">
+                        className="text-danger hover:text-danger p-px">
                         <PlusCircle className="w-4 h-4 rotate-45" />
                       </button>
                     </div>
@@ -412,17 +411,17 @@ export default function TemplateEdit() {
                         onChange={(e) => updateButton(i, { text: e.target.value })} />
                     </div>
                     {btn.type === 'URL' && (
-                      <Input className="h-8 font-mono text-xs" placeholder="https://example.com/track/{{1}}"
+                      <Input className="h-8 font-mono text-caption" placeholder="https://example.com/track/{{1}}"
                         value={btn.url || ''} onChange={(e) => updateButton(i, { url: e.target.value })} />
                     )}
                     {btn.type === 'PHONE_NUMBER' && (
-                      <Input className="h-8 font-mono text-xs" placeholder="+15551234567"
+                      <Input className="h-8 font-mono text-caption" placeholder="+15551234567"
                         value={btn.phone_number || ''} onChange={(e) => updateButton(i, { phone_number: e.target.value })} />
                     )}
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm" onClick={addButton}
-                  className="w-full gap-1 border-dashed text-violet-500 hover:text-violet-600">
+                  className="w-full gap-1 border-dashed text-accent-600 hover:text-accent-600">
                   <PlusCircle className="w-4 h-4" /> Add Button
                 </Button>
               </div>
@@ -434,7 +433,7 @@ export default function TemplateEdit() {
             <Button variant="outline" onClick={() => navigate(`/templates/${id}/view`, { state: { template } })}>
               Cancel
             </Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5"
+            <Button className="bg-accent-600 hover:bg-accent-700 text-on-accent gap-1"
               disabled={!form.bodyText || !!ratioErr || updateMutation.isPending}
               onClick={() => updateMutation.mutate()}>
               {updateMutation.isPending ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving…</> : 'Save Changes'}
@@ -444,7 +443,7 @@ export default function TemplateEdit() {
 
         {/* Live preview */}
         <div className="w-72 shrink-0 sticky top-6">
-          <div className="rounded-xl border bg-white shadow-sm p-4">
+          <div className="rounded-lg border bg-surface-1 shadow-none p-4">
             <WhatsappPreview
               header={form.hasHeader ? form.headerText : ''}
               body={form.bodyText}

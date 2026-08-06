@@ -14,7 +14,8 @@ npm run build
 npm run preview
 ```
 
-Default login (after backend seed): `owner@demo.com` / `Password123!`
+Default login (after backend seed): phone `15550000001`. No password — a one-time
+code, shown on the login page while `OTP_ECHO=true` is set in `backend/.env`.
 
 ## Notes
 - Auth token stored in `localStorage` (key: `token`) and sent on every API call.

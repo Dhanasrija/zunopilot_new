@@ -1,52 +1,168 @@
+/*
+ * Self-hosted variable fonts.
+ *
+ * §3.1 forbids the Google Fonts CDN — latency and privacy. These packages ship
+ * the woff2 files, Vite fingerprints and serves them from our own origin, and
+ * both faces are OFL-licensed. Importing packages rather than committing binaries
+ * keeps the fonts updatable and out of git history.
+ *
+ * Both are variable, so one file per family covers every weight the system allows
+ * (§3.2 permits 400–600 and nothing heavier).
+ */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  /*
+   * §2.1's palette is NOT restated here, deliberately.
+   *
+   * This block used to carry all sixteen colours as custom properties, duplicating
+   * `tailwind.config.js` "on purpose" so plain CSS could reach a colour. In practice
+   * exactly one rule ever did — the focus outline below — and during the 2026-08-06
+   * repalette this copy was missed and sat a full palette out of date, still serving
+   * the old warm surface and the old violet to anything that read it.
+   *
+   * That was the third such copy found in one afternoon (the contrast script held one
+   * too). A duplicate that nothing reads is invisible when it rots. So: the config is
+   * the only place colour is written, and CSS that needs a token uses `@apply`, which
+   * resolves against the config rather than against a hand-kept mirror.
+   *
+   * Non-colour tokens stay — they have no equivalent in the config and real consumers.
+   */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --brand: 248.7 76.7% 59.6%;
-    --brand-hover: 248.7 76.7% 49%;
-    --brand-light: 248.7 76.7% 79%;
-    --primary: var(--brand);
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: var(--brand);
-    --radius: 0.5rem;
+    /* §4.3 */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    /* Consumed by the shadcn primitives, which expect a single `--radius`.
+       Pinned to the §4.3 md step. */
+    --radius: 8px;
+
+    /* §5 — one duration per intent, so nothing is animated at a made-up speed. */
+    --duration-micro: 150ms;
+    --duration-panel: 250ms;
+    --duration-page: 400ms;
+    --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /*
+     * How much vertical space the app shell takes from a full-height page.
+     *
+     * 48px is `main`'s `p-6` top and bottom. The two pages that fill the viewport — Inbox
+     * and Customers — subtract this rather than hard-coding 48px, which they both used to
+     * do: the mobile header added 56px those numbers knew nothing about, and both pages
+     * overhung the bottom of the screen on a phone.
+     *
+     * One definition, two consumers. Change the header height and this is the only place
+     * that needs to know.
+     *
+     * Both consumers apply it **only at `lg`**. Below that the two panes stack, and pinning
+     * a stacked column to the viewport height leaves the table a few pixels tall — on a
+     * phone the page should simply scroll.
+     */
+    --shell-offset: 104px; /* 48px padding + 56px mobile header */
   }
-  * { @apply border-border; }
-  html, body {
-    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-feature-settings: 'cv11', 'ss01';
+
+  /* At `lg` the mobile header is not rendered, so only the padding is taken. */
+  @media (min-width: 1024px) {
+    :root {
+      --shell-offset: 48px;
+    }
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    font-family: 'Inter Variable', Inter, system-ui, -apple-system, sans-serif;
+    /*
+     * §3.1 — the stylistic sets Inter exposes. `cv05`/`cv11` give a single-storey
+     * l and a straight-tailed y, which stops 1 / l / I collapsing into each other
+     * in phone numbers and template ids.
+     */
+    font-feature-settings: 'cv05', 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  body { @apply bg-background text-foreground; }
+
+  body {
+    @apply bg-surface-0 text-ink-900;
+  }
+
+  /*
+   * §3.2 — headings balance their line breaks rather than leaving one orphaned
+   * word, and no heading is heavier than 600.
+   */
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    font-weight: 600;
+  }
+
+  /*
+   * §7 and §10 — visible focus on every interactive element, release-blocking.
+   *
+   * Global rather than per component, so a control cannot ship without one.
+   * `:focus-visible` keeps it off mouse clicks.
+   */
+  :focus-visible {
+    /* `outline-style` is not something Tailwind's width utility sets, so it stays
+       explicit; the colour goes through `@apply` so it tracks the config. */
+    outline-style: solid;
+    @apply outline-2 outline-offset-2 outline-accent-600;
+  }
+
+  /*
+   * §7 — tabular numerals wherever figures sit in a column. The `.num` utility
+   * covers deliberate metrics; this catches table cells nobody remembered to mark,
+   * so columns of figures never jitter as they update.
+   */
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * §5 — "prefers-reduced-motion: reduce → all transitions drop to 0ms
+ * opacity-only. Non-negotiable."
+ *
+ * Outside `@layer` so it cannot lose a specificity contest with a utility, and
+ * `!important` because the point is that no component can opt out.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Infinite horizontal marquee — used for the partner-logo strip.
    The inner element renders the logo list twice; translating -50% creates
    a seamless loop because the second copy slides into the original position. */
 @keyframes marquee-x {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
 }
 .animate-marquee {
   animation: marquee-x 30s linear infinite;
   will-change: transform;
 }
-.animate-marquee:hover { animation-play-state: paused; }
+.animate-marquee:hover {
+  animation-play-state: paused;
+}

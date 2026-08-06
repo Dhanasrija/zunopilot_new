@@ -3,15 +3,139 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="/app-logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
-    rel="stylesheet"
-  />
-  <title>ZunoPilot</title>
+
+  <!--
+    Everything SEO-related below is STATIC, and that is the point.
+
+    This is a client-rendered SPA: the body is `<div id="root"></div>` and nothing else
+    until React runs. Social scrapers — WhatsApp, LinkedIn, Facebook, X — do not execute
+    JavaScript, so a tag set from a component would be invisible to every one of them. A
+    shared zunopilot.com link previewed as a bare "ZunoPilot" with no description and no
+    image, which for a product whose premise is WhatsApp was the wrong first impression.
+
+    Consequence worth knowing: these tags are the same on every route. `/pricing` claims
+    the home page's title until per-route meta exists, which needs a `useDocumentHead` hook
+    and is a separate change. Google runs JS and would honour per-route tags; scrapers still
+    would not, so the only complete fix is prerendering.
+
+    The URLs are absolute and hardcoded, because a static file cannot know its own origin.
+    A staging deploy therefore serves tags claiming production — if staging is publicly
+    reachable it needs `X-Robots-Tag: noindex` at the host level, since `public/robots.txt`
+    ships an *allow* wherever it goes.
+  -->
+
+  <!--
+    The title and description are supplied copy — brand-first, positioning ZunoPilot as the
+    platform rather than describing a feature. Change them here and in the four social tags
+    below together; six tags carry the same two strings and a scraper reads whichever one it
+    was written for, so an edit to only some of them makes the previews disagree with Google.
+
+    Both are at the edge of their useful length: the title is exactly 60 characters and the
+    description 147. Google truncates titles around 60 and descriptions around 160, so
+    neither is currently cut — but any word added to the title will cost the tail. If it ever
+    needs to grow, "Platform" is the word to drop; it is the least load-bearing.
+
+    The separator is an en dash (–, U+2013), not a hyphen, and "ZunoPilot's" uses a straight
+    apostrophe. Both are literal characters, which the UTF-8 charset above makes safe.
+  -->
+  <title>ZunoPilot – AI-Powered WhatsApp Business Automation Platform</title>
+  <meta name="description"
+    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+  <link rel="canonical" href="https://zunopilot.com/" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+
+  <!-- Open Graph. `og:image` is the one thing here that is not finished: it wants a
+       purpose-made 1200×630 card dropped into `public/`. Until that file exists this points
+       at a 404 and previews render text-only — better than today, but not done. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="ZunoPilot" />
+  <meta property="og:title" content="ZunoPilot – AI-Powered WhatsApp Business Automation Platform" />
+  <meta property="og:description"
+    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+  <meta property="og:url" content="https://zunopilot.com/" />
+  <meta property="og:image" content="https://zunopilot.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="ZunoPilot — WhatsApp automation for small businesses" />
+  <meta property="og:locale" content="en_IN" />
+
+  <!-- `summary_large_image` rather than `summary`: the small card crops to a square and
+       makes a 1200×630 asset look like a mistake. -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="ZunoPilot – AI-Powered WhatsApp Business Automation Platform" />
+  <meta name="twitter:description"
+    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+  <meta name="twitter:image" content="https://zunopilot.com/og-image.png" />
+
+  <link rel="icon" type="image/png" href="/app-logo.png" />
+  <link rel="apple-touch-icon" href="/app-logo.png" />
+  <!-- The brand accent, so mobile Chrome's address bar matches the page rather than
+       defaulting to white. The sRGB equivalent of `--accent-600: oklch(0.53 0.21 279)` in
+       src/index.css — a hex literal because `theme-color` predates oklch support. Nothing
+       links the two, so retuning that token means recomputing this by hand. -->
+  <meta name="theme-color" content="#5951e0" />
+
+  <!--
+    Structured data.
+
+    **No `offers` or price, deliberately.** Prices live in the database and are changed by
+    an operator; a figure hardcoded here would go stale in silence, and Google penalises
+    structured data that disagrees with the visible page. `/pricing` is linked instead, so
+    the number is only ever stated in one place.
+
+    The contact details are the ones already published on the site rather than new ones — a
+    `contactPoint` nobody monitors is worse than none.
+  -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://zunopilot.com/#organization",
+          "name": "ZunoPilot",
+          "url": "https://zunopilot.com/",
+          "logo": "https://zunopilot.com/app-logo.png",
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": "support@zunopilot.com",
+            "telephone": "+91-9390683154",
+            "areaServed": "IN",
+            "availableLanguage": "en"
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://zunopilot.com/#website",
+          "url": "https://zunopilot.com/",
+          "name": "ZunoPilot",
+          "publisher": { "@id": "https://zunopilot.com/#organization" },
+          "inLanguage": "en-IN"
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "ZunoPilot",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web",
+          "url": "https://zunopilot.com/",
+          "publisher": { "@id": "https://zunopilot.com/#organization" },
+          "description": "Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform."
+        }
+      ]
+    }
+  </script>
+
+  <!--
+    Fonts are self-hosted and imported in src/index.css.
+
+    §3.1 forbids the Google Fonts CDN on latency and privacy grounds, and the
+    request that used to sit here also asked for weights 300 and 700–900, none of
+    which §3.2 permits — so it was downloading four faces the system is not
+    allowed to use. Removing it drops two preconnects and a render-blocking
+    stylesheet from every page load, which §10's LCP budget cares about.
+  -->
 </head>
 
 <body>

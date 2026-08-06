@@ -7,7 +7,7 @@ Node.js + Express + Prisma + Postgres. ES modules. MVC.
 cp .env.example .env       # fill in DATABASE_URL, JWT_SECRET, META_* values
 npm install
 npx prisma migrate dev --name init
-npm run prisma:seed        # creates demo tenant: owner@demo.com / Password123!
+npm run prisma:seed        # creates demo tenant; sign in with phone 15550000001
 npm run dev
 ```
 

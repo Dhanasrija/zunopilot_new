@@ -1,157 +1,316 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { Eye, EyeOff } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth.store';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
-import { validateEmail, validatePassword } from '@/lib/validators';
+import { Input } from '@/components/ui/input';
+import { PhoneField } from '@/components/ui/phone-field';
+import {
+  detectCountry, fullNumber, nationalNumberProblem, type Country,
+} from '@/lib/countries';
+import { Label } from '@/components/ui/label';
+import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
 
-type Errors = { email?: string; password?: string };
+// Signing in.
+//
+// One flow for signing up and signing in: a phone number either has an account or
+// gets one. That removes the "already registered?" fork entirely, and with it the
+// class of problem where someone creates a second account because they typed a
+// different spelling of their email.
+//
+// Where they land afterwards is the **server's** answer (`profileComplete`), not a
+// guess made here from whichever fields happen to be loaded.
 
-export default function Login() {
-  const [email, setEmail] = useState('owner@demo.com');
-  const [password, setPassword] = useState('Password123!');
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<Errors>({});
-  const setSession = useAuthStore((s) => s.setSession);
-  const token = useAuthStore((s) => s.token);
-  const nav = useNavigate();
-
-  const m = useMutation({
-    mutationFn: async () => {
-      const { data } = await api.post('/auth/login', { email, password });
-      return data.data;
-    },
-    onSuccess: (data) => {
-      setSession(data);
-      toast.success('Welcome back');
-      nav('/dashboard');
-    },
-  });
-
-  const validate = (): boolean => {
-    const next: Errors = {
-      email: validateEmail(email) || undefined,
-      password: validatePassword(password) || undefined,
-    };
-    setErrors(next);
-    return !next.email && !next.password;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-    m.mutate();
-  };
-
-  return (
-    <div
-      className="min-h-screen bg-no-repeat bg-cover bg-center flex flex-col"
-      style={{ backgroundImage: "url('/login-bg.png')" }}
-    >
-      <header className="bg-transparent">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 lg:h-20 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/app-logo.png" alt="ZunoPilot" className="h-9 w-auto" />
-            <span className="text-xl font-bold tracking-tight text-slate-900">ZunoPilot</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            {token ? (
-              <Link to="/dashboard">
-                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">Go to Dashboard</Button>
-              </Link>
-            ) : (
-              <>
-                <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
-                  Sign in
-                </Link>
-                <Link to="/signup">
-                  <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">Start Free Trial</Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 flex items-center justify-center px-4 py-8">
-        <div className="w-full max-w-md rounded-3xl bg-white/95 backdrop-blur shadow-xl shadow-violet-200/40 ring-1 ring-slate-200 p-6 sm:p-8 lg:p-10">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-              Welcome back to <span className="text-violet-600">ZunoPilot</span>
-            </h1>
-            <p className="mt-2 text-sm text-slate-500">
-              Sign in to access your business inbox, orders, and analytics.
-            </p>
-          </div>
-
-          <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
-            <Field label="Email" error={errors.email}>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); if (errors.email) setErrors((s) => ({ ...s, email: undefined })); }}
-                placeholder="Enter your mail"
-                maxLength={100}
-                aria-invalid={!!errors.email}
-                className={`rounded-lg ${errors.email ? 'border-red-400 focus-visible:ring-red-300' : ''}`}
-              />
-            </Field>
-
-            <Field label="Password" error={errors.password}>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => { setPassword(e.target.value); if (errors.password) setErrors((s) => ({ ...s, password: undefined })); }}
-                  placeholder="Enter your password"
-                  maxLength={64}
-                  aria-invalid={!!errors.password}
-                  className={`rounded-lg pr-10 ${errors.password ? 'border-red-400 focus-visible:ring-red-300' : ''}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </Field>
-
-            <Button
-              type="submit"
-              disabled={m.isPending}
-              className="w-full h-12 rounded-full bg-violet-600 hover:bg-violet-700 text-base font-semibold shadow-md shadow-violet-200"
-            >
-              {m.isPending ? 'Signing in…' : 'Sign In'}
-            </Button>
-          </form>
-
-          <p className="mt-5 text-center text-sm text-slate-500">
-            Don't have an account?{' '}
-            <Link to="/signup" className="text-violet-600 font-semibold hover:underline">Create one</Link>
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+interface RequestResult {
+  expiresAt: string;
+  resendAfterSeconds: number;
+  channel: 'sms' | 'echo';
+  /** Development only — the API refuses to return this in production. */
+  devCode?: string;
 }
 
-/* Helper — renders label + child + an error line under it. */
-function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+interface VerifyResult {
+  token: string;
+  user: AuthUser;
+  tenant: AuthTenant;
+  profileComplete: boolean;
+  isNew: boolean;
+}
+
+export default function Login() {
+  const navigate = useNavigate();
+  const setSession = useAuthStore((s) => s.setSession);
+
+  const [step, setStep] = useState<'phone' | 'code' | 'new'>('phone');
+
+  /**
+   * A verified session that has not been adopted yet, held back for confirmation.
+   *
+   * Only ever set when the server said `isNew` — see the note on the `'new'` step.
+   */
+  const [pending, setPending] = useState<VerifyResult | null>(null);
+
+  /**
+   * Country and national number are held apart, not as one prefilled string.
+   *
+   * This was `useState('+91 ')` in a free-text field, which meant the dial code was
+   * editable text a visitor could half-overwrite: type a US number over part of it
+   * and `+91 2025550123` reaches the API, where `normalisePhone` happily accepts 12
+   * digits. On *this* form that was not a validation error — sign-in doubles as
+   * sign-up, so it created a second user and a second workspace and told the person
+   * nothing. Keeping the dial code in a picker makes it unrepresentable.
+   *
+   * `detectCountry()` reads the browser locale and only moves off India when the
+   * locale names a region — see the note on it in `lib/countries.ts`.
+   */
+  const [country, setCountry] = useState<Country>(detectCountry);
+  const [national, setNational] = useState('');
+  const phone = fullNumber(country, national);
+  const [code, setCode] = useState('');
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const codeInput = useRef<HTMLInputElement>(null);
+
+  // Counts down so the resend control says *when*, rather than just refusing.
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown((n) => n - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const sendCode = useMutation({
+    mutationFn: () => api.post<{ data: RequestResult }>('/auth/otp', { phone })
+      .then((r) => r.data.data),
+    onSuccess: (result) => {
+      setStep('code');
+      setCooldown(result.resendAfterSeconds);
+      setDevCode(result.devCode ?? null);
+      setError(null);
+      if (result.devCode) setCode(result.devCode);
+      setTimeout(() => codeInput.current?.focus(), 50);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  /** Adopt a verified session and go where the server says. */
+  const land = (result: VerifyResult) => {
+    setSession(result);
+    // The whole point of the flag: a workspace that has not been set up goes to
+    // the form, everyone else goes straight to work.
+    navigate(result.profileComplete ? '/dashboard' : '/onboarding', { replace: true });
+  };
+
+  const verify = useMutation({
+    mutationFn: () => api.post<{ data: VerifyResult }>('/auth/otp/verify', { phone, code })
+      .then((r) => r.data.data),
+    onSuccess: (result) => {
+      // `isNew` was read off the response and thrown away for as long as this flow
+      // has existed, which is how a wrong country code stayed silent: the owner of
+      // this product picked `+1` from the country list, entered his ten-digit Indian
+      // number, verified a code, and landed on an empty onboarding form for a
+      // workspace nobody meant to create. Nothing on screen said a new business had
+      // just been made. It read as "I cannot log in".
+      //
+      // So a brand-new account now has to be acknowledged before it is adopted.
+      if (result.isNew) {
+        setPending(result);
+        setStep('new');
+        return;
+      }
+      land(result);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  // Was `digits.length < 8`, one flat rule for every country. libphonenumber knows the
+  // possible lengths per country, so this refuses a half-typed Indian number without
+  // also refusing a legitimately shorter one elsewhere.
+  const numberProblem = nationalNumberProblem(national, country);
+
   return (
-    <div className="space-y-1.5">
-      <Label className="text-sm font-medium text-slate-700">{label}</Label>
-      {children}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-accent-100 via-surface-1 to-surface-0 px-4">
+      <div className="w-full max-w-sm rounded-lg border bg-surface-1 p-6 shadow-none">
+        <div className="mb-4 flex items-center gap-2">
+          <img src="/app-logo.png" alt="" className="h-8 w-auto" />
+          <div className="min-w-0">
+            <h1 className="text-body font-semibold">
+              Sign in to <span className="text-accent-600">ZunoPilot</span>
+            </h1>
+            <p className="truncate text-caption text-muted-foreground">
+              {step === 'phone' && 'We will text you a code. No password to remember.'}
+              {step === 'code' && `Sent to ${phone.trim()}`}
+              {step === 'new' && 'Check the number before you go on.'}
+            </p>
+          </div>
+        </div>
+
+        {step === 'phone' ? (
+          <form
+            className="space-y-3"
+            onSubmit={(e) => { e.preventDefault(); setError(null); sendCode.mutate(); }}
+          >
+            <div className="space-y-1">
+              <Label htmlFor="phone">Mobile number</Label>
+              <PhoneField
+                id="phone"
+                autoFocus
+                country={country}
+                onCountryChange={setCountry}
+                value={national}
+                onChange={setNational}
+              />
+              <p className="text-caption text-muted-foreground">
+                Pick your country, then enter your number. Your country comes from the code you
+                choose, so we never have to ask separately.
+              </p>
+            </div>
+
+            {error && (
+              <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full" disabled={!!numberProblem || sendCode.isPending}>
+              {sendCode.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              Send me a code
+            </Button>
+          </form>
+        ) : step === 'code' ? (
+          <form
+            className="space-y-3"
+            onSubmit={(e) => { e.preventDefault(); setError(null); verify.mutate(); }}
+          >
+            <div className="space-y-1">
+              <Label htmlFor="code">Code</Label>
+              <Input
+                id="code"
+                ref={codeInput}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                className="text-center text-h3 tracking-[0.4em]"
+                value={code}
+                placeholder="••••••"
+                onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, '').slice(0, 8))}
+              />
+            </div>
+
+            {devCode && (
+              // Shown only because the API returned it, which it will not do in
+              // production. Labelled plainly so nobody mistakes it for a feature.
+              <div className="rounded-lg border border-warning/40 bg-warning/15 px-3 py-2">
+                <p className="text-caption font-medium text-ink-900">
+                  Development mode — code shown instead of sent
+                </p>
+                <p className="mt-px font-mono text-h3 tracking-widest text-ink-900">{devCode}</p>
+                <p className="mt-px text-caption text-ink-900">
+                  No SMS was spent. This never happens in production.
+                </p>
+              </div>
+            )}
+
+            {error && (
+              <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full" disabled={code.length < 4 || verify.isPending}>
+              {verify.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              Continue
+            </Button>
+
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground"
+                onClick={() => { setStep('phone'); setCode(''); setDevCode(null); setError(null); }}
+              >
+                <ArrowLeft className="h-3 w-3" /> Change number
+              </button>
+              <button
+                type="button"
+                disabled={cooldown > 0 || sendCode.isPending}
+                className="text-caption text-accent-700 underline disabled:text-muted-foreground disabled:no-underline"
+                onClick={() => { setError(null); sendCode.mutate(); }}
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          // A workspace that nobody meant to create.
+          //
+          // **This confirms rather than prevents, and the wording has to be honest
+          // about that.** The account and the tenant are written during
+          // `/auth/otp/verify`, so by the time this renders the workspace exists —
+          // what is still in the visitor's hands is whether they adopt it. Holding
+          // the session in `pending` instead of calling `setSession` is the part
+          // that matters: choosing the other number leaves the app signed out
+          // rather than sitting inside the wrong business.
+          //
+          // Preventing it outright would mean splitting verify into "prove the
+          // number" and "create the workspace", which is a real change to the
+          // signup contract and not one to make while someone is locked out.
+          <div className="space-y-3">
+            <div className="rounded-lg border border-warning/40 bg-warning/15 px-3 py-2">
+              <p className="flex items-center gap-2 text-caption font-medium text-ink-900">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                This number has no workspace yet
+              </p>
+              <p className="mt-1 font-mono text-body text-ink-900">{phone.trim()}</p>
+              <p className="mt-1 text-caption leading-snug text-ink-900">
+                Signing in created a new, empty workspace for it. If you meant a different country
+                code, your existing workspace is still there under the right number.
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => pending && land(pending)}
+            >
+              Set up this new workspace
+            </Button>
+
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setPending(null);
+                setStep('phone');
+                // The number is kept and the code cleared: the fix is almost always
+                // the country, so leaving the digits typed puts the person one click
+                // from the picker instead of retyping ten digits to prove a point.
+                setCode('');
+                setDevCode(null);
+                setError(null);
+              }}
+            >
+              Check the country code
+            </Button>
+          </div>
+        )}
+
+        {/* Suppressed on the `new` step, where the panel above has just said the same
+            thing about a specific number and saying it twice reads as reassurance. */}
+        {step !== 'new' && (
+          <div className="mt-4 flex items-start gap-2 border-t pt-3">
+            <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <p className="text-caption leading-snug text-muted-foreground">
+              New here? Entering your number creates your workspace — there is nothing separate to
+              sign up for.
+            </p>
+          </div>
+        )}
+
+        <p className="mt-3 text-center text-caption text-muted-foreground">
+          <Link to="/pricing" className="underline">See plans and pricing</Link>
+        </p>
+      </div>
     </div>
   );
 }

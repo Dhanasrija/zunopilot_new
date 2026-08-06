@@ -1,0 +1,131 @@
+# /etc/nginx/sites-available/app
+#
+# zunopilot.com + www  — the customer SPA, and a same-origin /api proxy
+# api.zunopilot.com    — the API for Meta's webhook, Razorpay's, and /media
+#
+# THIS FILE DOES NOT TOUCH x.zunopilot.com OR xapi.zunopilot.com. Those live in the separate
+# `zunopilot-dev` site and proxy an SSH reverse tunnel from a laptop. nginx matches by
+# server_name, so nothing here can capture them — but re-check both after every reload:
+#   curl -I https://x.zunopilot.com && curl -I https://xapi.zunopilot.com
+#
+# Apply with:
+#   sudo cp deploy/nginx/app /etc/nginx/sites-available/app
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot renew --dry-run       # a config certbot cannot parse breaks renewal SILENTLY
+
+server {
+    listen 80;
+    server_name zunopilot.com www.zunopilot.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 80;
+    server_name api.zunopilot.com;
+    return 301 https://$host$request_uri;
+}
+
+# ── The customer app ─────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name zunopilot.com www.zunopilot.com;
+
+    ssl_certificate     /etc/letsencrypt/live/zunopilot.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/zunopilot.com/privkey.pem;
+
+    # A symlink the deploy renames atomically, so switching releases is rename(2) rather than
+    # an rsync over the directory nginx is currently reading from.
+    root /srv/zunopilot/frontend/current;
+    index index.html;
+
+    # Bundles are pre-compressed in CI, so the box spends no CPU gzipping the 1.69 MB entry
+    # chunk on every cold request.
+    gzip_static on;
+
+    # 16m, deliberately NOT the 100m that media.service.ts allows for a DOCUMENT.
+    # multer uses memoryStorage() and the service writes input.buffer, so a 100 MB upload is
+    # 100 MB+ of heap in the process that also runs the pg-boss workers — killing it takes the
+    # job queue with it. Raise this only once uploads stream to disk.
+    client_max_body_size 16m;
+
+    # The API, same-origin. Every request carries an Authorization header, which makes it a
+    # non-simple CORS request — so serving the API cross-origin would add a preflight round
+    # trip to each one. A prefix location always beats `location /`, so try_files below cannot
+    # swallow these.
+    location /api {
+        # A file flag rather than a config edit, so taking the API down for a maintenance
+        # window does not mean touching (and possibly breaking) this file under pressure.
+        # 503 and not 200: Meta retries a 5xx webhook for days, and a 200 discards the
+        # customer's message permanently.
+        if (-f /srv/zunopilot/shared/MAINTENANCE) { return 503; }
+
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # GENERATION_TIMEOUT_MS is 90s ("generate a workflow from a description") against
+        # nginx's 60s default — so that feature 504s today while succeeding server-side.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+
+        # No Upgrade/Connection headers: there is no WebSocket or SSE anywhere in this
+        # codebase, and carrying them is cargo cult.
+    }
+
+    # Uploaded media is served by the backend, not from disk here. Proxying it same-origin
+    # also sidesteps helmet's default Cross-Origin-Resource-Policy, which would block an
+    # <img> on this origin pointing at api.zunopilot.com.
+    location /media {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # index.html must never be cached or a deploy is invisible until a hard refresh; hashed
+    # assets can be cached forever precisely because their name changes when they do.
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable" always;
+    }
+
+    # Client-side routing: /orders/:id and friends are not files on disk.
+    location / {
+        try_files $uri /index.html;
+    }
+}
+
+# ── The API host ─────────────────────────────────────────────────────────────
+# Kept even though the app now calls /api same-origin: Meta's webhook target, Razorpay's, and
+# the absolute media URLs built from APP_URL all resolve here.
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name api.zunopilot.com;
+
+    ssl_certificate     /etc/letsencrypt/live/zunopilot.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/zunopilot.com/privkey.pem;
+
+    client_max_body_size 16m;
+
+    location / {
+        if (-f /srv/zunopilot/shared/MAINTENANCE) { return 503; }
+
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+}

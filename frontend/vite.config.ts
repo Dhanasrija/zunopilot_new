@@ -9,5 +9,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Allow HTTPS dev tunnels (Meta's FB.login / Embedded Signup requires an
+    // HTTPS origin, so localhost is served through a tunnel during testing).
+    allowedHosts: ['localhost', 'x.zunopilot.com', '.zunopilot.com', '.ngrok-free.app'],
+    // Proxy the API through the dev server so a single tunnel origin serves both
+    // the app and /api (incl. /api/webhook for Meta). Avoids mixed content + CORS.
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+    },
   },
 });

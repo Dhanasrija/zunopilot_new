@@ -1,0 +1,50 @@
+# ZunoPilot — what crawlers may index.
+#
+# The Disallow list below is NOT about secrecy. Every path in it is behind authentication
+# and returns no data to an anonymous visitor. It is there because this is a single-page
+# app: /dashboard, /inbox and the rest all return HTTP 200 with the *same* HTML as the home
+# page, so without this a crawler would index two dozen duplicates of "/" under URLs that
+# show a login redirect to anyone who clicks them.
+#
+# Note this file ships to every environment it is deployed to, and it says "allow". A
+# publicly reachable staging host therefore needs `X-Robots-Tag: noindex` set at the host
+# level — a static file cannot tell where it is being served from.
+
+User-agent: *
+
+# The five genuinely public pages are allowed by omission: /, /pricing, /privacy, /terms
+# and /contact.
+
+# Signing in is not a search result anyone wants, and an indexed login page competes with
+# the home page for the brand query.
+Disallow: /login
+Disallow: /signup
+Disallow: /onboarding
+
+# The authenticated app. See the note above: duplicates, not secrets.
+Disallow: /dashboard
+Disallow: /inbox
+Disallow: /orders
+Disallow: /customers
+Disallow: /menu
+Disallow: /templates
+Disallow: /automation
+Disallow: /workflows
+Disallow: /legacy-workflows
+Disallow: /assistants
+Disallow: /connectors
+Disallow: /analytics
+Disallow: /leads
+Disallow: /campaigns
+Disallow: /tickets
+Disallow: /team
+Disallow: /roles
+Disallow: /settings
+Disallow: /billing
+Disallow: /invoices
+Disallow: /whatsapp
+
+# A support engineer's consent link, which is single-use and tenant-specific.
+Disallow: /support-session
+
+Sitemap: https://zunopilot.com/sitemap.xml

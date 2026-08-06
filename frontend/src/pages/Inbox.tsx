@@ -1,30 +1,102 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { cn, formatDateTime } from '@/lib/utils';
 import { toast } from 'sonner';
+import { usePermissions } from '@/lib/permissions';
+import { useAuthStore, useHasModule } from '@/stores/auth.store';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { PRIORITY_LABEL, TICKET_PRIORITIES, type TicketPriority } from '@/lib/tickets';
+import { ConversationList } from '@/components/inbox/ConversationList';
+import { ThreadHeader } from '@/components/inbox/ThreadHeader';
+import { MessageBubble } from '@/components/inbox/MessageBubble';
+import { Composer } from '@/components/inbox/Composer';
+import {
+  displayName, type Conversation, type Message, type Scope, type TeamMember,
+} from '@/components/inbox/types';
 
-interface Conversation {
-  id: string;
-  status: string;
-  automationPaused: boolean;
-  unreadCount: number;
-  lastMessageAt: string | null;
-  customer: { id: string; name?: string; waId: string };
-}
+// The inbox page: state, queries and mutations. Everything that draws is in
+// `components/inbox/` — this file was 574 lines with the list rows, the header, the bubbles
+// and the composer all inlined, which is why two colour systems had been living in it side by
+// side (shadcn aliases on the scope tabs, brand tokens three lines below on the assignment
+// pills).
 
-interface Message {
-  id: string;
-  direction: 'INBOUND' | 'OUTBOUND';
-  type: string;
-  body?: string | null;
-  createdAt: string;
+/**
+ * Raise a support ticket from the conversation the agent is already reading.
+ *
+ * Carries the `conversationId`, which is the whole reason to raise it from here:
+ * that link is what lets the ticket be answered on WhatsApp later, and the
+ * server takes the customer from the conversation rather than from this form.
+ */
+function RaiseFromConversation({ conversationId, customerName, open, onOpenChange }: {
+  conversationId: string;
+  customerName: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [priority, setPriority] = useState<TicketPriority>('NORMAL');
+
+  const raise = useMutation({
+    mutationFn: () => api.post('/tickets', { subject, body, priority, conversationId }),
+    onSuccess: (response) => {
+      const ticket = (response.data as { data: { number: string } }).data;
+      toast.success(`${ticket.number} raised for ${customerName}`);
+      setSubject(''); setBody(''); setPriority('NORMAL');
+      onOpenChange(false);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Raise a ticket for {customerName}</DialogTitle></DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="grid gap-1">
+            <Label htmlFor="ib-subject">Subject</Label>
+            <Input id="ib-subject" value={subject} onChange={(e) => setSubject(e.target.value)}
+              placeholder="Order never arrived" />
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor="ib-body">What happened</Label>
+            <Textarea id="ib-body" value={body} onChange={(e) => setBody(e.target.value)} rows={4} />
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor="ib-priority">Priority</Label>
+            <select
+              id="ib-priority"
+              className="h-9 rounded-md border border-ink-400 bg-surface-1 px-2 text-sm text-ink-900"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as TicketPriority)}
+            >
+              {TICKET_PRIORITIES.map((p) => (
+                <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-caption text-ink-500">
+            Linked to this conversation, so replies from the ticket reach them on
+            WhatsApp.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button disabled={!subject.trim() || !body.trim() || raise.isPending} onClick={() => raise.mutate()}>
+            {raise.isPending ? 'Raising…' : 'Raise ticket'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function Inbox() {
@@ -33,10 +105,20 @@ export default function Inbox() {
   const initial = params.get('conversationId');
   const [selectedId, setSelectedId] = useState<string | null>(initial);
   const [draft, setDraft] = useState('');
+  const [scope, setScope] = useState<Scope>('all');
+  const [raisingTicket, setRaisingTicket] = useState(false);
+  const { can } = usePermissions();
+  const hasSupport = useHasModule('SUPPORT');
+  const myId = useAuthStore((state) => state.user?.id);
 
   const conversations = useQuery({
-    queryKey: ['conversations'],
-    queryFn: async () => (await api.get<{ data: Conversation[] }>('/inbox/conversations')).data.data,
+    queryKey: ['conversations', scope],
+    queryFn: async () => {
+      const query = scope === 'mine' ? '?assignedToMe=true'
+        : scope === 'unassigned' ? '?unassigned=true'
+          : '';
+      return (await api.get<{ data: Conversation[] }>(`/inbox/conversations${query}`)).data.data;
+    },
     refetchInterval: 1_000,
   });
 
@@ -65,15 +147,107 @@ export default function Inbox() {
 
   const conv = conversations.data?.find((c) => c.id === selectedId);
 
+  // ── Keeping the newest message in view ──────────────────────────────────────
+  //
+  // The API returns up to 500 messages oldest-first, so the newest is at the
+  // bottom and a busy conversation opened at its natural scroll position showed
+  // the *oldest* message — an agent had to scroll through months of history to
+  // find what they had just been asked.
+  //
+  // Two behaviours, and the second is why this is not a one-liner:
+  //
+  //   1. **Opening a conversation jumps to the bottom**, instantly. Animating a
+  //      scroll through 147 messages is something to sit through, not a nicety.
+  //   2. **A message arriving only scrolls if the agent is already at the bottom.**
+  //      The list refetches every second, so unconditionally scrolling would yank
+  //      them back down every second while they were reading history and make it
+  //      impossible to look at anything but the latest message.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Is the agent parked at the bottom, i.e. following the conversation live? */
+  const following = useRef(true);
+  /** Which conversation the list is currently *showing*, to detect a switch. */
+  const shown = useRef<string | null>(null);
+
+  const list = messages.data;
+  // Keyed on the last id rather than the array identity: `refetchInterval` hands
+  // back a fresh array every second, and re-scrolling on each poll would fight the
+  // agent even when nothing changed.
+  const lastMessageId = list?.length ? list[list.length - 1].id : null;
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // A tolerance, not an exact equality: sub-pixel heights and a partly visible
+    // last bubble both mean `scrollTop` never quite reaches the maximum, and an
+    // exact test would decide the agent had scrolled away when they had not.
+    following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+  };
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    // No messages yet — the conversation was just selected and the fetch is still
+    // in flight. `shown` is deliberately left alone so this runs again, and
+    // still counts as a switch, once they arrive.
+    if (!el || !lastMessageId) return;
+
+    const switched = shown.current !== selectedId;
+    if (switched) {
+      shown.current = selectedId;
+      following.current = true;
+    }
+    if (switched || following.current) el.scrollTop = el.scrollHeight;
+  }, [selectedId, lastMessageId, list?.length]);
+
   const send = useMutation({
     mutationFn: async () => {
       await api.post(`/inbox/conversations/${selectedId}/messages`, { body: draft });
     },
     onSuccess: () => {
       setDraft('');
+      // Sending is an explicit request to be at the bottom: if the agent had
+      // scrolled up to check something before replying, their own message must not
+      // land somewhere they cannot see.
+      following.current = true;
       qc.invalidateQueries({ queryKey: ['messages', selectedId] });
       qc.invalidateQueries({ queryKey: ['conversations'] });
     },
+  });
+
+  const team = useQuery({
+    queryKey: ['team'],
+    queryFn: async () => (await api.get<{ data: TeamMember[] }>('/team')).data.data,
+    staleTime: 60_000,
+  });
+
+  const assign = useMutation({
+    mutationFn: async (agentId: string | null) => {
+      await api.post(`/inbox/conversations/${selectedId}/assign`, { agentId });
+    },
+    onSuccess: () => {
+      toast.success('Assignment updated');
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  /**
+   * Hand the conversation back to the bot.
+   *
+   * This existed on the server from the start and had no button, which meant a conversation
+   * that reached a handoff was automated exactly once and never again: Release clears the
+   * agent and the Automation toggle flips a different flag, but neither cancels the parked
+   * instance holding the workflow slot.
+   */
+  const handBackToBot = useMutation({
+    mutationFn: async () => {
+      await api.post(`/conversations/${selectedId}/resume-bot`);
+    },
+    onSuccess: () => {
+      toast.success('Handed back to the bot');
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const toggleAutomation = useMutation({
@@ -87,78 +261,80 @@ export default function Inbox() {
   });
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-48px)]">
-      {/* Page header */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold">Inbox</h1>
-          <p className="text-sm text-muted-foreground">Manage your WhatsApp conversations in real-time.</p>
-        </div>
+    <div className="flex flex-col gap-4 lg:h-[calc(100vh-var(--shell-offset))]">
+      <div className="shrink-0">
+        <h1 className="text-h2 font-semibold text-ink-900">Inbox</h1>
+        <p className="text-sm text-ink-500">Manage your WhatsApp conversations in real-time.</p>
       </div>
 
-      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
-      <Card className="col-span-4 flex flex-col min-h-0">
-        <CardHeader className="px-3 py-3 border-b shrink-0"><CardTitle className="text-sm font-semibold">Conversations</CardTitle></CardHeader>
-        <CardContent className="flex-1 overflow-auto p-0">
-          {conversations.data?.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelectedId(c.id)}
-              className={cn('w-full text-left p-3 border-b hover:bg-accent transition-colors', selectedId === c.id && 'bg-accent')}
-            >
-              <div className="flex justify-between items-start">
-                <div className="font-medium">{c.customer.name || c.customer.waId}</div>
-                {c.unreadCount > 0 && <Badge>{c.unreadCount}</Badge>}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
-                {c.lastMessageAt ? formatDateTime(c.lastMessageAt) : 'No messages'}
-                {/* {c.status === 'HUMAN_TAKEOVER' && <Badge variant="destructive" className="text-[10px]">HUMAN</Badge>} */}
-              </div>
-            </button>
-          )) || <div className="p-4 text-sm text-muted-foreground">Loading…</div>}
-        </CardContent>
-      </Card>
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
+        <Card className="col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-4">
+          <ConversationList
+            conversations={conversations.data}
+            isLoading={conversations.isLoading}
+            scope={scope}
+            onScopeChange={setScope}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            myId={myId}
+          />
+        </Card>
 
-      <Card className="col-span-8 flex flex-col min-h-0">
-        {!conv ? (
-          <CardContent className="flex-1 grid place-items-center text-muted-foreground">Select a conversation</CardContent>
-        ) : (
-          <>
-            <CardHeader className="border-b flex flex-row items-center justify-between shrink-0">
-              <div>
-                <CardTitle>{conv.customer.name || conv.customer.waId}</CardTitle>
-                <div className="text-xs text-muted-foreground">{conv.customer.waId}</div>
-              </div>
-              {/* <div className="flex items-center gap-2 text-sm">
-                <span>Automation</span>
-                <Switch
-                  checked={!conv.automationPaused}
-                  onCheckedChange={(v) => toggleAutomation.mutate(!v)}
-                />
-              </div> */}
-            </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto min-h-0 space-y-2 py-4 bg-muted/20">
-              {messages.data?.map((m) => (
-                <div key={m.id} className={cn('max-w-[70%] rounded-lg p-2 px-3 text-sm', m.direction === 'OUTBOUND' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-background border')}>
-                  <div>{m.body || `[${m.type}]`}</div>
-                  <div className={cn('text-[10px] mt-1', m.direction === 'OUTBOUND' ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
-                    {formatDateTime(m.createdAt)}
-                  </div>
-                </div>
-              )) || <div className="text-sm text-muted-foreground">Loading…</div>}
-            </CardContent>
-            <div className="border-t p-3 flex gap-2 shrink-0">
-              <Input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Type a reply…"
-                onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) send.mutate(); }}
-              />
-              <Button onClick={() => send.mutate()} disabled={!draft.trim() || send.isPending}>Send</Button>
+        <Card className="col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-8">
+          {!conv ? (
+            <div className="grid flex-1 place-items-center p-6 text-sm text-ink-500">
+              Select a conversation
             </div>
-          </>
-        )}
-      </Card>
+          ) : (
+            <>
+              <ThreadHeader
+                conversation={conv}
+                team={team.data ?? []}
+                myId={myId}
+                canAssignOthers={can('inbox:assign_others')}
+                hasSupport={hasSupport}
+                canRaiseTicket={can('tickets:write')}
+                onAssign={(agentId) => assign.mutate(agentId)}
+                onHandBackToBot={() => handBackToBot.mutate()}
+                handingBack={handBackToBot.isPending}
+                onToggleAutomation={(paused) => toggleAutomation.mutate(paused)}
+                onRaiseTicket={() => setRaisingTicket(true)}
+              />
+
+              <RaiseFromConversation
+                conversationId={conv.id}
+                customerName={displayName(conv.customer)}
+                open={raisingTicket}
+                onOpenChange={setRaisingTicket}
+              />
+
+              <div
+                ref={scrollRef}
+                onScroll={onScroll}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4"
+              >
+                {/*
+                  `mt-auto` bottom-aligns a thread shorter than the pane, so two messages sit
+                  above the composer instead of stranded at the top with a field of empty
+                  white beneath them. Once the thread overflows, `mt-auto` has no effect and
+                  the scroll behaviour above takes over unchanged.
+                */}
+                <div className="mt-auto space-y-2">
+                  {messages.data
+                    ? messages.data.map((m) => <MessageBubble key={m.id} message={m} myId={myId} />)
+                    : <p className="text-sm text-ink-500">Loading…</p>}
+                </div>
+              </div>
+
+              <Composer
+                value={draft}
+                onChange={setDraft}
+                onSend={() => send.mutate()}
+                sending={send.isPending}
+              />
+            </>
+          )}
+        </Card>
       </div>
     </div>
   );

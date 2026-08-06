@@ -1,0 +1,180 @@
+# ZunoPilot CI/CD
+#
+# Build and test on every push to `main` and on every pull request. Deploying is a separate,
+# MANUAL step — there is no staging environment and no restore-tested backup yet, so a merge
+# should not be able to reach production on its own.
+#
+# **Nothing is built on the production box.** `vite build` peaks near a gigabyte bundling the
+# 1.69 MB entry chunk, and that box also serves live traffic. Both SPAs are built here and
+# shipped as artifacts. The backend has no build step (it runs TypeScript through tsx), so it
+# ships source plus a prebuilt runtime `node_modules`.
+#
+# Node is pinned to the version the server runs. A mismatch here is the kind of thing that
+# only shows up as a native-module load failure at boot.
+
+image: node:22.22.2
+
+clone:
+  depth: 1
+
+definitions:
+  caches:
+    # Keyed on the lockfile so a dependency bump invalidates the cache instead of silently
+    # reusing a stale tree. The backend key also includes the Prisma schema, because the cache
+    # carries the GENERATED client under node_modules/.prisma — a schema change with an
+    # unchanged lockfile would otherwise restore a client that no longer matches the models.
+    fe-npm:
+      key: { files: [frontend/package-lock.json] }
+      path: frontend/node_modules
+    sa-npm:
+      key: { files: [superadmin/package-lock.json] }
+      path: superadmin/node_modules
+    be-npm:
+      key: { files: [backend/package-lock.json, backend/prisma/schema.prisma] }
+      path: backend/node_modules
+    # frontend/tsconfig.tsbuildinfo is deliberately NOT cached: `tsc -b` is an incremental
+    # composite build, and a stale buildinfo makes it skip typechecking it should have done.
+
+  services:
+    pg:
+      image: postgres:16-alpine
+      variables:
+        POSTGRES_DB: zunopilot_test
+        POSTGRES_USER: zuno
+        POSTGRES_PASSWORD: zuno
+        # Durability is meaningless in a container that dies with the step, and the backend
+        # suites run serially against one database — they are almost entirely fsync-bound.
+        POSTGRES_INITDB_ARGS: "--nosync"
+      memory: 1024
+
+  steps:
+    # ── frontend ─────────────────────────────────────────────────────────────
+    - step: &frontend
+        name: frontend — gates, types, tests, build
+        caches: [fe-npm]
+        script:
+          - cd frontend
+          - npm ci --no-audit --no-fund
+          # Vite reads VITE_-prefixed variables straight out of the environment. A Bitbucket
+          # repository variable named VITE_API_BASE_URL would therefore be baked into the
+          # bundle and silently undo the same-origin decision — reintroducing a CORS preflight
+          # on every authenticated request, with nothing in the diff to show for it.
+          - >
+            test -z "${VITE_API_BASE_URL:-}" ||
+            { echo "VITE_API_BASE_URL is set. The app must call same-origin /api. Refusing."; exit 1; }
+          - npm test
+          # Runs the brand, contrast and legacy-page gates first; each exits non-zero.
+          - npm run build
+          # And assert the OUTCOME, not just the input. The guard above only inspects the
+          # environment, but Vite also reads a `.env` on disk — so a stray committed .env, or
+          # a future `.env.production`, would bake an absolute origin in while the guard
+          # stayed green. Checking the emitted bundle catches every route in.
+          - >
+            if grep -rlE 'https?://(x?api\.)?zunopilot\.com/api' dist/assets/*.js >/dev/null 2>&1; then
+              echo "An absolute API origin is baked into the bundle. The app must call same-origin /api."; exit 1;
+            fi
+          # Pre-compress so nginx can serve with `gzip_static on` and spend no CPU on the
+          # 1.69 MB entry chunk or the 2.8 MB hero SVG.
+          - >
+            find dist -type f -size +1k
+            \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg'
+            -o -name '*.json' -o -name '*.txt' -o -name '*.xml' \)
+            -exec gzip -9 -k {} +
+        artifacts:
+          - frontend/dist/**
+
+    # ── superadmin ───────────────────────────────────────────────────────────
+    - step: &superadmin
+        name: superadmin — types, tests, build
+        caches: [sa-npm]
+        script:
+          - cd superadmin
+          - npm ci --no-audit --no-fund
+          - npm test
+          # The only build-time variable in the whole system. Its default is
+          # http://localhost:5173, which makes the support-access handover link in the console
+          # dead in production — it would send an operator to their own machine.
+          - VITE_CUSTOMER_APP_URL=https://zunopilot.com npm run build
+          - >
+            find dist -type f -size +1k
+            \( -name '*.js' -o -name '*.css' -o -name '*.html' \)
+            -exec gzip -9 -k {} +
+        artifacts:
+          - superadmin/dist/**
+
+    # ── backend ──────────────────────────────────────────────────────────────
+    - step: &backend-test
+        name: backend — typecheck + suites against a real Postgres
+        caches: [be-npm]
+        services: [pg]
+        script:
+          # config/env.ts calls dotenv.config(), which does not override values already in the
+          # environment — and a fresh clone has no .env anyway. Plain exports are enough.
+          - export DATABASE_URL="postgresql://zuno:zuno@localhost:5432/zunopilot_test?schema=public&connection_limit=15&pool_timeout=15"
+          # Both servers exit(1) below 32 characters. These are throwaway CI values; the real
+          # secrets never enter Bitbucket.
+          - export JWT_SECRET="ci-only-not-a-secret-0123456789abcdef0123456789abcdef"
+          - export SUPERADMIN_JWT_SECRET="ci-only-not-a-secret-fedcba9876543210fedcba9876543210"
+          - export ENCRYPTION_KEY="$(head -c 32 /dev/urandom | base64)"
+          # The e2e webhook test signs its payload with this and expects verification to pass.
+          - export META_APP_SECRET="ci-meta-app-secret"
+          - export META_WEBHOOK_VERIFY_TOKEN="ci-verify-token"
+          - cd backend
+          - npm ci --no-audit --no-fund
+          - npx prisma generate
+          # Bitbucket starts service containers but does not wait for readiness.
+          - for i in $(seq 1 30); do npx prisma migrate deploy && break || sleep 2; done
+          # tsx strips types at runtime and never checks them, so this step is the ONLY type
+          # gate the backend has. Keep it blocking.
+          - npm run typecheck
+          - npm test
+
+    - step: &backend-package
+        name: backend — runtime tree + source
+        script:
+          - cd backend
+          # Correct only because tsx and prisma are `dependencies`: both are needed at runtime
+          # on the server (tsx to execute, prisma to run `migrate deploy`).
+          - npm ci --omit=dev --no-audit --no-fund
+          - npx prisma generate
+          - tar -czf ../backend-node_modules.tgz node_modules
+          - cd ..
+          - >
+            tar -czf backend-src.tgz
+            backend/src backend/prisma backend/package.json backend/package-lock.json
+            backend/tsconfig.json backend/ecosystem.config.cjs
+          # Content address for the runtime tree, so a deploy that changes no dependency skips
+          # re-uploading ~65 MB.
+          - cat backend/package-lock.json backend/prisma/schema.prisma | sha256sum | cut -c1-16 > deps.sha
+        artifacts:
+          - backend-node_modules.tgz
+          - backend-src.tgz
+          - deps.sha
+
+    # ── deploy ───────────────────────────────────────────────────────────────
+    - step: &deploy
+        name: deploy to production
+        # The node image has no rsync or ssh client.
+        image: atlassian/default-image:4
+        deployment: production
+        trigger: manual
+        script:
+          - bash deploy/deploy.sh
+
+pipelines:
+  branches:
+    main:
+      - parallel:
+          steps:
+            - step: *frontend
+            - step: *superadmin
+            - step: *backend-test
+      - step: *backend-package
+      - step: *deploy
+  pull-requests:
+    '**':
+      - parallel:
+          steps:
+            - step: *frontend
+            - step: *superadmin
+            - step: *backend-test

@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
+import { Pagination } from '@/components/ui/pagination';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +23,7 @@ import { toast } from 'sonner';
 import {
   Plus, Trash2, ShoppingBag, ChefHat, CheckCircle, IndianRupee,
   RefreshCw, Search, Download, MoreVertical, TrendingUp, TrendingDown,
-  ChevronLeft, ChevronRight,
+  Eye,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -39,13 +41,13 @@ const NEXT: Record<OrderStatus, OrderStatus[]> = {
 };
 
 const STATUS_STYLE: Record<OrderStatus, string> = {
-  NEW: 'bg-violet-100 text-violet-700 border-violet-200',
-  ACCEPTED: 'bg-blue-100 text-blue-700 border-blue-200',
-  PREPARING: 'bg-amber-100 text-amber-700 border-amber-200',
-  READY: 'bg-sky-100 text-sky-700 border-sky-200',
-  OUT_FOR_DELIVERY: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-  DELIVERED: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  CANCELLED: 'bg-red-100 text-red-700 border-red-200',
+  NEW: 'bg-accent-100 text-accent-700 border-accent-100',
+  ACCEPTED: 'bg-accent-100 text-accent-700 border-accent-100',
+  PREPARING: 'bg-warning/15 text-ink-900 border-warning/40',
+  READY: 'bg-accent-100 text-accent-700 border-accent-100',
+  OUT_FOR_DELIVERY: 'bg-accent-100 text-accent-700 border-accent-100',
+  DELIVERED: 'bg-success/10 text-success border-success/30',
+  CANCELLED: 'bg-danger/10 text-danger border-danger/30',
 };
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -112,21 +114,9 @@ function timeAgo(d: string) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function isToday(d: string) {
-  const dt = new Date(d);
-  const now = new Date();
-  return dt.getDate() === now.getDate() && dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
-}
-
-function isYesterday(d: string) {
-  const dt = new Date(d);
-  const y = new Date(); y.setDate(y.getDate() - 1);
-  return dt.getDate() === y.getDate() && dt.getMonth() === y.getMonth() && dt.getFullYear() === y.getFullYear();
-}
-
-function isLast7(d: string) {
-  return Date.now() - new Date(d).getTime() < 7 * 24 * 60 * 60 * 1000;
-}
+// `isToday` / `isYesterday` / `isLast7` used to live here, filtering the fetched array
+// in the browser. The equivalent boundaries are now computed once in `dateRange` and
+// sent to the server, so there is nothing left to test a single row against.
 
 // ── Create Order Dialog ───────────────────────────────────────────────────────
 
@@ -148,7 +138,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
   const { data: menuItems } = useQuery<MenuItem[]>({
     queryKey: ['menu-items-list'],
-    queryFn: async () => (await api.get<{ data: MenuItem[] }>('/menu/items')).data.data,
+    queryFn: async () => (await api.get<{ data: MenuItem[] }>('/catalogue/items')).data.data,
     enabled: open,
   });
 
@@ -202,7 +192,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} className="gap-1.5 bg-violet-600 hover:bg-violet-700">
+      <Button onClick={() => setOpen(true)} className="gap-1 bg-accent-600 hover:bg-accent-700">
         <Plus className="w-4 h-4" /> Create Order
       </Button>
 
@@ -211,7 +201,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
           <DialogHeader>
             <DialogTitle>Create New Order</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-2">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Customer</Label>
               <Input placeholder="Search by name or phone…" value={customerSearch}
@@ -296,7 +286,7 @@ function CreateOrderDialog({ onCreated }: { onCreated: () => void }) {
 
 function StatusBadge({ status }: { status: OrderStatus }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${STATUS_STYLE[status]}`}>
+    <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold border ${STATUS_STYLE[status]}`}>
       {STATUS_LABEL[status]}
     </span>
   );
@@ -307,16 +297,89 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 const DATE_OPTIONS = ['Today', 'Yesterday', 'Last 7 days', 'All'];
 const PAGE_SIZE = 10;
 
+/**
+ * Turn the date chip into an explicit range for the API.
+ *
+ * A range and not just a lower bound, because "Yesterday" needs a ceiling as well as a
+ * floor. Computed here rather than server-side so the boundary is the *viewer's*
+ * midnight — a cutoff calculated in the server's timezone would put this morning's
+ * orders under "Yesterday" for anyone not sharing it.
+ */
+const dateRange = (filter: string): { since?: string; until?: string } => {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const DAY = 86_400_000;
+
+  switch (filter) {
+    case 'Today':
+      return { since: midnight.toISOString() };
+    case 'Yesterday':
+      return {
+        since: new Date(midnight.getTime() - DAY).toISOString(),
+        until: midnight.toISOString(),
+      };
+    case 'Last 7 days':
+      return { since: new Date(midnight.getTime() - 6 * DAY).toISOString() };
+    default:
+      return {};
+  }
+};
+
+interface OrderSummary {
+  newOrders: number;
+  preparing: number;
+  delivered: number;
+  /** A string: `Decimal` cannot cross JSON as a number without losing precision. */
+  revenue: string;
+  total: number;
+}
+
 export default function Orders() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dateFilter, setDateFilter] = useState('Today');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
   const [page, setPage] = useState(1);
 
+  const range = dateRange(dateFilter);
+  const listParams = {
+    ...range,
+    ...(statusFilter === 'ALL' ? {} : { status: statusFilter }),
+    ...(search.trim() ? { search: search.trim() } : {}),
+  };
+
+  /**
+   * One page of orders, filtered by the server.
+   *
+   * This used to fetch every order — capped at 200 — and then filter, sort, page and
+   * total it in the browser. That is correct only while a workspace has fewer than 200
+   * orders: above it the oldest silently vanished, the row count was the size of the
+   * truncated array, and revenue was the sum of whatever had made it through. Every
+   * filter is in the query key, so changing one refetches rather than re-slicing a
+   * stale array.
+   */
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['orders'],
-    queryFn: async () => (await api.get<{ data: Order[] }>('/orders')).data.data,
+    queryKey: ['orders', listParams, page],
+    queryFn: async () => {
+      const response = await api.get<{ data: Order[]; meta: { total: number } }>('/orders', {
+        params: { ...listParams, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE },
+      });
+      return { rows: response.data.data, total: response.data.meta.total };
+    },
+  });
+
+  /**
+   * The stats cards, from the server, over every order in the date range.
+   *
+   * Deliberately **not** derived from the page above. The cards count each status side
+   * by side, so a status-filtered list cannot produce them — and the previous version's
+   * revenue figure was simply the sum of one capped fetch.
+   */
+  const summary = useQuery({
+    queryKey: ['orders-summary', range],
+    queryFn: async () =>
+      (await api.get<{ data: OrderSummary }>('/orders/summary', { params: range })).data.data,
   });
 
   const updateStatus = useMutation({
@@ -328,136 +391,130 @@ export default function Orders() {
     },
   });
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
-  const stats = useMemo(() => {
-    const all = data ?? [];
-    return {
-      newOrders: all.filter((o) => o.status === 'NEW').length,
-      preparing: all.filter((o) => o.status === 'PREPARING' || o.status === 'ACCEPTED').length,
-      delivered: all.filter((o) => o.status === 'DELIVERED').length,
-      revenue: all.reduce((s, o) => s + Number(o.totalAmount), 0),
-    };
-  }, [data]);
+  // Filtering, paging and totalling all happen on the server now. What arrives is
+  // already the page to render.
+  const paginated = data?.rows ?? [];
+  const total = data?.total ?? 0;
 
-  // ── Filtered + paged ───────────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    let rows = data ?? [];
+  const stats = {
+    newOrders: summary.data?.newOrders ?? 0,
+    preparing: summary.data?.preparing ?? 0,
+    delivered: summary.data?.delivered ?? 0,
+    revenue: Number(summary.data?.revenue ?? 0),
+  };
 
-    // Date filter
-    if (dateFilter === 'Today') rows = rows.filter((o) => isToday(o.placedAt));
-    else if (dateFilter === 'Yesterday') rows = rows.filter((o) => isYesterday(o.placedAt));
-    else if (dateFilter === 'Last 7 days') rows = rows.filter((o) => isLast7(o.placedAt));
-
-    // Status filter
-    if (statusFilter !== 'ALL') rows = rows.filter((o) => o.status === statusFilter);
-
-    // Search
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      rows = rows.filter((o) =>
-        String(o.orderNumber).includes(q) ||
-        o.customerName?.toLowerCase().includes(q) ||
-        o.contactPhone?.includes(q),
-      );
-    }
-
-    return rows;
-  }, [data, dateFilter, statusFilter, search]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // What period the numbers above actually cover. Stating it beats the invented
+  // "vs yesterday" that used to sit there — and it is true, because it is the
+  // filter the stats were computed from.
+  const rangeLabel = dateFilter === 'All' ? 'All time' : dateFilter;
 
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
   const handleDateFilter = (v: string) => { setDateFilter(v); setPage(1); };
   const handleStatusFilter = (v: OrderStatus | 'ALL') => { setStatusFilter(v); setPage(1); };
 
-  const exportCSV = () => {
+  /**
+   * Export every matching order, not the page on screen.
+   *
+   * Now that the list is one page, `paginated` holds ten rows — exporting that would
+   * turn "Export" into "export what I can see", which is not what anyone clicking it
+   * wants. So this refetches the same filters without paging. `take` is capped at 200
+   * server-side, so it walks pages until it has them all.
+   */
+  const exportCSV = async () => {
+    const collected: Order[] = [];
+    const BATCH = 200;
+    for (let skip = 0; ; skip += BATCH) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await api.get<{ data: Order[]; meta: { total: number } }>('/orders', {
+        params: { ...listParams, take: BATCH, skip },
+      });
+      collected.push(...response.data.data);
+      if (collected.length >= response.data.meta.total || response.data.data.length === 0) break;
+    }
+
     const rows = [
       ['Order ID', 'Customer', 'Phone', 'Items', 'Amount', 'Status', 'Placed At'],
-      ...filtered.map((o) => [
+      ...collected.map((o) => [
         `#ORD-${o.orderNumber}`, o.customerName, o.contactPhone ?? '',
         o.items.map((i) => `${i.itemName} x${i.quantity}`).join('; '),
         o.totalAmount, o.status, o.placedAt,
       ]),
     ];
     const csv = rows.map((r) => r.join(',')).join('\n');
-    const a = document.createElement('a'); a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
-    a.download = `orders-${Date.now()}.csv`; a.click();
+    const a = document.createElement('a');
+    a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    a.download = `orders-${collected.length}-rows.csv`;
+    a.click();
+    toast.success(`Exported ${collected.length} orders`);
   };
 
-  // ── Pagination numbers ─────────────────────────────────────────────────────
-  const pageNumbers: (number | '...')[] = useMemo(() => {
-    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    if (page <= 3) return [1, 2, 3, '...', totalPages];
-    if (page >= totalPages - 2) return [1, '...', totalPages - 2, totalPages - 1, totalPages];
-    return [1, '...', page, '...', totalPages];
-  }, [page, totalPages]);
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Orders</h1>
+          <h1 className="text-h2 font-semibold">Orders</h1>
           <p className="text-sm text-muted-foreground">Manage incoming orders and track their status.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => refetch()} disabled={isFetching}>
+          <Button variant="outline" size="sm" className="gap-1 h-9" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} /> Refresh
           </Button>
           <CreateOrderDialog onCreated={() => {}} />
         </div>
       </div>
 
-      {/* Stats Cards */}
+{/*
+        Stats cards.
+
+        These carried hardcoded trend percentages — "+20% vs yesterday" and so on —
+        which were shown regardless of the numbers above them. On a workspace with
+        no orders it read "New Orders 0, +20% vs yesterday", which is a fabricated
+        metric presented as a real one. Removed rather than faked differently: the
+        API has no yesterday comparison to serve, and the Analytics page is where
+        real trends live.
+      */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
             label: 'New Orders', value: stats.newOrders, icon: ShoppingBag,
-            iconBg: 'bg-violet-100', iconColor: 'text-violet-600',
-            trend: '+20%', up: true,
+            iconBg: 'bg-accent-100', iconColor: 'text-accent-600',
           },
           {
             label: 'Preparing', value: stats.preparing, icon: ChefHat,
-            iconBg: 'bg-orange-100', iconColor: 'text-orange-500',
-            trend: '-8%', up: false,
+            iconBg: 'bg-warning/15', iconColor: 'text-warning',
           },
           {
             label: 'Delivered', value: stats.delivered, icon: CheckCircle,
-            iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600',
-            trend: '+15%', up: true,
+            iconBg: 'bg-success/10', iconColor: 'text-success',
           },
           {
             label: 'Revenue', value: formatCurrency(stats.revenue), icon: IndianRupee,
-            iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600',
-            trend: '+18%', up: true, large: true,
+            iconBg: 'bg-warning/15', iconColor: 'text-ink-900',
           },
-        ].map(({ label, value, icon: Icon, iconBg, iconColor, trend, up }) => (
-          <div key={label} className="rounded-xl border bg-white shadow-sm p-5 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
+        ].map(({ label, value, icon: Icon, iconBg, iconColor }) => (
+          <div key={label} className="rounded-lg border bg-surface-1 shadow-none p-4 flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
               <Icon className={`w-6 h-6 ${iconColor}`} />
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="text-2xl font-bold mt-0.5">{value}</p>
-              <div className={`flex items-center gap-0.5 text-xs mt-0.5 ${up ? 'text-emerald-600' : 'text-red-500'}`}>
-                {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                {trend} vs yesterday
-              </div>
+            <div className="min-w-0">
+              <p className="text-caption text-muted-foreground">{label}</p>
+              <p className="text-h2 font-semibold mt-px">{value}</p>
+              <p className="text-caption text-muted-foreground mt-px">{rangeLabel}</p>
             </div>
           </div>
         ))}
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+      <div className="rounded-lg border bg-surface-1 shadow-none overflow-hidden">
         {/* Filters toolbar */}
-        <div className="flex flex-wrap items-center gap-2 px-5 py-4 border-b">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-4 border-b">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search order ID, customer or phone..."
-              className="pl-9 h-9 text-sm"
+              className="pl-8 h-9 text-sm"
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
             />
@@ -477,7 +534,7 @@ export default function Orders() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={exportCSV}>
+          <Button variant="outline" size="sm" className="gap-1 h-9" onClick={exportCSV}>
             <Download className="w-3.5 h-3.5" /> Export
           </Button>
         </div>
@@ -486,9 +543,9 @@ export default function Orders() {
           <div className="flex items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
             <RefreshCw className="w-4 h-4 animate-spin" /> Loading orders…
           </div>
-        ) : filtered.length === 0 ? (
+        ) : total === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
-            <ShoppingBag className="w-8 h-8 text-slate-300" />
+            <ShoppingBag className="w-8 h-8 text-ink-300" />
             <p>No orders found</p>
           </div>
         ) : (
@@ -496,36 +553,41 @@ export default function Orders() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-slate-50/60">
+                  <tr className="border-b bg-surface-0/60">
                     {['Order ID', 'Customer', 'Phone', 'Items', 'Amount', 'Status', 'Order Time', 'Actions'].map((h) => (
-                      <th key={h} className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">
+                      <th key={h} className="text-left text-caption font-semibold text-ink-500 px-4 py-3 whitespace-nowrap">
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-ink-300">
                   {paginated.map((o) => (
-                    <tr key={o.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700 whitespace-nowrap">
-                        #ORD-{o.orderNumber}
+                    <tr key={o.id} className="hover:bg-surface-0/50 transition-colors">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <button
+                          onClick={() => navigate(`/orders/${o.id}`)}
+                          className="font-medium text-accent-600 hover:text-accent-700 hover:underline"
+                        >
+                          #ORD-{o.orderNumber}
+                        </button>
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                      <td className="px-4 py-3 font-medium text-ink-700 whitespace-nowrap">
                         {o.customerName}
                       </td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                      <td className="px-4 py-3 text-ink-500 whitespace-nowrap">
                         {o.contactPhone ?? '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">
+                      <td className="px-4 py-3 text-ink-700 max-w-[220px] truncate">
                         {o.items.map((i) => `${i.itemName} x ${i.quantity}`).join(', ')}
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                      <td className="px-4 py-3 font-medium text-ink-700 whitespace-nowrap">
                         {formatCurrency(o.totalAmount)}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <StatusBadge status={o.status} />
                       </td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                      <td className="px-4 py-3 text-ink-500 whitespace-nowrap">
                         {timeAgo(o.placedAt)}
                       </td>
                       <td className="px-4 py-3">
@@ -536,13 +598,16 @@ export default function Orders() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem className="gap-2" onClick={() => navigate(`/orders/${o.id}`)}>
+                              <Eye className="w-3.5 h-3.5" /> View details
+                            </DropdownMenuItem>
                             {NEXT[o.status].length === 0 ? (
                               <DropdownMenuItem disabled>No actions</DropdownMenuItem>
                             ) : (
                               NEXT[o.status].map((next) => (
                                 <DropdownMenuItem
                                   key={next}
-                                  className={next === 'CANCELLED' ? 'text-red-500 focus:text-red-500' : ''}
+                                  className={next === 'CANCELLED' ? 'text-danger focus:text-danger' : ''}
                                   onClick={() => updateStatus.mutate({ id: o.id, status: next })}
                                 >
                                   Mark {STATUS_LABEL[next]}
@@ -558,34 +623,14 @@ export default function Orders() {
               </table>
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50/40">
-              <p className="text-xs text-slate-500">
-                Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)} to{' '}
-                {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} orders
-              </p>
-              <div className="flex items-center gap-1">
-                <Button variant="outline" size="icon" className="w-7 h-7"
-                  disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </Button>
-                {pageNumbers.map((n, i) =>
-                  n === '...' ? (
-                    <span key={`dots-${i}`} className="w-7 text-center text-xs text-slate-400">…</span>
-                  ) : (
-                    <Button key={n} variant={page === n ? 'default' : 'outline'} size="icon"
-                      className={`w-7 h-7 text-xs ${page === n ? 'bg-violet-600 hover:bg-violet-700 border-violet-600' : ''}`}
-                      onClick={() => setPage(n as number)}>
-                      {n}
-                    </Button>
-                  )
-                )}
-                <Button variant="outline" size="icon" className="w-7 h-7"
-                  disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
+            {/* `total` is the server's count, so this is honest above 200 orders. */}
+            <Pagination
+              page={page}
+              onPageChange={setPage}
+              pageSize={PAGE_SIZE}
+              total={total}
+              noun="orders"
+            />
           </>
         )}
       </div>

@@ -1,0 +1,15 @@
+-- Blocking issues a generated draft could not fix, kept on the version that carries them.
+--
+-- Generation now validates its own output and hands the problems back to the model, bounded to
+-- two repair turns. When the loop gives up, the draft is still saved — a graph the operator can
+-- open and fix beats "try describing it again" — but publishing it has to stay refused, and the
+-- reason has to survive a page reload. That is what this column is for.
+--
+-- Nullable rather than defaulting to '[]', deliberately. Null means "no generator produced this
+-- version"; an empty array means "generated, and it came out clean". The publish gate reads the
+-- difference, and every version that already exists is correctly null.
+--
+-- Purely additive: one nullable column, nothing altered or dropped, so the two hand-written
+-- partial unique indexes (WorkflowInstance_one_active_per_conversation and
+-- Price_one_active_per_plan_interval) are untouched.
+ALTER TABLE "WorkflowVersion" ADD COLUMN "unresolvedIssues" JSONB;

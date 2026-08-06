@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The five genuinely public pages.
+
+  Hand-written rather than generated: it is five URLs that change only when someone adds a
+  marketing page, so a generator would be more machinery than the thing it produces. If a
+  blog or a set of feature pages ever arrives, generate it then.
+
+  /login, /signup and /onboarding are deliberately absent. A sign-in form is not a search
+  result anyone wants, and an indexed one competes with the home page for the brand query.
+
+  `lastmod` is the date this file was written, not a build timestamp. A date that moves on
+  every deploy teaches crawlers to ignore it, so it should be edited when the page's copy
+  actually changes.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://zunopilot.com/</loc>
+    <lastmod>2026-08-05</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://zunopilot.com/pricing</loc>
+    <lastmod>2026-08-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://zunopilot.com/contact</loc>
+    <lastmod>2026-08-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://zunopilot.com/privacy</loc>
+    <lastmod>2026-08-05</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://zunopilot.com/terms</loc>
+    <lastmod>2026-08-05</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>

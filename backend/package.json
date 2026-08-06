@@ -3,17 +3,27 @@
   "version": "1.0.0",
   "description": "WhatsApp Business Automation Platform - Backend (Node + Express + Prisma)",
   "type": "module",
-  "main": "src/server.js",
+  "main": "src/server.ts",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "dev:superadmin": "tsx watch src/superadmin-server.ts",
+    "start:superadmin": "tsx src/superadmin-server.ts",
+    "seed:superadmin": "tsx prisma/seed-superadmin.ts",
+    "seed:demo-volume": "tsx prisma/seed-demo-volume.ts",
+    "seed:connector-types": "tsx prisma/seed-connector-types.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
+    "@types/web-push": "^3.6.4",
     "axios": "^1.7.7",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -21,14 +31,34 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "express-validator": "^7.2.0",
+    "google-auth-library": "^11.0.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.13.10",
     "morgan": "^1.10.0",
+    "multer": "^2.2.0",
+    "openai": "^7.1.0",
+    "pg-boss": "^12.26.3",
+    "prisma": "^5.20.0",
+    "tsx": "^4.23.1",
     "uuid": "^10.0.0",
-    "winston": "^3.15.0"
+    "web-push": "^3.6.7",
+    "winston": "^3.15.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.1.2",
+    "@types/supertest": "^7.2.1",
+    "@types/uuid": "^10.0.0",
     "nodemon": "^3.1.7",
-    "prisma": "^5.20.0"
+    "supertest": "^7.2.2",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
   }
 }
