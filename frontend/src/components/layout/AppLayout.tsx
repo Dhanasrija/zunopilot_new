@@ -12,7 +12,7 @@ import {
   LayoutDashboard, MessageSquare, ShoppingCart, BookOpen,
   Users, Bell, Settings, BarChart3, Smartphone, LogOut, UserCircle2, ChevronUp,
   Workflow as WorkflowIcon, Bot, PlugZap, Users2, CreditCard,
-  Target, Megaphone, LifeBuoy, Menu, PanelLeftClose, PanelLeftOpen,
+  Target, Megaphone, LifeBuoy, Menu, PanelLeftClose, PanelLeftOpen, MessageSquareReply,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -49,6 +49,13 @@ const nav: Array<{
   { to: '/leads', label: 'Leads', icon: Target, permission: 'leads:read', module: 'LEADS' },
   { to: '/campaigns', label: 'Campaigns', icon: Megaphone, permission: 'campaigns:read', module: 'MARKETING' },
   { to: '/tickets', label: 'Support', icon: LifeBuoy, permission: 'tickets:read', module: 'SUPPORT' },
+  // **No `module`, deliberately.** `KEYWORD_RULES` gates the keyword half of this page; the
+  // fallback message — what a customer gets when nothing matched — belongs to every workspace,
+  // so the entry stays. The page hides the keyword cards on its own.
+  //
+  // "Auto-replies" rather than "Automation": the nav already has Workflows and Assistants, and
+  // a third word for roughly the same idea helps nobody find anything.
+  { to: '/automation', label: 'Auto-replies', icon: MessageSquareReply, permission: 'automation:write' },
   { to: '/assistants', label: 'Assistants', icon: Bot, permission: 'workflows:read' },
   { to: '/workflows', label: 'Workflows', icon: WorkflowIcon, permission: 'workflows:read' },
   { to: '/connectors', label: 'Connectors', icon: PlugZap, permission: 'connectors:read' },

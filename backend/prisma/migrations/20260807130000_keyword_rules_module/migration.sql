@@ -1,0 +1,29 @@
+-- An operator switch for keyword replies: the workspace's own FAQ answers.
+--
+-- A `KeywordRule` is "if the message mentions any of these words, send this response". Useful
+-- for a business with a handful of stock answers — opening hours, delivery area, parking — and
+-- noise for one whose conversations all go through workflows or the AI agent.
+--
+-- **Defaults ON, which is the opposite of how modules normally work** — the same exception
+-- `AI_AGENT` and `ECOMMERCE` make, for the same reason. MARKETING, LEADS and SUPPORT are
+-- add-ons nobody has until they are granted one, so off-by-default protects us from handing out
+-- what was never sold. Keyword rules already answer messages in every workspace, and the AI's
+-- general response reads the same rows as its FAQ knowledge base, so off-by-default would mute
+-- both the moment this deploys.
+--
+-- That default lives in code — `defaultState()` in modules/module.service.ts — rather than as
+-- backfilled rows here, because rows would only cover the workspaces that exist tonight and
+-- every future signup would arrive with no keyword replies and no obvious reason why.
+--
+-- **The fallback message is deliberately NOT behind this switch.** `FallbackRule` is what a
+-- customer receives when nothing else matched, so every workspace needs to be able to edit it
+-- whether or not it has keyword rules. Gating it would leave a workspace stuck with a built-in
+-- default it cannot change, which is the exact complaint that prompted this module.
+--
+-- Purely additive: one enum value. Nothing is altered or dropped, so the two hand-written
+-- partial unique indexes (WorkflowInstance_one_active_per_conversation and
+-- Price_one_active_per_plan_interval) are untouched. Existing KeywordRule rows survive a
+-- switch-off untouched and answer again the moment it is switched back on.
+
+-- AlterEnum
+ALTER TYPE "ModuleKey" ADD VALUE 'KEYWORD_RULES';

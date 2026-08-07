@@ -164,6 +164,15 @@ const MODULE_COPY: Record<ModuleKey, { label: string; blurb: string }> = {
     blurb: 'Tickets raised from conversations, assigned and resolved, with updates '
       + 'sent back to the customer.',
   },
+  KEYWORD_RULES: {
+    label: 'Keyword replies',
+    blurb: 'The workspace’s own FAQ answers — "if the message mentions any of these words, send '
+      + 'this reply" — and the same answers used as the AI agent’s knowledge base. On for every '
+      + 'workspace by default; switch it off for one whose conversations all run through '
+      + 'workflows. Switching it off stops the saved replies going out, it does not delete them, '
+      + 'and they answer again the moment you switch it back on. The fallback message — what a '
+      + 'customer gets when nothing matched — stays editable either way.',
+  },
   ECOMMERCE: {
     label: 'Selling',
     blurb: 'The Orders screen and the Menu / catalogue, and their APIs. On for every workspace '

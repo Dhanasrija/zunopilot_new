@@ -12,7 +12,9 @@ import { prisma } from '../../config/prisma.js';
 // Leads is on is a second place that can disagree with the first, and the
 // disagreement always surfaces as "the menu is there but the page 404s".
 
-export const MODULE_KEYS = ['MARKETING', 'LEADS', 'SUPPORT', 'AI_AGENT', 'ECOMMERCE'] as const;
+export const MODULE_KEYS = [
+  'MARKETING', 'LEADS', 'SUPPORT', 'AI_AGENT', 'ECOMMERCE', 'KEYWORD_RULES',
+] as const;
 
 export type ModuleState = Record<ModuleKey, boolean>;
 
@@ -24,12 +26,13 @@ export type ModuleState = Record<ModuleKey, boolean>;
  * were promised, and they tell us within the hour. A bug that fails to *disable* one silently
  * hands every workspace on the platform a module nobody sold them, and nothing surfaces it.
  *
- * **On for `AI_AGENT` and `ECOMMERCE`, which invert that reasoning rather than ignoring it.**
- * Neither is an add-on nobody has yet: the agent is already answering customers in every
- * workspace, and every workspace can already see Orders and Menu. Off-by-default would mute or
- * strip all of them the moment this deploys, which is exactly the "silently hands/takes away"
- * failure the rule above exists to prevent, pointing the other way. These are capabilities that
- * get revoked, not ones that get granted.
+ * **On for `AI_AGENT`, `ECOMMERCE` and `KEYWORD_RULES`, which invert that reasoning rather than
+ * ignoring it.** None is an add-on nobody has yet: the agent is already answering customers in
+ * every workspace, every workspace can already see Orders and Menu, and every workspace's
+ * keyword rules already answer messages — the AI's general response reads the same rows as its
+ * FAQ knowledge base. Off-by-default would mute or strip all of them the moment this deploys,
+ * which is exactly the "silently hands/takes away" failure the rule above exists to prevent,
+ * pointing the other way. These are capabilities that get revoked, not ones that get granted.
  *
  * Expressed here rather than as backfilled rows in the migration on purpose: rows would only
  * cover the workspaces that existed when it ran, and every future signup would arrive with no
@@ -46,6 +49,7 @@ const defaultState = (): ModuleState => ({
   SUPPORT: false,
   AI_AGENT: true,
   ECOMMERCE: true,
+  KEYWORD_RULES: true,
 });
 
 /** Every module's state for one workspace. */

@@ -122,7 +122,11 @@ export default function App() {
               <Route path="billing" element={<Billing />} />
               <Route path="assistants/:assistantId/routing" element={<AssistantRouting />} />
               <Route path="assistants/:assistantId/workflows" element={<EngineWorkflows />} />
-              <Route path="automation" element={<Automation />} />
+              {/* Permission only, no module: `KEYWORD_RULES` gates the keyword half inside the
+                  page, and the fallback message belongs to every workspace. */}
+              <Route element={<RequireCapability permission="automation:write" />}>
+                <Route path="automation" element={<Automation />} />
+              </Route>
               <Route path="templates" element={<Templates />} />
               <Route path="templates/:id/view" element={<TemplateView />} />
               <Route path="templates/:id/edit" element={<TemplateEdit />} />

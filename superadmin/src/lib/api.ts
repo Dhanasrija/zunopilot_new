@@ -70,7 +70,8 @@ export interface Overview {
  * on model calls, or to hide selling from a workspace that does not sell. Same machinery,
  * opposite direction.
  */
-export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE';
+export type ModuleKey =
+  | 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE' | 'KEYWORD_RULES';
 
 export interface ModuleSetting {
   module: ModuleKey;

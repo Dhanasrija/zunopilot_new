@@ -36,6 +36,8 @@ routes.use('/auth', auth);
 routes.use('/tenant', tenant);
 routes.use('/whatsapp', whatsapp);
 routes.use('/webhook', webhook);
+// The one router whose module gate is per-route rather than `router.use`: `KEYWORD_RULES`
+// covers the keyword rules, and deliberately not the fallback message. See the file's header.
 routes.use('/automation', automation);
 routes.use('/inbox', inbox);
 /*
