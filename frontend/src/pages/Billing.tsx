@@ -101,7 +101,9 @@ export default function Billing() {
   const manage = can('settings:write');
 
   const catalogue = useCatalogue();
-  const [interval, setInterval] = useState<BillingInterval>('QUARTERLY');
+  // Monthly until the catalogue answers, which also says monthly. Seeding this with a
+  // different interval would flash the wrong prices on a slow connection.
+  const [interval, setInterval] = useState<BillingInterval>('MONTHLY');
   const [choosing, setChoosing] = useState<PlanCode | null>(null);
 
   /*

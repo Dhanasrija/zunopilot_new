@@ -152,8 +152,12 @@ describe('the approved prices', () => {
 });
 
 describe('presentation rules', () => {
-  it('defaults to quarterly, and badges quarterly and yearly', () => {
-    expect(INTERVAL_META.QUARTERLY.isDefault).toBe(true);
+  it('defaults to monthly, and badges quarterly and yearly', () => {
+    // The preselected interval and the badges are separate decisions: quarterly is still the
+    // one most people choose, but the toggle opens on the smallest commitment rather than on
+    // three months billed up front.
+    expect(INTERVAL_META.MONTHLY.isDefault).toBe(true);
+    expect(INTERVAL_META.QUARTERLY.isDefault).toBe(false);
     expect(INTERVAL_META.QUARTERLY.badge).toBe('Most Popular');
     expect(INTERVAL_META.YEARLY.badge).toBe('Best Value');
     expect(INTERVAL_META.MONTHLY.badge).toBeNull();
