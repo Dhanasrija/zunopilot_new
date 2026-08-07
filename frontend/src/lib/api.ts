@@ -30,7 +30,16 @@ api.interceptors.response.use(
   (r) => r,
   (error: AxiosError<{ message?: string }>) => {
     const status = error.response?.status;
-    const msg = error.response?.data?.message || error.message || 'Request failed';
+    /*
+     * A 413 usually is not ours. nginx caps the request body before Express sees it and
+     * answers with its own HTML error page, so there is no `message` to read and the toast
+     * said "Request failed with status code 413" — a number, to somebody who wanted to send a
+     * video. The server's own refusals do carry a message and still win.
+     */
+    const tooLarge = status === 413
+      ? 'That file is too large to upload. Videos and documents are limited to 16 MB.'
+      : null;
+    const msg = error.response?.data?.message || tooLarge || error.message || 'Request failed';
     if (status === 401) {
       useAuthStore.getState().clear();
       if (!window.location.pathname.startsWith('/login')) {

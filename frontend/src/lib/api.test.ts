@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InternalAxiosRequestConfig } from 'axios';
+import { toast } from 'sonner';
 import { api } from './api';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 /*
  * How a request body leaves the browser.
@@ -62,5 +65,41 @@ describe('the ordinary case still works', () => {
     const sent = await captureRequest({ body: 'hello' });
     expect(sent.data).toBe('{"body":"hello"}');
     expect(contentTypeOf(sent)).toContain('application/json');
+  });
+});
+
+describe('an error that is not ours', () => {
+  beforeEach(() => { vi.mocked(toast.error).mockClear(); });
+
+  /** Fail a request the way a server would, with a body and no `message` field. */
+  const failWith = async (status: number, data: unknown) => {
+    await api.post('/anything', { a: 1 }, {
+      adapter: async (config) => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw Object.assign(new Error(`Request failed with status code ${status}`), {
+          isAxiosError: true,
+          config,
+          response: { status, data, statusText: '', headers: {}, config },
+        });
+      },
+    }).catch(() => {});
+  };
+
+  it('**turns a bare 413 into something an agent can act on**', async () => {
+    /*
+     * nginx caps the request body before Express sees it and answers with its own HTML error
+     * page — there is no JSON, so there is no `message`. The toast read "Request failed with
+     * status code 413" to somebody who had just tried to send a video.
+     */
+    await failWith(413, '<html><head><title>413 Request Entity Too Large</title></head></html>');
+
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/too large/i));
+    expect(toast.error).not.toHaveBeenCalledWith(expect.stringMatching(/status code/i));
+  });
+
+  it("still prefers the server's own words when it has any", async () => {
+    // Our routes do answer with a message, and theirs is more specific than a generic one.
+    await failWith(413, { message: 'That file is 42 MB. The limit is 16 MB.' });
+    expect(toast.error).toHaveBeenCalledWith('That file is 42 MB. The limit is 16 MB.');
   });
 });

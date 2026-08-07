@@ -196,3 +196,70 @@ describe('outside the 24-hour window', () => {
     expect(onSend).toHaveBeenCalledOnce();
   });
 });
+
+describe('a file the platform cannot send', () => {
+  /*
+   * **Why this is checked in the browser at all.** The server checks too, and is the
+   * authority — but its refusal costs a whole upload first, and beyond about 20 MB the request
+   * never reaches it: nginx caps the body and answers 413 with no message of its own, which
+   * reached the agent as "Request failed with status code 413" when they tried to send a
+   * video.
+   */
+  const oversized = () => new File(['x'], 'holiday.mp4', { type: 'video/mp4' });
+
+  it('**does not stage it, and says why**', async () => {
+    const onSendFile = vi.fn();
+    render(
+      <Composer
+        value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+        onSendFile={onSendFile}
+        checkFile={() => 'That file is 42.0 MB. The limit is MP4 or 3GPP, up to 16 MB.'}
+      />,
+    );
+    await userEvent.upload(
+      screen.getByLabelText(/attach a file/i, { selector: 'input' }), oversized(),
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/limit is MP4 or 3GPP, up to 16 MB/);
+    // The name must not appear as though it were staged and ready to go.
+    expect(screen.queryByText('holiday.mp4')).not.toBeInTheDocument();
+  });
+
+  it('cannot be sent by pressing Send anyway', async () => {
+    const onSendFile = vi.fn();
+    const onSend = vi.fn();
+    render(
+      <Composer
+        value="here you go" onChange={vi.fn()} onSend={onSend} sending={false}
+        onSendFile={onSendFile} checkFile={() => 'Too large'}
+      />,
+    );
+    await userEvent.upload(
+      screen.getByLabelText(/attach a file/i, { selector: 'input' }), oversized(),
+    );
+    await userEvent.click(sendButton());
+
+    expect(onSendFile).not.toHaveBeenCalled();
+    // The text still goes, because the words were fine — only the file was not.
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('accepts the next file, and clears the warning', async () => {
+    let refuse = true;
+    render(
+      <Composer
+        value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+        onSendFile={vi.fn()} checkFile={() => (refuse ? 'Too large' : null)}
+      />,
+    );
+    const input = screen.getByLabelText(/attach a file/i, { selector: 'input' });
+    await userEvent.upload(input, oversized());
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    refuse = false;
+    await userEvent.upload(input, new File(['x'], 'small.mp4', { type: 'video/mp4' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText('small.mp4')).toBeInTheDocument();
+  });
+});

@@ -48,8 +48,20 @@ const RULES: Record<HeaderKind, { mimeTypes: string[]; maxBytes: number; label: 
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'text/plain',
     ],
-    maxBytes: 100 * 1024 * 1024,
-    label: 'PDF, Word, Excel or plain text, up to 100 MB',
+    /*
+     * **16 MB, not the 100 MB Meta allows.** Ours, not theirs, and the honest number: nginx
+     * caps a request body at 20m, so a 100 MB document was refused at the edge with a bare
+     * 413 long before this rule was consulted. A ceiling nobody could reach is a promise the
+     * product cannot keep.
+     *
+     * What it would take to raise it is not a bigger number here: multer uses
+     * memoryStorage() and `storeUpload` writes `input.buffer`, so a 100 MB document is
+     * 100 MB+ of heap in the process that also runs the pg-boss workers. Streaming the
+     * upload straight through to S3 comes first; then this and `client_max_body_size`
+     * move together.
+     */
+    maxBytes: 16 * 1024 * 1024,
+    label: 'PDF, Word, Excel or plain text, up to 16 MB',
   },
 };
 
