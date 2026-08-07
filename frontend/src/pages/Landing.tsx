@@ -175,7 +175,16 @@ export default function Landing() {
     <div className="min-h-screen bg-white text-slate-900">
       <Header open={open} setOpen={setOpen} />
       <Hero />
-      <Partners />
+      {/*
+        The partner strip is hidden until there are real partners to name.
+        It shipped with placeholder art — "LOGO", "IPSUM", "Logoips" — under the line
+        "Endorsed by the globe's leading innovative enterprises", which is a claim about
+        endorsements that do not exist, on the public home page.
+
+        <Partners /> is left intact rather than deleted: restoring it is putting real files in
+        PARTNER_LOGOS and uncommenting one line. Do not put it back with placeholders.
+      */}
+      {/* <Partners /> */}
       <Features />
       <Stats />
       <Testimonials />
@@ -1225,10 +1234,10 @@ function Footer() {
 
         <div className="relative mt-5 flex items-center justify-between gap-4 select-none">
           <div className="flex items-center gap-5 text-slate-900">
-            <SocialIcon href="https://facebook.com" label="Facebook"><Facebook className="h-[18px] w-[18px] fill-current" strokeWidth={0} /></SocialIcon>
-            <SocialIcon href="https://instagram.com" label="Instagram"><Instagram className="h-[18px] w-[18px]" strokeWidth={2} /></SocialIcon>
-            <SocialIcon href="https://twitter.com" label="X"><XLogo className="h-[16px] w-[16px]" /></SocialIcon>
-            <SocialIcon href="https://linkedin.com" label="LinkedIn"><Linkedin className="h-[18px] w-[18px] fill-current" strokeWidth={0} /></SocialIcon>
+            <SocialIcon href="https://www.facebook.com/zunopilot/" label="Facebook"><Facebook className="h-[18px] w-[18px] fill-current" strokeWidth={0} /></SocialIcon>
+            <SocialIcon href="https://www.instagram.com/zunopilot/" label="Instagram"><Instagram className="h-[18px] w-[18px]" strokeWidth={2} /></SocialIcon>
+            <SocialIcon href="https://x.com/zunopilot" label="X"><XLogo className="h-[16px] w-[16px]" /></SocialIcon>
+            <SocialIcon href="https://www.linkedin.com/company/zunopilot" label="LinkedIn"><Linkedin className="h-[18px] w-[18px] fill-current" strokeWidth={0} /></SocialIcon>
           </div>
 
           {/* Watermark — single dark logo (icon with Z baked in) + matching wordmark. */}
