@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
 import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/ApiError.js';
+import { StorageUnconfiguredError } from '../modules/media/storage.js';
 
 /**
  * Turn the Prisma errors that are really the caller's fault into a clean 4xx.
@@ -48,6 +49,21 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
       message: issues.map((i) => (i.field === '(body)' ? i.message : `${i.field}: ${i.message}`)).join('; '),
       details: issues,
     });
+    return;
+  }
+
+  /*
+   * File storage is not set up.
+   *
+   * 503, and the message goes to the caller verbatim — it is written for an operator and it
+   * names the variable to set. Everything else about this request is fine, so the alternative
+   * is a bare "Internal server error" on an upload while the rest of the product works, which
+   * tells nobody anything. Handled here rather than at each route so the campaign send, the
+   * Inbox send and the inbound worker all say the same thing.
+   */
+  if (err instanceof StorageUnconfiguredError) {
+    logger.error(`${req.method} ${req.originalUrl} -> 503: ${err.message}`);
+    res.status(503).json({ success: false, message: err.message });
     return;
   }
 

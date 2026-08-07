@@ -75,11 +75,24 @@ S3_BUCKET=zunopilot-media
 AWS_REGION=ap-south-1
 ```
 
-**`S3_BUCKET` is required in production and the API refuses to boot without it.** Falling back
-to local disk when it is unset is exactly the failure this codebase has had five times: an
-absent variable reading as a working configuration, and nobody noticing until the disk fills or
-a deploy replaces the release directory and the files are gone. Locally, with `S3_BUCKET`
-unset, media goes to `MEDIA_DIR` on disk as before — so nothing needs AWS to run the app.
+**`S3_BUCKET` is required in production.** Falling back to local disk when it is unset is
+exactly the failure this codebase has had five times: an absent variable reading as a working
+configuration, and nobody noticing until the disk fills or a deploy replaces the release
+directory and the files are gone.
+
+Without it, the API **starts, logs the problem as an error, and refuses every media
+operation with a 503** naming the variable. Uploads, sending a file from the Inbox, campaign
+header media and storing an inbound photograph all fail; messaging, billing, workflows and the
+console are untouched.
+
+It used to `process.exit(1)` instead. That cost an outage on 2026-08-07: the variable was
+missing on a deploy, the API crash-looped, the health gate failed after 80 seconds and the
+release rolled back — the whole product down over a file-storage setting. The data is still
+protected either way, because `storage.ts` refuses rather than writing somewhere temporary;
+what changed is that the refusal is scoped to the thing that is broken.
+
+Locally, with `S3_BUCKET` unset, media goes to `MEDIA_DIR` on disk as before — so nothing needs
+AWS to run the app.
 
 ## Checking it works
 
