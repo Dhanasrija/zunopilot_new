@@ -6,6 +6,7 @@ import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { whatsappProviderFor } from '../conversation-engine/providers/whatsapp.js';
+import { metaFailureMessage } from '../../services/meta-error.js';
 import { recordOutboundMessage } from '../conversation-engine/providers/mirror.js';
 
 // Support tickets.
@@ -412,9 +413,10 @@ export const sendTicketUpdate = async (
     });
   } catch (err) {
     // A provider failure is not the agent's fault and must not lose the text
-    // they wrote.
+    // they wrote. `err.message` on its own was always "Request failed with status code
+    // 400" — true, and useless; Meta's reason for refusing is in the response body.
     return refuse(
-      `WhatsApp refused the message (${err instanceof Error ? err.message : 'unknown error'}). `
+      `WhatsApp refused the message (${metaFailureMessage(err)}). `
       + 'The update has been saved on the ticket.',
     );
   }

@@ -7,6 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
+import { metaFailure } from '../services/meta-error.js';
 import { whatsappProviderFor } from '../modules/conversation-engine/providers/whatsapp.js';
 import { recordOutboundMessage } from '../modules/conversation-engine/providers/mirror.js';
 import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
@@ -226,12 +227,14 @@ export const sendAgentMessage = asyncHandler(async (req, res) => {
   let sent: { messageId: string | null };
   try {
     sent = await whatsappProviderFor(wa).sendText({ to: conversation.customer.waId, body });
-  } catch (err: any) {
-    const isTokenError = err.response?.data?.error?.code === 190 || err.response?.status === 401;
-    if (isTokenError) {
-      throw new ApiError(424, 'WhatsApp/Meta connection error: Token expired or invalid');
-    }
-    throw err;
+  } catch (err) {
+    // Meta explains its own refusals well; the job here is only to stop that explanation
+    // being thrown away. Rethrowing the `AxiosError` made every one of them a 500
+    // "Internal server error" — including "recipient not in allowed list" and the expired
+    // 24-hour window, both of which the agent can act on and neither of which is a fault
+    // of ours. `metaFailure` returns null for anything that is not a Graph rejection, so a
+    // real bug in here still surfaces as one.
+    throw metaFailure(err) ?? err;
   }
 
   const msg = await recordOutboundMessage(
