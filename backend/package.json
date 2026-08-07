@@ -19,7 +19,8 @@
     "start:superadmin": "tsx src/superadmin-server.ts",
     "seed:superadmin": "tsx prisma/seed-superadmin.ts",
     "seed:demo-volume": "tsx prisma/seed-demo-volume.ts",
-    "seed:connector-types": "tsx prisma/seed-connector-types.ts"
+    "seed:connector-types": "tsx prisma/seed-connector-types.ts",
+    "openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
