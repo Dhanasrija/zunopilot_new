@@ -3,6 +3,7 @@ import { prisma } from '../../../config/prisma.js';
 import { withContext } from '../../../config/logger.js';
 import { llmProvider } from '../providers/llm.js';
 import { moduleEnabled } from '../../modules/module.service.js';
+import { knowledgeAsPrompt, knowledgeFor } from '../../knowledge/knowledge.service.js';
 import type { WhatsAppSender } from '../engine/types.js';
 
 // The assistant answering on its own.
@@ -39,19 +40,33 @@ export interface GeneralResponseResult {
   latencyMs?: number;
 }
 
-const buildSystemPrompt = ({
-  tenant, assistant, faqs, hasMenu,
+/**
+ * The prompt the assistant answers from.
+ *
+ * **Two sources of knowledge, and they are different tools.** `KeywordRule` FAQs are
+ * question-to-exact-answer, worth keeping where the wording matters — a refund window, an
+ * address. `KnowledgeEntry` is prose about the business, and it is what lets the assistant
+ * answer a question nobody anticipated.
+ *
+ * Exported so the Knowledge page's try-it box builds the identical prompt. A second copy that
+ * drifted would make the preview reassuring and wrong, which is worse than no preview.
+ */
+export const buildSystemPrompt = ({
+  tenant, assistant, faqs, knowledge, hasMenu,
 }: {
   tenant: Tenant;
   assistant: Pick<Assistant, 'generalSystemPrompt'>;
   faqs: Array<{ keywords: string[]; response: string }>;
+  knowledge: string;
   hasMenu: boolean;
 }): string => {
-  const knowledge = faqs.length
+  const answers = faqs.length
     ? faqs
       .map((f, i) => `${i + 1}. Asked about: ${f.keywords.join(', ')}\n   Answer: ${f.response}`)
       .join('\n')
     : '(none configured)';
+
+  const about = knowledge.trim();
 
   return `You are the WhatsApp assistant for ${tenant.businessName}${
     tenant.category ? ` (${tenant.category.toLowerCase().replace(/_/g, ' ')})` : ''
@@ -61,15 +76,25 @@ ${assistant.generalSystemPrompt?.trim() || 'Be brief, warm and factual.'}
 
 WHAT YOU CAN ANSWER
 
-Use only the business's own answers below. They are the source of truth.
+Everything below is the business's own material and the only source of truth.
+${about ? `
+ABOUT THE BUSINESS
 
-${knowledge}
+${about}
+` : ''}
+PREPARED ANSWERS
+
+Where one of these fits the question, prefer its wording — it is how the business
+has chosen to answer that question.
+
+${answers}
 
 RULES
 
 1. Keep replies under 60 words. This is WhatsApp, not email.
-2. If the answer is not in the list above, say you'll check with the team rather
-   than guessing. Never invent an answer.
+2. Answer only from the material above. You may put it in your own words and draw
+   on more than one part of it, but never add a fact that is not there. If it does
+   not cover the question, say you'll check with the team. Never guess.
 3. Never state a price, a stock level, an order status, a delivery time, or an
    appointment slot. You have no access to any of those. If asked, say you'll
    check.
@@ -141,6 +166,10 @@ export const respondGenerally = async ({
 
   const keywordRulesEnabled = await moduleEnabled(tenant.id, 'KEYWORD_RULES');
 
+  // The prose the business wrote about itself. Not behind `KEYWORD_RULES` — that module
+  // gates the canned FAQ answers, and this is the other kind of knowledge entirely.
+  const knowledge = await knowledgeFor(tenant.id);
+
   const [faqs, menuCount, recent] = await Promise.all([
     /*
      * The tenant's existing keyword rules are their FAQ knowledge base. Reusing
@@ -189,6 +218,7 @@ export const respondGenerally = async ({
         tenant,
         assistant,
         faqs: faqs.map((f) => ({ keywords: f.keywords, response: f.response })),
+        knowledge: knowledgeAsPrompt(knowledge.entries),
         hasMenu: menuCount > 0,
       }),
       userPrompt: buildUserPrompt(history, message),
@@ -244,4 +274,5 @@ export const respondGenerally = async ({
   }
 };
 
-export { buildSystemPrompt, buildUserPrompt };
+// `buildSystemPrompt` is exported at its declaration; only the user prompt needs re-exporting.
+export { buildUserPrompt };

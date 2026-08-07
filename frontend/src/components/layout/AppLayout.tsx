@@ -13,6 +13,7 @@ import {
   Users, Bell, Settings, BarChart3, Smartphone, LogOut, UserCircle2, ChevronUp,
   Workflow as WorkflowIcon, Bot, PlugZap, Users2, CreditCard,
   Target, Megaphone, LifeBuoy, Menu, PanelLeftClose, PanelLeftOpen, MessageSquareReply,
+  BookMarked,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -56,6 +57,10 @@ const nav: Array<{
   // "Auto-replies" rather than "Automation": the nav already has Workflows and Assistants, and
   // a third word for roughly the same idea helps nobody find anything.
   { to: '/automation', label: 'Auto-replies', icon: MessageSquareReply, permission: 'automation:write' },
+  // No `module`: `AI_AGENT` decides whether a model is ever called, not whether a business
+  // may write down what it does. Preparing the knowledge before switching the agent on is
+  // the natural order to work in.
+  { to: '/knowledge', label: 'Knowledge', icon: BookMarked, permission: 'automation:write' },
   { to: '/assistants', label: 'Assistants', icon: Bot, permission: 'workflows:read' },
   { to: '/workflows', label: 'Workflows', icon: WorkflowIcon, permission: 'workflows:read' },
   { to: '/connectors', label: 'Connectors', icon: PlugZap, permission: 'connectors:read' },

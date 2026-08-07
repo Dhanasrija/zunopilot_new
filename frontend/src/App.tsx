@@ -33,6 +33,7 @@ import InvoiceView from '@/pages/InvoiceView';
 import AssistantRouting from '@/pages/AssistantRouting';
 import EngineWorkflows from '@/pages/EngineWorkflows';
 import Automation from '@/pages/Automation';
+import Knowledge from '@/pages/Knowledge';
 import Templates from '@/pages/Templates';
 import TemplateView from '@/pages/TemplateView';
 import TemplateEdit from '@/pages/TemplateEdit';
@@ -128,6 +129,7 @@ export default function App() {
                   page, and the fallback message belongs to every workspace. */}
               <Route element={<RequireCapability permission="automation:write" />}>
                 <Route path="automation" element={<Automation />} />
+                <Route path="knowledge" element={<Knowledge />} />
               </Route>
               <Route path="templates" element={<Templates />} />
               <Route path="templates/:id/view" element={<TemplateView />} />

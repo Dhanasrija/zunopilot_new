@@ -122,6 +122,7 @@ model Tenant {
   whatsappAccounts WhatsappAccount[]
   keywords         KeywordRule[]
   fallback         FallbackRule?
+  knowledge        KnowledgeEntry[]
   customers        Customer[]
   conversations    Conversation[]
   messages         Message[]
@@ -285,6 +286,7 @@ model User {
   ticketEvents     TicketEvent[] @relation("TicketEventActor")
   // Module 22: marketing
   createdCampaigns Campaign[]    @relation("CampaignCreator")
+  knowledgeWritten KnowledgeEntry[] @relation("KnowledgeAuthor")
   leadEvents       LeadEvent[]   @relation("LeadEventActor")
   calls            CallLog[]     @relation("CallActor")
   reminders        Reminder[]    @relation("ReminderAssignee")
@@ -592,6 +594,51 @@ model FallbackRule {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   response  String
   updatedAt DateTime @updatedAt
+}
+
+/// What the business has told the assistant about itself.
+///
+/// **The thing the AI agent was missing.** Its only knowledge until now was `KeywordRule`,
+/// which is `keyword → exact canned reply` — so answering "do you build mobile apps?" required
+/// somebody to have guessed that phrasing in advance. A workspace with no rules got a prompt
+/// whose knowledge section read "(none configured)" above an instruction never to guess, which
+/// is an assistant that can only ever say it will check with the team.
+///
+/// Prose instead: paste what the business does, and the model answers questions nobody
+/// anticipated. `KeywordRule` still feeds the same prompt — an exact canned answer is worth
+/// keeping for the questions where the wording matters.
+///
+/// **Shaped like a chunk on purpose.** Today every active entry is injected whole, which is
+/// correct while the corpus is a few pages. When documents arrive, a long one is split into
+/// several of these rows and an embedding column is added beside `body` — retrieval slots in
+/// without the page, the API or the prompt builder changing shape.
+model KnowledgeEntry {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// What this is about — "Services", "Delivery area". Shown to the model as a heading, so a
+  /// useful one measurably improves which passage it draws from.
+  title String
+
+  /// The prose itself.
+  body String
+
+  /// Off keeps the text without feeding it to the model — how you retire an answer that has
+  /// gone out of date without losing what it said.
+  isActive Boolean @default(true)
+
+  /// Lowest first. Also decides what survives when the corpus is over the prompt budget, so
+  /// the order is "what matters most", not decoration.
+  sortOrder Int @default(0)
+
+  createdById String?
+  createdBy   User?   @relation("KnowledgeAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, isActive, sortOrder])
 }
 
 // ---------------- Module 6: Menu management ----------------
