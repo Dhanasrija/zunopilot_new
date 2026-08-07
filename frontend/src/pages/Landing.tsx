@@ -175,7 +175,16 @@ export default function Landing() {
     <div className="min-h-screen bg-white text-slate-900">
       <Header open={open} setOpen={setOpen} />
       <Hero />
-      <Partners />
+      {/*
+        The partner strip is hidden until there are real partners to name.
+        It shipped with placeholder art — "LOGO", "IPSUM", "Logoips" — under the line
+        "Endorsed by the globe's leading innovative enterprises", which is a claim about
+        endorsements that do not exist, on the public home page.
+
+        <Partners /> is left intact rather than deleted: restoring it is putting real files in
+        PARTNER_LOGOS and uncommenting one line. Do not put it back with placeholders.
+      */}
+      {/* <Partners /> */}
       <Features />
       <Stats />
       <Testimonials />
