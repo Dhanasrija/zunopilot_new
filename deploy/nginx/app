@@ -49,6 +49,9 @@ server {
     # job queue with it. Raise this only once uploads stream to disk.
     client_max_body_size 16m;
 
+    # `zuno` strips the query string from /api/webhook only — see conf.d/zunopilot-logging.conf.
+    access_log /var/log/nginx/access.log zuno;
+
     # The API, same-origin. Every request carries an Authorization header, which makes it a
     # non-simple CORS request — so serving the API cross-origin would add a preflight round
     # trip to each one. A prefix location always beats `location /`, so try_files below cannot
@@ -115,6 +118,9 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/zunopilot.com/privkey.pem;
 
     client_max_body_size 16m;
+
+    # `zuno` strips the query string from /api/webhook only — see conf.d/zunopilot-logging.conf.
+    access_log /var/log/nginx/access.log zuno;
 
     location / {
         if (-f /srv/zunopilot/shared/MAINTENANCE) { return 503; }

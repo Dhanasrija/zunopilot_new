@@ -7,13 +7,29 @@ import { cn } from '@/lib/utils';
 // Tabular numerals are applied to `td`/`th` globally in `index.css` rather than
 // per cell, because a column of figures that jitters as it updates is the exact
 // problem the rule exists to prevent and it only takes one unmarked cell.
-export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
-    </div>
-  )
-);
+export const Table = React.forwardRef<
+  HTMLTableElement,
+  React.HTMLAttributes<HTMLTableElement> & {
+    /**
+     * Below `sm`, render each row as a card instead of a table row.
+     *
+     * Worth turning on for anything past about three columns. A wide table on a phone
+     * either overflows the document — see `.table-stack` in index.css for why `w-full`
+     * does not prevent that — or scrolls sideways inside its card, which hides the column
+     * headings exactly when you need them. Pass a `label` to each TableCell so the
+     * heading travels with the value.
+     */
+    stack?: boolean;
+  }
+>(({ className, stack = false, ...props }, ref) => (
+  <div className="relative w-full overflow-auto">
+    <table
+      ref={ref}
+      className={cn('w-full caption-bottom text-sm', stack && 'table-stack', className)}
+      {...props}
+    />
+  </div>
+));
 Table.displayName = 'Table';
 
 // Sticky header per §7. `surface-1` background so rows scrolling underneath do not
@@ -63,9 +79,19 @@ export const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttr
 TableHead.displayName = 'TableHead';
 
 // §4.1 — "Dense tables: 12px cell padding."
-export const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => (
-    <td ref={ref} className={cn('px-3 py-3 align-middle', className)} {...props} />
-  )
-);
+export const TableCell = React.forwardRef<
+  HTMLTableCellElement,
+  React.TdHTMLAttributes<HTMLTableCellElement> & {
+    /**
+     * The column heading, repeated on this cell for the stacked phone layout.
+     *
+     * Ignored above `sm`, where the real `<thead>` is visible. Rendered as `data-label`
+     * rather than markup so the desktop table gains no extra DOM. Leave it off for a cell
+     * that needs no heading — an actions column — and the card gives it a full-width row.
+     */
+    label?: string;
+  }
+>(({ className, label, ...props }, ref) => (
+  <td ref={ref} data-label={label} className={cn('px-3 py-3 align-middle', className)} {...props} />
+));
 TableCell.displayName = 'TableCell';

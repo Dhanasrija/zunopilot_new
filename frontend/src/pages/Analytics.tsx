@@ -206,7 +206,7 @@ export default function Analytics() {
             {recent.length === 0 ? (
               <div className="py-8 text-center text-sm text-ink-500">No orders yet</div>
             ) : (
-              <table className="w-full text-sm">
+              <table className="table-stack w-full text-sm">
                 <thead>
                   <tr className="border-b bg-surface-0/60">
                     {['Order ID', 'Customer', 'Status', 'Amount', 'Date'].map((h) => (
@@ -217,15 +217,15 @@ export default function Analytics() {
                 <tbody className="divide-y divide-ink-300">
                   {recent.map((o) => (
                     <tr key={o.id} className="hover:bg-surface-0/50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-ink-700">#ORD-{o.orderNumber}</td>
-                      <td className="px-4 py-3 text-ink-700">{o.customer.name || o.customer.phone || o.customer.waId}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Order ID" className="px-4 py-3 font-medium text-ink-700">#ORD-{o.orderNumber}</td>
+                      <td data-label="Customer" className="px-4 py-3 text-ink-700">{o.customer.name || o.customer.phone || o.customer.waId}</td>
+                      <td data-label="Status" className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold ${STATUS_BADGE[o.status] ?? 'bg-surface-0 text-ink-700'}`}>
                           {STATUS_LABEL[o.status] ?? o.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-medium">{formatCurrency(o.totalAmount)}</td>
-                      <td className="px-4 py-3 text-ink-500 text-caption">{fmtTime(o.placedAt)}</td>
+                      <td data-label="Amount" className="px-4 py-3 font-medium">{formatCurrency(o.totalAmount)}</td>
+                      <td data-label="Date" className="px-4 py-3 text-ink-500 text-caption">{fmtTime(o.placedAt)}</td>
                     </tr>
                   ))}
                 </tbody>

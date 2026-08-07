@@ -355,7 +355,7 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
               unread={unread}
               onOpen={openNotification}
               onMarkAllRead={markAllRead}
-              collapsed
+              iconOnly
             />
           </div>
         </div>

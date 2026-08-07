@@ -11,6 +11,50 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { routes } from './routes/index.js';
 import { publicMediaRoutes } from './modules/media/media.routes.js';
 
+/**
+ * Query-string keys whose value must never reach a log file.
+ *
+ * The one that prompted this: Meta verifies a webhook with
+ * `GET /api/webhook?hub.mode=subscribe&hub.verify_token=<the real token>&hub.challenge=…`,
+ * and morgan's `dev` format logs the whole URL. So every verification handshake wrote
+ * `META_WEBHOOK_VERIFY_TOKEN` in plaintext into `api.out.log` — a file that rotates,
+ * compresses and gets swept into backups. The webhook handler itself was already careful and
+ * logs only `receivedTokenLen`; the generic request logger quietly undid that.
+ *
+ * Both spellings are listed because Meta sends the value twice, dotted and underscored.
+ * `code` and `access_token` are here pre-emptively: the Embedded Signup callback carries an
+ * authorisation code, and the same logger will see it.
+ */
+const REDACTED_QUERY_KEYS = new Set([
+  'hub.verify_token', 'hub_verify_token', 'access_token', 'token', 'code',
+]);
+
+/**
+ * Redact those keys out of the URL morgan prints.
+ *
+ * Registered at module scope rather than inside `buildApp`, because morgan's token registry is
+ * global and the test suite builds many apps. Overriding `url` rather than post-processing the
+ * formatted line: the `dev` format has already wrapped the status code in ANSI escapes by then,
+ * and a regex over coloured output is the kind of thing that works until it doesn't.
+ */
+export const redactUrl = (raw: string): string => {
+  const q = raw.indexOf('?');
+  if (q === -1) return raw;
+  const params = new URLSearchParams(raw.slice(q + 1));
+  let touched = false;
+  for (const key of [...params.keys()]) {
+    if (REDACTED_QUERY_KEYS.has(key)) {
+      params.set(key, '[redacted]');
+      touched = true;
+    }
+  }
+  return touched ? `${raw.slice(0, q)}?${params.toString()}` : raw;
+};
+
+morgan.token('url', (req) => redactUrl(
+  (req as express.Request).originalUrl ?? (req as { url?: string }).url ?? '',
+));
+
 export const buildApp = (): Express => {
   const app = express();
 

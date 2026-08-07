@@ -200,7 +200,7 @@ export default function Dashboard() {
             </span>
           </div>
 
-          <table className="w-full text-sm">
+          <table className="table-stack w-full text-sm">
             <thead>
               <tr className="border-b bg-surface-0/60">
                 <th className="text-left text-caption font-semibold text-ink-500 px-4 py-2">CUSTOMER</th>
@@ -224,7 +224,7 @@ export default function Dashboard() {
                   const displayName = o.customer.name || o.customer.phone || o.customer.waId;
                   return (
                     <tr key={o.id} className="hover:bg-surface-0/50 transition-colors">
-                      <td className="px-4 py-3">
+                      <td data-label="Customer" className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full bg-ink-300 flex items-center justify-center shrink-0 text-caption font-semibold text-ink-700">
                             {initials}
@@ -235,16 +235,16 @@ export default function Dashboard() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 hidden md:table-cell">
+                      <td data-label="Items" className="px-4 py-3 hidden md:table-cell">
                         <p className="text-caption text-ink-500">{formatCurrency(o.totalAmount)}</p>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-ink-700">
+                      <td data-label="Amount" className="px-4 py-3 font-semibold text-ink-700">
                         {formatCurrency(o.totalAmount)}
                       </td>
-                      <td className="px-4 py-3 text-ink-500 text-caption whitespace-nowrap">
+                      <td data-label="Time" className="px-4 py-3 text-ink-500 text-caption whitespace-nowrap">
                         {timeAgo(o.placedAt)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td data-label="Status" className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-px rounded-full text-caption font-semibold ${STATUS_BADGE[o.status] ?? 'bg-surface-0 text-ink-700'}`}>
                           {STATUS_LABEL[o.status] ?? o.status}
                         </span>

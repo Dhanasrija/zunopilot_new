@@ -33,14 +33,28 @@ const ago = (iso: string): string => {
 };
 
 export function NotificationBell({
-  notifications, unread, onOpen, onMarkAllRead, collapsed = false, className,
+  notifications, unread, onOpen, onMarkAllRead, collapsed = false, iconOnly = false, className,
 }: {
   notifications: AppNotification[];
   unread: number;
   onOpen: (notification: AppNotification) => void;
   onMarkAllRead: () => void;
-  /** Sidebar rail state. Hides the label, keeps the count. */
+  /**
+   * Sidebar rail state. Hides the label **at `lg` and up**, which is the only place the
+   * rail exists — below `lg` the sidebar is a drawer and the label belongs there.
+   */
   collapsed?: boolean;
+  /**
+   * Icon only, at every width. For the mobile top bar.
+   *
+   * Not the same thing as `collapsed`, and conflating them is what broke every screen on a
+   * phone: the mobile header passed `collapsed`, whose `lg:hidden` does nothing below `lg`,
+   * so "Notifications" rendered `whitespace-nowrap` inside a `shrink-0` wrapper. The header
+   * could then not shrink below its content, that width became the page's minimum, and
+   * every grid and heading beneath it was laid out against a box wider than the screen.
+   * The symptom was not a wide header — it was the whole app clipped at the right edge.
+   */
+  iconOnly?: boolean;
   className?: string;
 }) {
   return (
@@ -56,7 +70,7 @@ export function NotificationBell({
           className={cn(
             'relative flex items-center gap-3 rounded-md px-2 py-2 text-sm text-ink-500',
             'transition-colors duration-micro hover:bg-accent-100/40 hover:text-ink-900',
-            collapsed ? 'w-full lg:justify-center lg:px-0' : 'w-full',
+            iconOnly ? 'w-auto justify-center px-2' : collapsed ? 'w-full lg:justify-center lg:px-0' : 'w-full',
             className,
           )}
         >
@@ -71,13 +85,13 @@ export function NotificationBell({
               />
             )}
           </span>
-          <span className={cn('whitespace-nowrap', collapsed && 'lg:hidden')}>
+          <span className={cn('whitespace-nowrap', iconOnly ? 'hidden' : collapsed && 'lg:hidden')}>
             Notifications
           </span>
           {unread > 0 && (
             <span className={cn(
               'ml-auto rounded-full bg-danger px-2 text-caption font-medium text-surface-1',
-              collapsed && 'lg:hidden',
+              iconOnly ? 'hidden' : collapsed && 'lg:hidden',
             )}>
               {unread > 99 ? '99+' : unread}
             </span>
