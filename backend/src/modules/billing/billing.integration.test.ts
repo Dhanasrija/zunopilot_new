@@ -152,10 +152,17 @@ describe('the approved prices', () => {
 });
 
 describe('presentation rules', () => {
-  it('defaults to quarterly, and badges quarterly and yearly', () => {
-    expect(INTERVAL_META.QUARTERLY.isDefault).toBe(true);
-    expect(INTERVAL_META.QUARTERLY.badge).toBe('Most Popular');
-    expect(INTERVAL_META.YEARLY.badge).toBe('Best Value');
+  it('defaults to monthly, and badges quarterly and yearly', () => {
+    // The preselected interval and the badges are separate decisions: quarterly is still the
+    // one most people choose, but the toggle opens on the smallest commitment rather than on
+    // three months billed up front.
+    expect(INTERVAL_META.MONTHLY.isDefault).toBe(true);
+    expect(INTERVAL_META.QUARTERLY.isDefault).toBe(false);
+    // The saving, not a claim. "Most Popular" also sits on the Growth plan card, so the same
+    // words meant two different things on one screen; the percentages are what the reader is
+    // actually weighing, and they match `savingsPercent`.
+    expect(INTERVAL_META.QUARTERLY.badge).toBe('Save 10%');
+    expect(INTERVAL_META.YEARLY.badge).toBe('Save 20%');
     expect(INTERVAL_META.MONTHLY.badge).toBeNull();
   });
 

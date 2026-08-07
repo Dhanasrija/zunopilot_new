@@ -13,7 +13,9 @@ import { Button } from '@/components/ui/button';
 
 export default function Pricing() {
   const { data, isLoading } = useCatalogue();
-  const [interval, setInterval] = useState<BillingInterval>('QUARTERLY');
+  // Monthly until the catalogue answers, which also says monthly. Seeding this with a
+  // different interval would flash the wrong prices on a slow connection.
+  const [interval, setInterval] = useState<BillingInterval>('MONTHLY');
 
   useEffect(() => {
     if (data) setInterval(data.defaultInterval);

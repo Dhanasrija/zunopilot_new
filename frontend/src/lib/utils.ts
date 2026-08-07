@@ -1,5 +1,34 @@
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+/**
+ * tailwind-merge, taught the type scale from §3.2.
+ *
+ * Without this it silently eats text colours. `text-caption` is ours, not Tailwind's, so
+ * tailwind-merge cannot tell it is a font size — it sees a `text-` class, assumes a colour,
+ * decides it conflicts with the colour already there, and keeps the last one:
+ *
+ *   cn('text-on-accent', 'text-caption')  ->  'text-caption'      // colour gone
+ *
+ * The visible symptom was the current page number in the pagination control: `Button`'s
+ * default variant supplies `bg-accent-600 text-on-accent`, the call site adds
+ * `h-7 w-7 text-caption`, and the white was dropped — leaving dark text on a solid accent
+ * fill. Nothing warned, and the class list looked correct in the source.
+ *
+ * This is not a one-component problem: `text-caption` alone appears in 70 files, and every
+ * one of them is a place a variant's colour could vanish. Naming the scale here fixes all of
+ * them at once, and keeps `text-sm` working as the Tailwind built-in it also is.
+ *
+ * Add any new size token from `tailwind.config.js` to this list too, or it will start
+ * deleting colours the day someone uses it.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [{ text: ['display', 'h1', 'h2', 'h3', 'body-lg', 'body', 'caption'] }],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

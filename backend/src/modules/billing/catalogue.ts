@@ -348,12 +348,16 @@ export const INTERVAL_META: Record<BillingInterval, {
   badge: string | null;
   isDefault: boolean;
 }> = {
-  MONTHLY: { label: 'Monthly', everyLabel: 'every month', badge: null, isDefault: false },
-  QUARTERLY: { label: 'Quarterly', everyLabel: 'every 3 months', badge: 'Most Popular', isDefault: true },
-  YEARLY: { label: 'Yearly', everyLabel: 'every 12 months', badge: 'Best Value', isDefault: false },
+  MONTHLY: { label: 'Monthly', everyLabel: 'every month', badge: null, isDefault: true },
+  QUARTERLY: { label: 'Quarterly', everyLabel: 'every 3 months', badge: 'Save 10%', isDefault: false },
+  YEARLY: { label: 'Yearly', everyLabel: 'every 12 months', badge: 'Save 20%', isDefault: false },
 };
 
-export const DEFAULT_INTERVAL: BillingInterval = 'QUARTERLY';
+// Monthly. The badges are unchanged — quarterly is still the one most people pick, and
+// saying so is useful. What the toggle should NOT do is start on a plan that bills three
+// months up front before anyone has asked for it; the smallest commitment goes first and
+// the badge does the persuading.
+export const DEFAULT_INTERVAL: BillingInterval = 'MONTHLY';
 
 /**
  * Effective monthly cost, for display only.

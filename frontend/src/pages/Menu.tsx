@@ -759,7 +759,10 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
 
 // ── Categories tab ────────────────────────────────────────────────────────────
 
-function CategoriesTab({ label, categories, isLoading, qc }: {
+// Exported for its test. The whole page needs a router, an auth store and a query client to
+// render; this tab needs a query client and nothing else, and it is the piece that was
+// reported broken.
+export function CategoriesTab({ label, categories, isLoading, qc }: {
   label: string; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
 }) {
   const [name, setName] = useState('');
@@ -778,7 +781,22 @@ function CategoriesTab({ label, categories, isLoading, qc }: {
         <Input value={name} onChange={(e) => setName(e.target.value)}
           placeholder={`New ${label.toLowerCase()} name`} className="max-w-xs h-9 text-sm"
           onKeyDown={(e) => e.key === 'Enter' && name && create.mutate()} />
-        <Button className="h-9 gap-1 bg-accent-600 hover:bg-accent-700"
+        {/*
+          Outline until there is a name, solid once there is.
+
+          Both states are disabled the same way; what changes is what the disabled state
+          *looks like*. A solid accent button at 50% opacity reads as a live control that is
+          failing — it was reported as "the Add button got disabled", as a fault, when the
+          field was simply empty. An outline button greys into the row and reads as waiting.
+
+          `default` already is `bg-accent-600 hover:bg-accent-700`, so the explicit classes
+          this replaces were duplicating the variant.
+
+          Only this one. The other seven buttons with the same `disabled={!x || pending}`
+          shape are dialog submits, where a disabled primary sits under a form the person is
+          already filling in and is understood.
+        */}
+        <Button variant={name ? 'default' : 'outline'} className="h-9 gap-1"
           onClick={() => name && create.mutate()} disabled={!name || create.isPending}>
           <Plus className="h-4 w-4" /> Add
         </Button>

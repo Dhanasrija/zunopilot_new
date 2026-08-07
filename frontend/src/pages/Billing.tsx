@@ -6,6 +6,7 @@ import { usePermissions } from '@/lib/permissions';
 import {
   formatLimit, formatRupees, useCatalogue,
   type BillingInterval, type PlanCode,
+  type Catalogue,
 } from '@/lib/pricing';
 import { Disclosures, IntervalSwitch, PlanCard } from '@/components/billing/PlanGrid';
 import TaxDetails from '@/components/billing/TaxDetails';
@@ -13,10 +14,11 @@ import { BillingIdentityDialog } from '@/components/billing/BillingIdentityDialo
 import { isBillable, isBillingAddressError, useBillingIdentity } from '@/components/billing/billing-identity';
 import SupportAccess from '@/components/billing/SupportAccess';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn, formatDateTime } from '@/lib/utils';
-import { AlertTriangle, ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, BookUser, ChevronRight, ExternalLink, FileText, LifeBuoy, Loader2, Package, Receipt, ShieldCheck } from 'lucide-react';
 
 // Billing.
 //
@@ -60,6 +62,10 @@ interface SubscriptionResponse {
   disclosures: { tax: string; aiOverage: string };
 }
 
+/** Derived from the response rather than restated, so they cannot drift from it. */
+type Subscription = NonNullable<SubscriptionResponse['subscription']>;
+type Invoice = SubscriptionResponse['invoices'][number];
+
 /** Load Razorpay's checkout script once, on demand. */
 const loadRazorpay = (): Promise<boolean> => new Promise((resolve) => {
   if (typeof window === 'undefined') return resolve(false);
@@ -95,13 +101,183 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit: 
   );
 }
 
+/**
+ * The money summary beside the plan.
+ *
+ * Every figure here comes from the server. `payablePaise` is the charged total and
+ * `amountPaise` the approved price; GST is the DIFFERENCE between them, never a rate applied
+ * on the client. Quoting 18% of something and charging something else is exactly the drift
+ * `payablePaise` exists to prevent.
+ */
+function BillingSummary({
+  catalogue, subscription, entitlements, onChangePlan, canManage,
+}: {
+  catalogue: Catalogue;
+  subscription: Subscription | null;
+  entitlements: { plan: PlanCode | 'FREE'; planName: string };
+  onChangePlan: () => void;
+  canManage: boolean;
+}) {
+  const plan = catalogue.plans.find((p) => p.code === entitlements.plan);
+  const price = subscription ? plan?.prices[subscription.interval] : undefined;
+  const intervalLabel = subscription
+    ? catalogue.intervals.find((i) => i.code === subscription.interval)?.label
+    : null;
+  const gstPaise = price ? price.payablePaise - price.amountPaise : 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-body">
+          <Receipt className="h-4 w-4 text-ink-500" /> Billing summary
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <dl className="space-y-2 text-caption">
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted-foreground">Plan</dt>
+            <dd className="text-right font-medium">
+              {entitlements.planName}
+              {intervalLabel && <span className="text-muted-foreground"> · {intervalLabel}</span>}
+            </dd>
+          </div>
+
+          {subscription?.currentPeriodStart && subscription.currentPeriodEnd && (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="shrink-0 text-muted-foreground">Billing cycle</dt>
+              <dd className="text-right">
+                {formatDateTime(subscription.currentPeriodStart)} – {formatDateTime(subscription.currentPeriodEnd)}
+              </dd>
+            </div>
+          )}
+
+          {price && (
+            <>
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="text-muted-foreground">Billing amount</dt>
+                <dd className="tabular-nums">{formatRupees(price.amountPaise, { decimals: true })}</dd>
+              </div>
+              {gstPaise > 0 && catalogue.gst && (
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted-foreground">GST ({catalogue.gst.ratePercent}%)</dt>
+                  <dd className="tabular-nums">{formatRupees(gstPaise, { decimals: true })}</dd>
+                </div>
+              )}
+              <div className="flex items-baseline justify-between gap-4 border-t pt-2">
+                <dt className="font-medium">Total</dt>
+                <dd className="text-body font-semibold tabular-nums">
+                  {formatRupees(price.payablePaise, { decimals: true })}
+                </dd>
+              </div>
+            </>
+          )}
+
+          {!price && (
+            <p className="text-muted-foreground">
+              No paid plan yet. Pick one to see what it costs.
+            </p>
+          )}
+        </dl>
+
+        {canManage && (
+          <Button className="w-full gap-1" onClick={onChangePlan}>
+            <ArrowLeftRight className="h-4 w-4" />
+            {subscription ? 'Change plan' : 'Choose a plan'}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Support links. Static, so it says only what is actually true. */
+function NeedHelp() {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-body">
+          <LifeBuoy className="h-4 w-4 text-ink-500" /> Need help?
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-caption text-muted-foreground">
+          We are here to help you with your billing.
+        </p>
+        <a
+          href="mailto:support@zunopilot.com?subject=Billing%20question"
+          className="flex items-center justify-between gap-2 rounded-md border border-ink-300 px-3 py-2 text-caption transition-colors duration-micro hover:bg-accent-100/40"
+        >
+          Contact support <ChevronRight className="h-4 w-4 shrink-0 text-ink-500" />
+        </a>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * The last three invoices on the Overview, with the rest a tab away.
+ *
+ * Three because the question this answers is "did the last one go through" — the full ledger
+ * is a different task and has its own tab.
+ */
+function RecentInvoices({ invoices, onViewAll }: { invoices: Invoice[]; onViewAll: () => void }) {
+  if (invoices.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+        <CardTitle className="text-body">Recent invoices</CardTitle>
+        {invoices.length > 3 && (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="text-caption font-medium text-accent-600 hover:underline"
+          >
+            View all invoices
+          </button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {invoices.slice(0, 3).map((invoice) => (
+          <div
+            key={invoice.id}
+            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b pb-2 last:border-0 last:pb-0"
+          >
+            <div className="min-w-0">
+              <p className="font-mono text-caption">{invoice.number}</p>
+              <p className="text-caption text-muted-foreground">
+                {invoice.planName} · {invoice.intervalLabel}
+              </p>
+            </div>
+            <div className="flex items-baseline gap-3">
+              <span className="tabular-nums">{formatRupees(invoice.totalPaise, { decimals: true })}</span>
+              <a
+                href={`/invoices/${invoice.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-caption text-accent-600 hover:underline"
+              >
+                View <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Billing() {
   const qc = useQueryClient();
   const { can } = usePermissions();
   const manage = can('settings:write');
 
   const catalogue = useCatalogue();
-  const [interval, setInterval] = useState<BillingInterval>('QUARTERLY');
+  // Monthly until the catalogue answers, which also says monthly. Seeding this with a
+  // different interval would flash the wrong prices on a slow connection.
+  // Controlled so "View all invoices" on the Overview can move to the Invoices tab.
+  const [tab, setTab] = useState('overview');
+  const [interval, setInterval] = useState<BillingInterval>('MONTHLY');
   const [choosing, setChoosing] = useState<PlanCode | null>(null);
 
   /*
@@ -313,267 +489,315 @@ export default function Billing() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-body">Current plan</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="text-h3 font-semibold">{entitlements.planName}</span>
-              <Badge
-                variant="outline"
-                className={cn('text-caption', onFree
-                  ? 'border-ink-300 bg-surface-0 text-ink-700'
-                  : 'border-success/30 bg-success/10 text-success')}
-              >
-                {entitlements.status}
-              </Badge>
-            </div>
+      {/*
+        Four tabs rather than one long scroll. The page carries four unrelated jobs — see what
+        you are on, change it, find an invoice, edit the address — and stacking them meant
+        scrolling past three to reach the fourth.
 
-            {subscription?.currentPeriodEnd && (
-              <p className="text-caption text-muted-foreground">
-                {subscription.cancelledAt ? 'Access until ' : 'Renews on '}
-                {formatDateTime(subscription.currentPeriodEnd)}
-              </p>
-            )}
-            {subscription?.pendingChange && (
-              <div className="rounded-md border border-accent-100 bg-accent-100 p-2">
-                <p className="text-caption leading-snug text-accent-700">
-                  Changing to <strong>{subscription.pendingChange.plan}</strong>{' '}
-                  ({subscription.pendingChange.interval.toLowerCase()}) on{' '}
-                  {formatDateTime(subscription.pendingChange.effectiveAt)}. You keep your current
-                  plan until then.
-                </p>
-                {manage && (
-                  <button
-                    className="mt-1 text-caption font-medium text-accent-700 underline"
-                    onClick={() => cancelScheduled.mutate()}
-                  >
-                    Cancel this change
-                  </button>
-                )}
-              </div>
-            )}
-
-            {subscription?.assignedNote && (
-              <p className="flex items-start gap-1 text-caption text-muted-foreground">
-                <ShieldCheck className="mt-px h-3 w-3 shrink-0" />
-                {subscription.assignedNote}
-              </p>
-            )}
-
-            <div className="space-y-2 border-t pt-3">
-              <UsageBar label="AI interactions this month" used={usage.used} limit={usage.limit} />
-              <UsageBar label="Team members" used={consumption.teamMembers} limit={entitlements.teamMembers} />
-              <UsageBar label="WhatsApp numbers" used={consumption.whatsappNumbers} limit={entitlements.whatsappNumbers} />
-              <UsageBar label="Active automations" used={consumption.activeAutomations} limit={entitlements.activeAutomations} />
-            </div>
-
-            {usage.overQuota && !onFree && (
-              <div className={cn('rounded-md p-2',
-                usage.capReached ? 'bg-danger/10' : 'bg-warning/15')}
-              >
-                <p className={cn('text-caption leading-snug',
-                  usage.capReached ? 'text-danger' : 'text-ink-900')}
-                >
-                  {usage.capReached ? (
-                    <>
-                      You have reached your spend limit of{' '}
-                      {formatRupees(usage.overageCapPaise)} for this period, so the assistant has
-                      stopped using AI. Customers still get answered by your keyword rules and
-                      fallback message. Raise the limit to turn AI back on.
-                    </>
-                  ) : (
-                    <>
-                      Past your included quota. Further AI is charged at{' '}
-                      {formatRupees(usage.overageRatePaise, { decimals: true })} per interaction —{' '}
-                      <strong>
-                        {usage.overageInteractions.toLocaleString('en-IN')} so far,{' '}
-                        {formatRupees(usage.overagePaise, { decimals: true })}
-                      </strong>
-                      , added to your next invoice.
-                    </>
-                  )}
-                </p>
-              </div>
-            )}
-
-            {usage.overQuota && onFree && (
-              <p className="rounded-md bg-warning/15 p-2 text-caption leading-snug text-ink-900">
-                You have used the free allowance for this period. Choose a plan to keep the
-                assistant answering with AI.
-              </p>
-            )}
-
-            {/*
-              The spend limit. A cap is what makes usage billing safe to switch
-              on — without one, a loop or a viral week becomes a bill nobody
-              agreed to.
-            */}
-            {manage && !onFree && (
-              <div className="border-t pt-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-caption font-medium">AI spend limit</span>
-                  <span className="text-caption text-muted-foreground">
-                    per billing month
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground">₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={100}
-                      defaultValue={Math.round(usage.overageCapPaise / 100)}
-                      onBlur={(e) => {
-                        const rupees = Number(e.target.value);
-                        if (!Number.isFinite(rupees) || rupees < 0) return;
-                        const paise = Math.round(rupees) * 100;
-                        if (paise !== usage.overageCapPaise) setCap.mutate(paise);
-                      }}
-                      className="h-7 w-full rounded-md border bg-background pl-4 pr-2 text-caption tabular-nums"
-                    />
-                  </div>
-                  <button
-                    className="text-caption text-muted-foreground underline"
-                    onClick={() => setCap.mutate(null)}
-                  >
-                    Reset
-                  </button>
-                </div>
-                <p className="mt-1 text-caption leading-snug text-muted-foreground">
-                  Set to ₹0 to never spend beyond your plan — the assistant stops using AI at the
-                  quota instead.
-                </p>
-              </div>
-            )}
-
-            <p className="text-caption text-muted-foreground">
-              Counted {formatDateTime(usage.periodStart)} – {formatDateTime(usage.periodEnd)}.
-            </p>
-
-            {manage && subscription && !subscription.cancelledAt && !onFree && (
-              <Button
-                variant="outline" size="sm" className="w-full text-caption"
-                disabled={cancel.isPending}
-                onClick={() => cancel.mutate()}
-              >
-                {cancel.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                Cancel at period end
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-
-        <TaxDetails canManage={manage} />
-
+        Controlled, because "View all invoices" in the Overview has to move the reader to the
+        Invoices tab. A link that scrolled instead would leave the tab strip lying about where
+        they are.
+      */}
+      <Tabs value={tab} onValueChange={setTab}>
         {/*
-          The address step. Rendered once at page level rather than per plan card, because it is
-          one dialog whose subject is `pendingChoice` — not fourteen of them.
+          The strip scrolls on a phone instead of setting the page width. Four triggers with
+          `whitespace-nowrap` are wider than 375px, and `TabsList` is inline-flex — without this
+          wrapper its content becomes the document's minimum width and every screen below it is
+          clipped at the right edge. That exact failure shipped once already, from the mobile
+          header's notification label.
         */}
-        <BillingIdentityDialog
-          open={pendingChoice !== null}
-          onOpenChange={(next) => { if (!next) setPendingChoice(null); }}
-          canManage={manage}
-          onComplete={() => {
-            const resume = pendingChoice;
-            setPendingChoice(null);
-            // Straight on to payment. Saving the address was a step in buying something, not an
-            // errand — sending them back to the grid to find the plan again would make it one.
-            if (resume) startChange(resume.plan, resume.interval);
-          }}
-        />
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max min-w-full">
+            <TabsTrigger value="overview"><FileText className="h-4 w-4" /> Overview</TabsTrigger>
+            <TabsTrigger value="plans"><Package className="h-4 w-4" /> Plans</TabsTrigger>
+            <TabsTrigger value="invoices"><Receipt className="h-4 w-4" /> Invoices</TabsTrigger>
+            <TabsTrigger value="details"><BookUser className="h-4 w-4" /> Billing details</TabsTrigger>
+          </TabsList>
+        </div>
 
-        <SupportAccess />
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="space-y-4 lg:col-span-2">
+            <Card className="lg:col-span-1">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-body">Current plan</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-h3 font-semibold">{entitlements.planName}</span>
+                  <Badge
+                    variant="outline"
+                    className={cn('text-caption', onFree
+                      ? 'border-ink-300 bg-surface-0 text-ink-700'
+                      : 'border-success/30 bg-success/10 text-success')}
+                  >
+                    {entitlements.status}
+                  </Badge>
+                </div>
 
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-body">Invoices</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {invoices.length === 0 ? (
-              <p className="px-6 pb-6 text-sm text-muted-foreground">No invoices yet.</p>
-            ) : (
-              <table className="table-stack w-full text-sm">
-                <thead className="border-y bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-2 font-medium">Invoice</th>
-                    <th className="px-4 py-2 font-medium">Plan</th>
-                    <th className="px-4 py-2 font-medium">Period</th>
-                    <th className="px-4 py-2 text-right font-medium">Amount</th>
-                    <th className="px-4 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id} className="border-b last:border-0">
-                      <td data-label="Invoice" className="px-4 py-2 font-mono text-caption">{invoice.number}</td>
-                      <td data-label="Plan" className="px-4 py-2">
-                        {invoice.planName}
-                        <span className="text-muted-foreground"> · {invoice.intervalLabel}</span>
-                      </td>
-                      <td data-label="Period" className="px-4 py-2 text-caption text-muted-foreground">
-                        {formatDateTime(invoice.periodStart)} – {formatDateTime(invoice.periodEnd)}
-                      </td>
-                      <td data-label="Amount" className="px-4 py-2 text-right tabular-nums">
-                        {formatRupees(invoice.totalPaise, { decimals: true })}
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <a
-                          href={`/invoices/${invoice.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-caption text-accent-600 hover:underline"
-                        >
-                          View <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                {subscription?.currentPeriodEnd && (
+                  <p className="text-caption text-muted-foreground">
+                    {subscription.cancelledAt ? 'Access until ' : 'Renews on '}
+                    {formatDateTime(subscription.currentPeriodEnd)}
+                  </p>
+                )}
+                {subscription?.pendingChange && (
+                  <div className="rounded-md border border-accent-100 bg-accent-100 p-2">
+                    <p className="text-caption leading-snug text-accent-700">
+                      Changing to <strong>{subscription.pendingChange.plan}</strong>{' '}
+                      ({subscription.pendingChange.interval.toLowerCase()}) on{' '}
+                      {formatDateTime(subscription.pendingChange.effectiveAt)}. You keep your current
+                      plan until then.
+                    </p>
+                    {manage && (
+                      <button
+                        className="mt-1 text-caption font-medium text-accent-700 underline"
+                        onClick={() => cancelScheduled.mutate()}
+                      >
+                        Cancel this change
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {subscription?.assignedNote && (
+                  <p className="flex items-start gap-1 text-caption text-muted-foreground">
+                    <ShieldCheck className="mt-px h-3 w-3 shrink-0" />
+                    {subscription.assignedNote}
+                  </p>
+                )}
+
+                <div className="space-y-2 border-t pt-3">
+                  <UsageBar label="AI interactions this month" used={usage.used} limit={usage.limit} />
+                  <UsageBar label="Team members" used={consumption.teamMembers} limit={entitlements.teamMembers} />
+                  <UsageBar label="WhatsApp numbers" used={consumption.whatsappNumbers} limit={entitlements.whatsappNumbers} />
+                  <UsageBar label="Active automations" used={consumption.activeAutomations} limit={entitlements.activeAutomations} />
+                </div>
+
+                {usage.overQuota && !onFree && (
+                  <div className={cn('rounded-md p-2',
+                    usage.capReached ? 'bg-danger/10' : 'bg-warning/15')}
+                  >
+                    <p className={cn('text-caption leading-snug',
+                      usage.capReached ? 'text-danger' : 'text-ink-900')}
+                    >
+                      {usage.capReached ? (
+                        <>
+                          You have reached your spend limit of{' '}
+                          {formatRupees(usage.overageCapPaise)} for this period, so the assistant has
+                          stopped using AI. Customers still get answered by your keyword rules and
+                          fallback message. Raise the limit to turn AI back on.
+                        </>
+                      ) : (
+                        <>
+                          Past your included quota. Further AI is charged at{' '}
+                          {formatRupees(usage.overageRatePaise, { decimals: true })} per interaction —{' '}
+                          <strong>
+                            {usage.overageInteractions.toLocaleString('en-IN')} so far,{' '}
+                            {formatRupees(usage.overagePaise, { decimals: true })}
+                          </strong>
+                          , added to your next invoice.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                {usage.overQuota && onFree && (
+                  <p className="rounded-md bg-warning/15 p-2 text-caption leading-snug text-ink-900">
+                    You have used the free allowance for this period. Choose a plan to keep the
+                    assistant answering with AI.
+                  </p>
+                )}
+
+                {/*
+                  The spend limit. A cap is what makes usage billing safe to switch
+                  on — without one, a loop or a viral week becomes a bill nobody
+                  agreed to.
+                */}
+                {manage && !onFree && (
+                  <div className="border-t pt-3">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-caption font-medium">AI spend limit</span>
+                      <span className="text-caption text-muted-foreground">
+                        per billing month
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground">₹</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={100}
+                          defaultValue={Math.round(usage.overageCapPaise / 100)}
+                          onBlur={(e) => {
+                            const rupees = Number(e.target.value);
+                            if (!Number.isFinite(rupees) || rupees < 0) return;
+                            const paise = Math.round(rupees) * 100;
+                            if (paise !== usage.overageCapPaise) setCap.mutate(paise);
+                          }}
+                          className="h-7 w-full rounded-md border bg-background pl-4 pr-2 text-caption tabular-nums"
+                        />
+                      </div>
+                      <button
+                        className="text-caption text-muted-foreground underline"
+                        onClick={() => setCap.mutate(null)}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <p className="mt-1 text-caption leading-snug text-muted-foreground">
+                      Set to ₹0 to never spend beyond your plan — the assistant stops using AI at the
+                      quota instead.
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-caption text-muted-foreground">
+                  Counted {formatDateTime(usage.periodStart)} – {formatDateTime(usage.periodEnd)}.
+                </p>
+
+                {manage && subscription && !subscription.cancelledAt && !onFree && (
+                  <Button
+                    variant="outline" size="sm" className="w-full text-caption"
+                    disabled={cancel.isPending}
+                    onClick={() => cancel.mutate()}
+                  >
+                    {cancel.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                    Cancel at period end
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+            </div>
+
+            <div className="space-y-4">
+              <BillingSummary
+                catalogue={catalogue.data}
+                subscription={subscription}
+                entitlements={entitlements}
+                onChangePlan={() => setTab('plans')}
+                canManage={manage}
+              />
+              <NeedHelp />
+            </div>
+          </div>
+
+          {/* The three most recent, with the rest a tab away. */}
+          <RecentInvoices invoices={invoices} onViewAll={() => setTab('invoices')} />
+        </TabsContent>
+
+        <TabsContent value="plans" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-h3 font-semibold">
+                {onFree ? 'Choose a plan' : 'Change plan'}
+              </h2>
+              <IntervalSwitch catalogue={catalogue.data} value={interval} onChange={setInterval} />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {catalogue.data.plans.map((plan) => (
+                <PlanCard
+                  key={plan.code}
+                  plan={plan}
+                  interval={interval}
+                  catalogue={catalogue.data!}
+                  currentPlan={entitlements.plan}
+                  busy={choosing === plan.code}
+                  currentInterval={subscription?.interval ?? null}
+                  pendingPlan={subscription?.pendingChange ?? null}
+                  onChoose={manage ? (code, chosen) => choosePlan(code, chosen) : undefined}
+                  onContactSales={() => {
+                    window.location.href = 'mailto:sales@zunopilot.com?subject=Enterprise%20plan';
+                  }}
+                />
+              ))}
+            </div>
+
+            <Disclosures catalogue={catalogue.data} />
+
+            {!manage && (
+              <p className="text-caption text-muted-foreground">
+                Only an owner can change the plan.
+              </p>
             )}
-          </CardContent>
-        </Card>
-      </div>
+        </TabsContent>
 
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-h3 font-semibold">
-            {onFree ? 'Choose a plan' : 'Change plan'}
-          </h2>
-          <IntervalSwitch catalogue={catalogue.data} value={interval} onChange={setInterval} />
-        </div>
+        <TabsContent value="invoices">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-body">Invoices</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {invoices.length === 0 ? (
+                  <p className="px-6 pb-6 text-sm text-muted-foreground">No invoices yet.</p>
+                ) : (
+                  <table className="table-stack w-full text-sm">
+                    <thead className="border-y bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 font-medium">Invoice</th>
+                        <th className="px-4 py-2 font-medium">Plan</th>
+                        <th className="px-4 py-2 font-medium">Period</th>
+                        <th className="px-4 py-2 text-right font-medium">Amount</th>
+                        <th className="px-4 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoices.map((invoice) => (
+                        <tr key={invoice.id} className="border-b last:border-0">
+                          <td data-label="Invoice" className="px-4 py-2 font-mono text-caption">{invoice.number}</td>
+                          <td data-label="Plan" className="px-4 py-2">
+                            {invoice.planName}
+                            <span className="text-muted-foreground"> · {invoice.intervalLabel}</span>
+                          </td>
+                          <td data-label="Period" className="px-4 py-2 text-caption text-muted-foreground">
+                            {formatDateTime(invoice.periodStart)} – {formatDateTime(invoice.periodEnd)}
+                          </td>
+                          <td data-label="Amount" className="px-4 py-2 text-right tabular-nums">
+                            {formatRupees(invoice.totalPaise, { decimals: true })}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <a
+                              href={`/invoices/${invoice.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-caption text-accent-600 hover:underline"
+                            >
+                              View <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+        </TabsContent>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {catalogue.data.plans.map((plan) => (
-            <PlanCard
-              key={plan.code}
-              plan={plan}
-              interval={interval}
-              catalogue={catalogue.data!}
-              currentPlan={entitlements.plan}
-              busy={choosing === plan.code}
-              currentInterval={subscription?.interval ?? null}
-              pendingPlan={subscription?.pendingChange ?? null}
-              onChoose={manage ? (code, chosen) => choosePlan(code, chosen) : undefined}
-              onContactSales={() => {
-                window.location.href = 'mailto:sales@zunopilot.com?subject=Enterprise%20plan';
-              }}
-            />
-          ))}
-        </div>
+        <TabsContent value="details" className="space-y-4">
+          <TaxDetails canManage={manage} />
+          <SupportAccess />
+        </TabsContent>
+      </Tabs>
 
-        <Disclosures catalogue={catalogue.data} />
-
-        {!manage && (
-          <p className="text-caption text-muted-foreground">
-            Only an owner can change the plan.
-          </p>
-        )}
-      </div>
+      {/*
+        The address step. Page level, outside the tabs, because it is one dialog whose subject is
+        `pendingChoice` — and choosing a plan on the Plans tab must not unmount it.
+      */}
+      <BillingIdentityDialog
+        open={pendingChoice !== null}
+        onOpenChange={(next) => { if (!next) setPendingChoice(null); }}
+        canManage={manage}
+        onComplete={() => {
+          const resume = pendingChoice;
+          setPendingChoice(null);
+          // Straight on to payment. Saving the address was a step in buying something, not an
+          // errand — sending them back to the grid to find the plan again would make it one.
+          if (resume) startChange(resume.plan, resume.interval);
+        }}
+      />
     </div>
   );
 }
