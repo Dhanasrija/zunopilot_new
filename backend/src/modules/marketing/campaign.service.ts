@@ -1,4 +1,6 @@
-import type { Campaign, CampaignStatus, Prisma, TemplateHeaderFormat } from '@prisma/client';
+import type {
+  Campaign, CampaignStatus, MediaKind, Prisma, TemplateHeaderFormat,
+} from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { ApiError } from '../../utils/ApiError.js';
@@ -45,6 +47,17 @@ export const campaignInclude = {
  * "needs media" would block every text-header template for no reason.
  */
 const MEDIA_HEADERS: TemplateHeaderFormat[] = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+
+/**
+ * A `MediaKind` a template header can actually carry.
+ *
+ * `AUDIO` joined the enum for inbound voice notes, and a header cannot be one — Meta has no
+ * audio header format. The compiler caught this the moment the value existed, which is the
+ * argument for narrowing here rather than casting at each send.
+ */
+type HeaderMediaKind = Extract<MediaKind, 'IMAGE' | 'VIDEO' | 'DOCUMENT'>;
+const isHeaderKind = (kind: MediaKind): kind is HeaderMediaKind =>
+  kind === 'IMAGE' || kind === 'VIDEO' || kind === 'DOCUMENT';
 
 export interface AudienceFilter {
   /** Only customers seen since this date. */
@@ -398,7 +411,9 @@ export const sendCampaignBatch = async (
    * The URL is the same for every message, and `publicUrlFor` is pure — but building it in
    * the loop would invite a database read per recipient the day it stops being pure.
    */
-  const headerMedia = campaign.headerMedia && MEDIA_HEADERS.includes(campaign.template.headerFormat)
+  const headerMedia = campaign.headerMedia
+    && MEDIA_HEADERS.includes(campaign.template.headerFormat)
+    && isHeaderKind(campaign.headerMedia.kind)
     ? {
       kind: campaign.headerMedia.kind,
       link: publicUrlFor(campaign.headerMedia),
@@ -631,6 +646,9 @@ export const sendTestMessage = async (
         where: { id: input.headerMediaId!, tenantId },
       });
       if (!asset) throw ApiError.badRequest('That attachment is not in this workspace');
+      if (!isHeaderKind(asset.kind)) {
+        throw ApiError.badRequest('That file cannot be used as a template header.');
+      }
       return { kind: asset.kind, link: publicUrlFor(asset), filename: asset.originalName };
     })()
     : undefined;

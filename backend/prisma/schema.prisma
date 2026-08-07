@@ -205,8 +205,14 @@ model MediaAsset {
   sizeBytes    Int
   /// As the uploader named it. Display only — never used to build a path.
   originalName String
-  /// The uuid filename on disk. Not the id, so the id can be rotated without moving bytes.
+  /// Where the bytes are: an S3 object key in production, a path under `MEDIA_DIR` locally.
+  /// Built by `storageKeyFor` and tenant-prefixed, so a workspace's files share one prefix.
+  /// Never taken from a request, and not the id — so an id can be rotated without moving bytes.
   storageKey   String @unique
+
+  /// Decides which route will hand this over, and it is a privacy boundary rather than
+  /// bookkeeping. See `MediaSource`.
+  source MediaSource @default(UPLOAD)
 
   uploadedByUserId String?
 
@@ -222,6 +228,22 @@ enum MediaKind {
   IMAGE
   VIDEO
   DOCUMENT
+
+  /// Inbound only. A customer can send a voice note or an audio file; a template header
+  /// cannot be one, so this never appears in the upload rules.
+  AUDIO
+}
+
+/// Why a file is here, and therefore who may read it.
+///
+/// **The distinction is a privacy boundary, not bookkeeping.** `UPLOAD` is a template header
+/// the business chose to send, and Meta fetches it from an unauthenticated URL because it
+/// cannot present a token — that route has always been public and has to stay public.
+/// `INBOUND` is a photograph a customer sent: a damaged delivery, an ID, a prescription.
+/// Serving those from the same open route would publish them to anyone holding the id.
+enum MediaSource {
+  UPLOAD
+  INBOUND
 }
 
 model User {

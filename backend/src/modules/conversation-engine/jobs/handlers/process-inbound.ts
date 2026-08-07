@@ -1,13 +1,20 @@
-import { Prisma, type Conversation, type Customer, type Tenant, type WhatsappAccount } from '@prisma/client';
+import {
+  Prisma, type Conversation, type Customer, type MessageType, type Tenant, type WhatsappAccount,
+} from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
 import { withContext } from '../../../../config/logger.js';
 import { withAdvisoryLock } from '../../../../utils/withAdvisoryLock.js';
 import type { NormalisedInboundMessage } from '../../http/webhook-intake.js';
 import { routeInboundMessage } from '../../routing/index.js';
+import { whatsappProviderFor } from '../../providers/whatsapp.js';
+import { recordOutboundMessage } from '../../providers/mirror.js';
 import { enqueue, QUEUES, type ProcessInboundMessageJob } from '../queue.js';
 import { linkLeadToCustomer } from '../../../leads/lead.service.js';
 import { handleConsentKeyword } from '../../../marketing/consent.service.js';
 import { notifyInboundMessage } from '../../../notifications/notification.producers.js';
+import {
+  captureInboundMedia, describeMedia, isMediaType, messageTypeOf,
+} from '../../../media/inbound-media.js';
 
 // The inbound pipeline, running off the queue rather than in the request.
 //
@@ -153,6 +160,40 @@ const metaInteractiveOf = (message: NormalisedInboundMessage): Record<string, un
   return undefined;
 };
 
+/** The message types that carry a file rather than words. */
+const MEDIA_MESSAGE_TYPES = new Set<MessageType>(['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT']);
+
+const ATTACHMENT_REPLY: Record<string, string> = {
+  IMAGE: 'Thanks — we\'ve got your photo. Someone from the team will take a look.',
+  VIDEO: 'Thanks — we\'ve got your video. Someone from the team will take a look.',
+  AUDIO: 'Thanks — we\'ve got your voice message. Someone from the team will listen and reply.',
+  DOCUMENT: 'Thanks — we\'ve got your document. Someone from the team will take a look.',
+};
+
+/**
+ * Tell the customer the file arrived.
+ *
+ * Sent through the provider the rest of the engine uses, so a demo or simulated channel is
+ * answered by the mock rather than attempting a live send with a fake token. Mirrored into the
+ * Inbox for the same reason every other automated reply is: an agent who cannot see what the
+ * bot already said will say it again.
+ */
+const acknowledgeAttachment = async (context: ResolvedContext, type: MessageType) => {
+  const body = ATTACHMENT_REPLY[type] ?? 'Thanks — we\'ve got your attachment.';
+
+  const sent = await whatsappProviderFor(context.channel)
+    .sendText({ to: context.contact.waId, body });
+
+  await recordOutboundMessage(
+    {
+      tenantId: context.tenant.id,
+      conversationId: context.conversation.id,
+      customerId: context.contact.id,
+    },
+    { type: 'TEXT', body, messageId: sent.messageId },
+  );
+};
+
 const persistMessage = async (context: ResolvedContext, message: NormalisedInboundMessage) => {
   // Idempotent by wamid, because this runs on every retry.
   //
@@ -167,19 +208,53 @@ const persistMessage = async (context: ResolvedContext, message: NormalisedInbou
   });
   if (existing) return existing;
 
+  /*
+   * A photo, video, document or voice note is fetched **now**, before the row is written.
+   *
+   * Meta hands over a media id, not a file, and that id expires. Doing this lazily when an
+   * agent opens the conversation works for a few minutes and then silently stops, which
+   * surfaces weeks later as "all the old photos are broken". Every image sent to this platform
+   * before this shipped is already gone for that reason.
+   *
+   * A failure returns null and the message is still recorded: losing an attachment is bad,
+   * losing the fact that a customer wrote to you because a download timed out is worse.
+   */
+  const captured = isMediaType(message.type)
+    ? await captureInboundMedia({
+      tenantId: context.tenant.id,
+      accessToken: context.channel.accessToken,
+      whatsappType: message.type,
+      raw: message.raw,
+    })
+    : null;
+
+  /*
+   * The body for a file with no caption.
+   *
+   * `message.text` is the caption, and for a bare photo it is an empty string — which used to
+   * reach the router as nothing at all, so the customer got the generic "sorry, I didn't catch
+   * that" as though their photo had never arrived. A short description means the Inbox, the
+   * notification and the assistant all say the same true thing.
+   */
+  const body = message.text
+    || (captured ? describeMedia(captured.kind, captured.originalName) : message.text);
+
   const created = await prisma.message.create({
     data: {
       tenantId: context.tenant.id,
       conversationId: context.conversation.id,
       customerId: context.contact.id,
       direction: 'INBOUND',
-      type: message.type === 'text' ? 'TEXT'
-        : message.type === 'interactive' || message.type === 'button' ? 'INTERACTIVE'
-          : message.type === 'location' ? 'LOCATION'
-            : 'SYSTEM',
+      // Was `SYSTEM` for everything that was not text, interactive or a location — so an
+      // image and an unhandled system notice were indistinguishable, and the Inbox rendered
+      // both as the literal string "[SYSTEM]".
+      type: messageTypeOf(message.type),
       status: 'RECEIVED',
       waMessageId: message.externalMessageId,
-      body: message.text,
+      body,
+      // Our own id, not Meta's URL. Meta's expires; this one is served by
+      // `GET /api/media/:id/file`, authenticated and scoped to this workspace.
+      mediaUrl: captured ? `/api/media/${captured.mediaAssetId}/file` : null,
       // `payload.interactive` must keep META's shape, not our normalised one.
       //
       // The ordering state machine reads `interactive.list_reply.id` directly,
@@ -304,6 +379,31 @@ const processEvent = async (eventId: string): Promise<void> => {
     // starts for a thread an agent is handling.
     if (context.conversation.automationPaused || context.conversation.status === 'HUMAN_TAKEOVER') {
       logger.info('Automation paused for this conversation, not routing');
+      await prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: { processingStatus: 'PROCESSED', processedAt: new Date() },
+      });
+      return;
+    }
+
+    /*
+     * A file with no caption is acknowledged, not routed.
+     *
+     * The model cannot see the image. Handing it "[photo]" produces a confident answer about
+     * nothing, and with the agent off it reaches the generic fallback — which reads to the
+     * customer as though the photo never arrived. Neither is honest; both were what happened
+     * before this.
+     *
+     * A caption is different: that is a real message and goes through the router as normal,
+     * with the file sitting beside it in the Inbox for whoever picks it up.
+     *
+     * Deliberately after the cart and the human-takeover checks above, so a flow that is
+     * *expecting* a document — upload your prescription, send a photo of the damage — still
+     * gets it, and a thread an agent has taken over stays silent.
+     */
+    if (MEDIA_MESSAGE_TYPES.has(message.type) && !payload.message.text.trim()) {
+      await acknowledgeAttachment(context, message.type);
+      logger.info('Acknowledged an attachment with no caption', { type: message.type });
       await prisma.webhookEvent.update({
         where: { id: eventId },
         data: { processingStatus: 'PROCESSED', processedAt: new Date() },

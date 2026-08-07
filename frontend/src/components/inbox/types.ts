@@ -36,6 +36,11 @@ export interface Message {
   direction: 'INBOUND' | 'OUTBOUND';
   type: string;
   body?: string | null;
+  /**
+   * Our own path to the file, `/api/media/:id/file`, not Meta's URL — theirs expires.
+   * Null when there is no attachment, or when fetching it from Meta failed.
+   */
+  mediaUrl?: string | null;
   payload?: unknown;
   createdAt: string;
   /**

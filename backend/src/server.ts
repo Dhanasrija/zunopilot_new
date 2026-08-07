@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { env, jwtSecretWeakness } from './config/env.js';
 import { logger } from './config/logger.js';
 import { prisma } from './config/prisma.js';
+import { assertStorageConfigured, storageBackend } from './modules/media/storage.js';
 import { startResumeWorker, stopResumeWorker } from './services/workflow-engine/resume-worker.js';
 import { startWorkers } from './modules/conversation-engine/jobs/workers.js';
 import { stopQueue } from './modules/conversation-engine/jobs/queue.js';
@@ -20,6 +21,23 @@ if (weakness) {
   logger.error(
     `${weakness}. The API will not start. Generate one with: openssl rand -base64 48`,
   );
+  process.exit(1);
+}
+
+/*
+ * Where media goes, checked before anything can write one.
+ *
+ * Same reasoning as the secret above. A production server with no `S3_BUCKET` would happily
+ * write customer photographs into the release directory — which the next deploy replaces — and
+ * nothing would look wrong until somebody opened a conversation from last week and the image
+ * was gone. Refusing to start turns a silent, delayed data loss into a five-minute
+ * configuration fix.
+ */
+try {
+  assertStorageConfigured();
+  logger.info('Media storage', { backend: storageBackend() });
+} catch (err) {
+  logger.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 }
 
