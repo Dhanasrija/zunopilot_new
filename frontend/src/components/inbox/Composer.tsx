@@ -20,7 +20,7 @@ import { formatBytes } from '@/lib/media';
 
 export function Composer({
   value, onChange, onSend, sending,
-  onSendFile, attaching = false, fileAccept, windowClosed = false,
+  onSendFile, attaching = false, fileAccept, checkFile, windowClosed = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -32,6 +32,14 @@ export function Composer({
   /** The MIME types the server will accept, so the file browser cannot offer a refusal. */
   fileAccept?: string;
   /**
+   * Why a chosen file cannot be sent, or null.
+   *
+   * The `accept` attribute above is a filter, not a guarantee — it says nothing about size,
+   * and a person can always pick "All files". Without this, an oversized video was uploaded
+   * in full and then refused, or worse, cut off by nginx and reported as a bare 413.
+   */
+  checkFile?: (file: File) => string | null;
+  /**
    * True when 24 hours have passed since the customer last wrote.
    *
    * WhatsApp then accepts templates only, and a template's media is fixed at approval — so
@@ -41,6 +49,7 @@ export function Composer({
   windowClosed?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const busy = sending || attaching;
 
@@ -51,6 +60,7 @@ export function Composer({
     if (file && onSendFile) {
       onSendFile(file, value.trim());
       setFile(null);
+      setRefused(null);
       return;
     }
     onSend();
@@ -66,6 +76,17 @@ export function Composer({
         The staged file, named before it is sent. An agent who picked the wrong one from a
         folder of near-identical filenames finds out here rather than from the customer.
       */}
+      {/*
+        Said here rather than in a toast. The reason is about the file the agent is looking at,
+        it names a limit they need while choosing the next one, and a toast is gone in four
+        seconds.
+      */}
+      {refused && (
+        <p role="alert" className="mb-2 rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-caption text-ink-900">
+          {refused}
+        </p>
+      )}
+
       {file && (
         <div className="mb-2 flex items-center gap-2 rounded-md border border-ink-300 px-3 py-2">
           <Paperclip aria-hidden className="h-4 w-4 shrink-0 text-ink-500" />
@@ -77,7 +98,7 @@ export function Composer({
             size="icon"
             aria-label={`Remove ${file.name}`}
             disabled={busy}
-            onClick={() => setFile(null)}
+            onClick={() => { setFile(null); setRefused(null); }}
           >
             <X className="h-3.5 w-3.5" />
           </Button>
@@ -97,9 +118,13 @@ export function Composer({
               accept={fileAccept}
               onChange={(e) => {
                 const chosen = e.target.files?.[0];
-                if (chosen) setFile(chosen);
                 // Cleared so choosing the same file twice still fires a change.
                 e.target.value = '';
+                if (!chosen) return;
+
+                const problem = checkFile?.(chosen) ?? null;
+                setRefused(problem);
+                setFile(problem ? null : chosen);
               }}
             />
             <Button

@@ -79,6 +79,36 @@ export const useDeleteMedia = () => {
   });
 };
 
+/**
+ * Why this file cannot be sent, or null when it can.
+ *
+ * Checked in the browser as well as on the server, which is worth the duplication here: the
+ * server's refusal costs a full upload first, and for a 20 MB video over a phone connection
+ * that is a minute of waiting for a no. Bigger still and it never reaches the server at all —
+ * nginx caps the request body and answers 413 with no message of its own.
+ *
+ * The rules come from `GET /media/rules`, so this reads the server's numbers rather than
+ * keeping a second copy that would drift.
+ */
+export const rejectReason = (file: File, rules: MediaRules | undefined): string | null => {
+  if (!rules) return null; // Not loaded yet — let the server decide rather than guess.
+
+  const kinds = Object.values(rules.kinds);
+  const rule = kinds.find((k) => k.mimeTypes.includes(file.type));
+  if (!rule) {
+    const accepted = kinds.map((k) => k.label).join('; ');
+    return file.type
+      ? `WhatsApp will not accept a ${file.type} file. Send one of: ${accepted}.`
+      : `That file type cannot be identified. Send one of: ${accepted}.`;
+  }
+
+  if (file.size > rule.maxBytes) {
+    return `That file is ${formatBytes(file.size)}. The limit is ${rule.label}.`;
+  }
+
+  return null;
+};
+
 export const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;

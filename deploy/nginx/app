@@ -43,11 +43,20 @@ server {
     # chunk on every cold request.
     gzip_static on;
 
-    # 16m, deliberately NOT the 100m that media.service.ts allows for a DOCUMENT.
-    # multer uses memoryStorage() and the service writes input.buffer, so a 100 MB upload is
-    # 100 MB+ of heap in the process that also runs the pg-boss workers — killing it takes the
-    # job queue with it. Raise this only once uploads stream to disk.
-    client_max_body_size 16m;
+    # 20m: comfortably above the app's own 16 MB ceiling, and deliberately not equal to it.
+    #
+    # **The two limits measure different things.** The app weighs the file; nginx weighs the
+    # whole request — multipart boundaries, the field header, the filename. When both said 16m
+    # a video at exactly Meta's 16 MB limit, which the UI advertises as acceptable, was
+    # rejected here with a bare 413 before any code that could explain itself ran. A cap that
+    # refuses what the product says it accepts is worse than no cap.
+    #
+    # Still not the 100m that media.service.ts once allowed for a DOCUMENT: multer uses
+    # memoryStorage() and the service writes input.buffer, so a 100 MB upload is 100 MB+ of
+    # heap in the process that also runs the pg-boss workers, and killing it takes the job
+    # queue with it. That ceiling came down to 16 MB to match — see the note there. Raising
+    # either needs uploads to stream rather than buffer.
+    client_max_body_size 20m;
 
     # `zuno` strips the query string from /api/webhook only — see conf.d/zunopilot-logging.conf.
     access_log /var/log/nginx/access.log zuno;
@@ -117,7 +126,9 @@ server {
     ssl_certificate     /etc/letsencrypt/live/zunopilot.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/zunopilot.com/privkey.pem;
 
-    client_max_body_size 16m;
+    # Same 20m as the app host, and kept in step with it deliberately: the two differing is
+    # how you get an upload that works from one hostname and 413s from the other.
+    client_max_body_size 20m;
 
     # `zuno` strips the query string from /api/webhook only — see conf.d/zunopilot-logging.conf.
     access_log /var/log/nginx/access.log zuno;

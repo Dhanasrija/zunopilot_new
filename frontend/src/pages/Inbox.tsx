@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
-import { useMediaRules } from '@/lib/media';
+import { rejectReason, useMediaRules } from '@/lib/media';
 import { useAuthStore, useHasModule } from '@/stores/auth.store';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -381,6 +381,7 @@ export default function Inbox() {
                 fileAccept={mediaRules.data
                   ? Object.values(mediaRules.data.kinds).flatMap((k) => k.mimeTypes).join(',')
                   : undefined}
+                checkFile={(file) => rejectReason(file, mediaRules.data)}
                 windowClosed={windowClosed}
               />
             </>
