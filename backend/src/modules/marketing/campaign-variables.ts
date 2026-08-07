@@ -50,9 +50,17 @@ export const variableValueSchema = z.union([
   }),
 ]);
 
-export const variableValuesSchema = z
-  .record(z.string().max(80), variableValueSchema)
-  .default({});
+/**
+ * The map on its own, with no default.
+ *
+ * Split out because `.default({})` and a partial update do not mix: `z.object().partial()`
+ * makes a field optional but still applies its default when the key is absent, so a PATCH that
+ * only renames a campaign would arrive with `variableValues: {}` and blank every placeholder.
+ * A create wants the default; an edit must be able to leave the field alone.
+ */
+export const variableValuesRecord = z.record(z.string().max(80), variableValueSchema);
+
+export const variableValuesSchema = variableValuesRecord.default({});
 
 /** What a template declares, read defensively — `variables` is a Json column. */
 export const declaredVariables = (variables: unknown): string[] =>

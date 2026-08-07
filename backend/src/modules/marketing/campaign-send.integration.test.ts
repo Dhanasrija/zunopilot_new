@@ -372,3 +372,115 @@ describe('the test send', () => {
     expect(hooks.sends).toHaveLength(0);
   });
 });
+
+describe('fixing a draft', () => {
+  /*
+   * The other half of the start guard.
+   *
+   * `startCampaign` refuses unfilled placeholders, which is right — but with no way to edit a
+   * campaign, a draft made before that guard (or by a browser still running an older bundle)
+   * could never be given its values and could never be removed. It sat there refusing to start.
+   * Turning "sends badly" into "sits there forever" is not an improvement.
+   */
+  const draftWithNoValues = async () => {
+    const campaignId = await makeCampaign(await makeTemplate(), {});
+    await request(app).post(`/api/campaigns/${campaignId}/start`)
+      .set(auth(owner)).expect(400);
+    return campaignId;
+  };
+
+  it('**a stuck draft can be given its values and then starts**', async () => {
+    await makeCustomer('15558000001', 'Naveen');
+    const campaignId = await draftWithNoValues();
+
+    await request(app).patch(`/api/campaigns/${campaignId}`).set(auth(owner)).send({
+      variableValues: { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } },
+    }).expect(200);
+
+    await request(app).post(`/api/campaigns/${campaignId}/start`).set(auth(owner)).expect(200);
+    await sendCampaignBatch(campaignId, 10);
+    expect(hooks.sends.map((s) => s.params[0])).toEqual(['Naveen']);
+  });
+
+  it('**a stuck draft can be thrown away**', async () => {
+    const campaignId = await draftWithNoValues();
+
+    await request(app).delete(`/api/campaigns/${campaignId}`).set(auth(owner)).expect(200);
+
+    expect(await prisma.campaign.findUnique({ where: { id: campaignId } })).toBeNull();
+  });
+
+  it('a partial edit leaves the rest alone', async () => {
+    // `campaignSchema` has defaults on `audienceFilter` and `variableValues`, so parsing an
+    // unmodified schema would quietly reset both to empty on a rename.
+    const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
+
+    await request(app).patch(`/api/campaigns/${campaignId}`).set(auth(owner))
+      .send({ name: 'Renamed' }).expect(200);
+
+    const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(campaign.name).toBe('Renamed');
+    expect(campaign.variableValues).toEqual({ 1: 'there' });
+  });
+
+  it('**refuses to edit a campaign that has already sent**', async () => {
+    // A campaign that reached somebody is a record of what was sent. Rewriting its text would
+    // make the record describe a message nobody received.
+    await makeCustomer('15558000001', 'Naveen');
+    const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
+    await request(app).post(`/api/campaigns/${campaignId}/start`).set(auth(owner)).expect(200);
+    await sendCampaignBatch(campaignId, 10);
+
+    const res = await request(app).patch(`/api/campaigns/${campaignId}`).set(auth(owner))
+      .send({ name: 'Too late' }).expect(400);
+    expect(res.body.message).toMatch(/record of what was sent/i);
+  });
+
+  it('**refuses to delete one that has sent** — that would erase who received it', async () => {
+    await makeCustomer('15558000001', 'Naveen');
+    const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
+    await request(app).post(`/api/campaigns/${campaignId}/start`).set(auth(owner)).expect(200);
+    await sendCampaignBatch(campaignId, 10);
+
+    await request(app).delete(`/api/campaigns/${campaignId}`).set(auth(owner)).expect(400);
+    expect(await prisma.campaign.findUnique({ where: { id: campaignId } })).not.toBeNull();
+    // The delivery history is what the refusal is protecting.
+    expect(await prisma.campaignRecipient.count({ where: { campaignId } })).toBe(1);
+  });
+
+  it('will not point a campaign at another workspace\'s template', async () => {
+    const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
+    const other = await prisma.tenant.create({
+      data: { businessName: 'Someone else' },
+    });
+    const stranger = await prisma.campaignTemplate.create({
+      data: {
+        tenantId: other.id, name: 'Theirs', metaTemplate: 'theirs_v1',
+        bodyPreview: 'Hello', status: 'APPROVED',
+      },
+    });
+
+    await request(app).patch(`/api/campaigns/${campaignId}`).set(auth(owner))
+      .send({ templateId: stranger.id }).expect(400);
+
+    await prisma.tenant.delete({ where: { id: other.id } });
+  });
+
+  it('is behind campaigns:write', async () => {
+    const readOnly = await prisma.role.create({
+      data: { tenantId: TENANT, name: 'Viewer', permissions: ['campaigns:read'] },
+    });
+    const viewer = await prisma.user.create({
+      data: {
+        tenantId: TENANT, phone: '15559000021', fullName: 'Viewer', role: 'AGENT',
+        roleId: readOnly.id,
+      },
+    });
+    const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
+
+    await request(app).patch(`/api/campaigns/${campaignId}`)
+      .set(auth(signToken({ userId: viewer.id }))).send({ name: 'Nope' }).expect(403);
+    await request(app).delete(`/api/campaigns/${campaignId}`)
+      .set(auth(signToken({ userId: viewer.id }))).expect(403);
+  });
+});

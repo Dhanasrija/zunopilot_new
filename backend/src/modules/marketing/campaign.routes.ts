@@ -3,7 +3,7 @@ import { requireAuth, requireModule, requirePermission } from '../../middleware/
 import {
   getCampaign, getConsentSummary, listCampaignRecipients, listCampaigns, listTemplates,
   patchTemplate, postAudiencePreview, postCampaign, postCampaignPause, postCampaignStart,
-  postCampaignTest, postTemplate, postTemplateSync,
+  patchCampaign, postCampaignTest, postTemplate, postTemplateSync, removeCampaign,
 } from './campaign.controller.js';
 
 // Marketing.
@@ -36,6 +36,10 @@ router.get('/', requirePermission('campaigns:read'), listCampaigns);
 router.post('/', requirePermission('campaigns:write'), postCampaign);
 
 router.get('/:campaignId', requirePermission('campaigns:read'), getCampaign);
+// Drafting, not sending: `campaigns:write`. The service refuses anything that has already
+// started, whoever is asking — a campaign that reached somebody is a record of what was sent.
+router.patch('/:campaignId', requirePermission('campaigns:write'), patchCampaign);
+router.delete('/:campaignId', requirePermission('campaigns:write'), removeCampaign);
 router.get('/:campaignId/recipients', requirePermission('campaigns:read'), listCampaignRecipients);
 
 // The only two that actually reach a customer's phone, and the only two behind
