@@ -27,16 +27,23 @@ export function IntervalSwitch({
   onChange: (interval: BillingInterval) => void;
 }) {
   return (
-    <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border bg-muted/40 p-1">
+    <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-ink-300 bg-surface-0 p-1">
       {catalogue.intervals.map((interval) => (
         <button
           key={interval.code}
+          type="button"
+          aria-pressed={value === interval.code}
           onClick={() => onChange(interval.code)}
           className={cn(
-            'relative rounded-lg px-3 py-1 text-sm font-medium transition-colors',
+            'relative rounded-md px-3 py-2 text-sm font-medium transition-colors duration-micro',
+            // The selected segment is a raised surface with accent text, so the choice reads
+            // from the fill rather than from weight alone — the previous version differed only
+            // by a foreground colour, which is easy to miss on a bright screen.
             value === interval.code
-              ? 'bg-background shadow-none text-foreground'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'border border-ink-300 bg-surface-1 text-accent-700'
+              // A transparent border on the unselected ones, so selecting does not shift the
+              // row by a pixel as a border appears.
+              : 'border border-transparent text-ink-500 hover:text-ink-900',
           )}
         >
           {interval.label}
@@ -91,7 +98,13 @@ export function PlanCard({
       {plan.badges.length > 0 && (
         <div className="absolute -top-3 left-5 flex gap-1">
           {plan.badges.map((badge) => (
-            <Badge key={badge} className="bg-accent-600 text-caption hover:bg-accent-600">
+            // `text-on-accent` and a transparent border, both explicitly: the Badge default
+            // variant is a TINT (bg-accent-100 / text-accent-700 / border-accent-200), and
+            // overriding only the background left dark purple text on a dark purple fill.
+            <Badge
+              key={badge}
+              className="border-transparent bg-accent-600 text-caption text-on-accent hover:bg-accent-600"
+            >
               {badge}
             </Badge>
           ))}

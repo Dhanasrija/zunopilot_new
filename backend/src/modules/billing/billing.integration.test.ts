@@ -158,8 +158,11 @@ describe('presentation rules', () => {
     // three months billed up front.
     expect(INTERVAL_META.MONTHLY.isDefault).toBe(true);
     expect(INTERVAL_META.QUARTERLY.isDefault).toBe(false);
-    expect(INTERVAL_META.QUARTERLY.badge).toBe('Most Popular');
-    expect(INTERVAL_META.YEARLY.badge).toBe('Best Value');
+    // The saving, not a claim. "Most Popular" also sits on the Growth plan card, so the same
+    // words meant two different things on one screen; the percentages are what the reader is
+    // actually weighing, and they match `savingsPercent`.
+    expect(INTERVAL_META.QUARTERLY.badge).toBe('Save 10%');
+    expect(INTERVAL_META.YEARLY.badge).toBe('Save 20%');
     expect(INTERVAL_META.MONTHLY.badge).toBeNull();
   });
 

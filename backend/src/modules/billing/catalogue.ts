@@ -349,8 +349,8 @@ export const INTERVAL_META: Record<BillingInterval, {
   isDefault: boolean;
 }> = {
   MONTHLY: { label: 'Monthly', everyLabel: 'every month', badge: null, isDefault: true },
-  QUARTERLY: { label: 'Quarterly', everyLabel: 'every 3 months', badge: 'Most Popular', isDefault: false },
-  YEARLY: { label: 'Yearly', everyLabel: 'every 12 months', badge: 'Best Value', isDefault: false },
+  QUARTERLY: { label: 'Quarterly', everyLabel: 'every 3 months', badge: 'Save 10%', isDefault: false },
+  YEARLY: { label: 'Yearly', everyLabel: 'every 12 months', badge: 'Save 20%', isDefault: false },
 };
 
 // Monthly. The badges are unchanged — quarterly is still the one most people pick, and
