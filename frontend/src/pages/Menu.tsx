@@ -759,7 +759,10 @@ function GroceryItemsTab({ items, categories, isLoading, qc, addOpen, onAddOpenC
 
 // ── Categories tab ────────────────────────────────────────────────────────────
 
-function CategoriesTab({ label, categories, isLoading, qc }: {
+// Exported for its test. The whole page needs a router, an auth store and a query client to
+// render; this tab needs a query client and nothing else, and it is the piece that was
+// reported broken.
+export function CategoriesTab({ label, categories, isLoading, qc }: {
   label: string; categories: Category[]; isLoading: boolean; qc: ReturnType<typeof useQueryClient>;
 }) {
   const [name, setName] = useState('');
