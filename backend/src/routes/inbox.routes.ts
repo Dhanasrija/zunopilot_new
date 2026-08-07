@@ -7,11 +7,13 @@ import {
   assignAgent,
   setAutomation,
   sendAgentMessage,
+  sendAgentMedia,
   addNote,
   startConversation,
 } from '../controllers/inbox.controller.js';
 import {
   sendMessageValidator,
+  sendMediaValidator,
   assignAgentValidator,
   setAutomationValidator,
   noteValidator,
@@ -32,6 +34,10 @@ router.post('/conversations', requirePermission('inbox:reply'), startConversatio
 router.get('/conversations/:id', requirePermission('inbox:read'), getConversation);
 router.get('/conversations/:id/messages', requirePermission('inbox:read'), listMessages);
 router.post('/conversations/:id/messages', requirePermission('inbox:reply'), sendMessageValidator, validate, sendAgentMessage);
+// Sending a file is replying, so it needs no permission of its own — an agent who can send
+// words can send a photograph. The file itself was uploaded through `POST /api/media`, which
+// has its own `media:write` gate.
+router.post('/conversations/:id/media', requirePermission('inbox:reply'), sendMediaValidator, validate, sendAgentMedia);
 router.post('/conversations/:id/read', markRead);
 // `assign_self` is the floor; taking one off a colleague is checked in the
 // controller, which is the only place that knows who currently owns it.

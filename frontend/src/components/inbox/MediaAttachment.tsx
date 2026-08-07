@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { Download, FileText, Mic, Video } from 'lucide-react';
 import type { Message } from './types';
+import { useAuthedMedia } from './useAuthedMedia';
 
-// A file a customer sent.
+// A file in the thread — one a customer sent, or one an agent sent them.
 //
 // **What this replaces.** Inbound media was stored as `SYSTEM` with no file behind it, and the
 // bubble rendered `message.body || '[' + message.type + ']'` — so an agent opening a thread
@@ -12,7 +12,7 @@ import type { Message } from './types';
 // The bytes come from `/api/media/:id/file`, which is authenticated and tenant-scoped. Not a
 // presigned S3 URL: a presigned URL keeps working for anyone holding it until it expires,
 // while this one stops the moment the session does. For a photograph of somebody's ID that
-// difference is the whole point.
+// difference is the whole point. `useAuthedMedia` is what carries the token — see its header.
 
 const ICON = { VIDEO: Video, AUDIO: Mic, DOCUMENT: FileText } as const;
 
@@ -28,9 +28,8 @@ export const hasAttachment = (message: Message): boolean =>
   Boolean(message.mediaUrl) && message.type in LABEL;
 
 export function MediaAttachment({ message, outbound }: { message: Message; outbound: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const url = message.mediaUrl;
-  if (!url) return null;
+  const { url, loading, failed } = useAuthedMedia(message.mediaUrl);
+  if (!message.mediaUrl) return null;
 
   const label = LABEL[message.type] ?? 'Attachment';
 
@@ -41,46 +40,44 @@ export function MediaAttachment({ message, outbound }: { message: Message; outbo
    * read in an office, and a voice note that starts playing because somebody scrolled is a
    * thing people learn to dread.
    */
-  if (message.type === 'IMAGE' && !failed) {
+  if (url && message.type === 'IMAGE') {
     return (
       <a href={url} target="_blank" rel="noreferrer" className="mt-1 block">
         <img
           src={url}
           alt={label}
-          loading="lazy"
-          onError={() => setFailed(true)}
           className="max-h-64 w-auto max-w-full rounded-md border border-ink-300 object-contain"
         />
       </a>
     );
   }
 
-  if (message.type === 'VIDEO' && !failed) {
+  if (url && message.type === 'VIDEO') {
     return (
       // eslint-disable-next-line jsx-a11y/media-has-caption -- a customer's video has no track
       <video
         src={url}
         controls
         preload="metadata"
-        onError={() => setFailed(true)}
         className="mt-1 max-h-64 w-full rounded-md border border-ink-300"
       />
     );
   }
 
-  if (message.type === 'AUDIO' && !failed) {
-    return (
-      <audio src={url} controls preload="metadata" onError={() => setFailed(true)} className="mt-1 w-full" />
-    );
+  if (url && message.type === 'AUDIO') {
+    return <audio src={url} controls preload="metadata" className="mt-1 w-full" />;
   }
 
   const Icon = ICON[message.type as keyof typeof ICON] ?? FileText;
 
   return (
     <a
-      href={url}
+      href={url ?? undefined}
+      // A blob URL opens in a tab with no filename; `download` gives the saved file its name.
+      download={url ? label : undefined}
       target="_blank"
       rel="noreferrer"
+      aria-disabled={!url}
       className={[
         'mt-1 flex items-center gap-2 rounded-md border p-2 text-caption',
         outbound ? 'border-on-accent/40 text-on-accent' : 'border-ink-300 text-ink-700',
@@ -93,9 +90,9 @@ export function MediaAttachment({ message, outbound }: { message: Message; outbo
           expired Meta id, a download that timed out — is a thing the agent needs to know
           about, because the customer believes they sent it.
         */}
-        {failed ? `${label} could not be loaded` : label}
+        {failed ? `${label} could not be loaded` : loading ? `Loading ${label.toLowerCase()}…` : label}
       </span>
-      {!failed && <Download className="h-4 w-4 shrink-0" />}
+      {url && <Download className="h-4 w-4 shrink-0" />}
     </a>
   );
 }

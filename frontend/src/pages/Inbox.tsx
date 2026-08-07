@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
+import { useMediaRules } from '@/lib/media';
 import { useAuthStore, useHasModule } from '@/stores/auth.store';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -213,6 +214,50 @@ export default function Inbox() {
     },
   });
 
+  /**
+   * Upload the file, then send it.
+   *
+   * Two requests rather than one multipart send, because `POST /media` already validates the
+   * type and size, stores it under the tenant's prefix and gives it the URL WhatsApp will
+   * fetch. A second uploader living in the Inbox would eventually disagree with that one.
+   */
+  const sendFile = useMutation({
+    mutationFn: async ({ file, caption }: { file: File; caption: string }) => {
+      const form = new FormData();
+      form.append('file', file);
+      // No explicit Content-Type: the browser sets the multipart boundary.
+      const asset = (await api.post<{ data: { id: string } }>('/media', form)).data.data;
+      await api.post(`/inbox/conversations/${selectedId}/media`, {
+        mediaId: asset.id,
+        caption: caption || null,
+      });
+    },
+    onSuccess: () => {
+      setDraft('');
+      following.current = true;
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['media'] });
+    },
+    // No onError toast: the api interceptor already toasts the server's message, and the
+    // refusals here — an expired window, a file too large — are all worth reading verbatim.
+  });
+
+  const mediaRules = useMediaRules();
+
+  /*
+   * Whether WhatsApp still allows a plain reply.
+   *
+   * Computed from the thread the page already has rather than fetched: the last inbound
+   * message's timestamp is the whole rule. The server checks it too and is the authority —
+   * this only stops the agent picking a file that was never going to be accepted.
+   */
+  const lastInboundAt = messages.data
+    ?.filter((m) => m.direction === 'INBOUND')
+    .at(-1)?.createdAt;
+  const windowClosed = !!messages.data
+    && (!lastInboundAt || Date.now() - new Date(lastInboundAt).getTime() > 24 * 60 * 60 * 1000);
+
   const team = useQuery({
     queryKey: ['team'],
     queryFn: async () => (await api.get<{ data: TeamMember[] }>('/team')).data.data,
@@ -331,6 +376,12 @@ export default function Inbox() {
                 onChange={setDraft}
                 onSend={() => send.mutate()}
                 sending={send.isPending}
+                onSendFile={(file, caption) => sendFile.mutate({ file, caption })}
+                attaching={sendFile.isPending}
+                fileAccept={mediaRules.data
+                  ? Object.values(mediaRules.data.kinds).flatMap((k) => k.mimeTypes).join(',')
+                  : undefined}
+                windowClosed={windowClosed}
               />
             </>
           )}

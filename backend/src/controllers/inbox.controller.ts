@@ -8,8 +8,11 @@ import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { metaFailure } from '../services/meta-error.js';
-import { whatsappProviderFor } from '../modules/conversation-engine/providers/whatsapp.js';
+import { isSimulatedChannel, whatsappProviderFor } from '../modules/conversation-engine/providers/whatsapp.js';
 import { recordOutboundMessage } from '../modules/conversation-engine/providers/mirror.js';
+import { mediaFor, publicUrlFor, publicUrlIsReachable } from '../modules/media/media.service.js';
+import { describeMedia } from '../modules/media/inbound-media.js';
+import { windowStateFor } from '../modules/support/ticket.service.js';
 import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
 import { maskContact } from '../utils/mask-number.js';
 import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
@@ -256,6 +259,108 @@ export const sendAgentMessage = asyncHandler(async (req, res) => {
     where: { id: conversation.id },
     data: { lastMessageAt: new Date() },
   });
+  res.status(201).json({ success: true, data: msg });
+});
+
+/**
+ * Send a customer a file.
+ *
+ * The agent uploads it first through `POST /api/media`, then names the id here — so the bytes
+ * are validated, stored and given a URL by the one path that already does that, rather than a
+ * second uploader that would eventually disagree with the first.
+ *
+ * **Meta fetches the file from us**, which is why it has to be an `UPLOAD` asset: those are
+ * servable on the open route precisely because Meta cannot present a token. An `INBOUND` file —
+ * something a customer sent — is deliberately not reachable there, so forwarding one back is
+ * refused rather than silently failing at Meta with a download error.
+ */
+export const sendAgentMedia = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { mediaId, caption } = req.body as { mediaId?: string; caption?: string };
+  if (!mediaId) throw ApiError.badRequest('Choose a file to send');
+
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId: tenantIdOf(req) },
+    include: { customer: true },
+  });
+  if (!conversation) throw ApiError.notFound('Conversation not found');
+
+  /*
+   * The 24-hour window, checked before the send rather than after Meta refuses it.
+   *
+   * Outside it WhatsApp allows templates only, and a template's media is fixed when the
+   * template is approved — so "send this customer a photo" is genuinely impossible, not merely
+   * blocked. Saying so here means the agent finds out before they pick a file, and reuses the
+   * same rule the ticket sender applies rather than a second copy that could drift.
+   */
+  const window = await windowStateFor(tenantIdOf(req), conversation.id);
+  if (!window.open) {
+    throw ApiError.badRequest(
+      window.reason === 'never_messaged'
+        ? 'This customer has never messaged you, so WhatsApp will not accept a file. They have to write first.'
+        : 'WhatsApp only allows a file within 24 hours of the customer’s last message. '
+          + 'That window has closed — send a template, or wait for them to write again.',
+    );
+  }
+
+  const asset = await mediaFor(tenantIdOf(req), mediaId);
+  if (asset.source !== 'UPLOAD') {
+    throw ApiError.badRequest(
+      'That file came from a customer and cannot be sent back. Upload your own copy instead.',
+    );
+  }
+
+  const wa = await channelForTenant(conversation.tenantId);
+  if (!wa) throw ApiError.badRequest('WhatsApp not connected');
+
+  // Said here rather than left to Meta, which reports it as a generic media download failure
+  // that reads like our bug. On a laptop `APP_URL` is localhost and Meta cannot reach it.
+  //
+  // Only for a real channel: a simulated one never fetches the link, so refusing a demo or a
+  // test workspace over an address nobody will dial would be a rule with no purpose.
+  if (!isSimulatedChannel(wa) && !publicUrlIsReachable()) {
+    throw ApiError.badRequest(
+      'WhatsApp fetches the file from this server, and APP_URL is not a public https address. '
+      + 'Sending files needs a reachable APP_URL.',
+    );
+  }
+
+  let sent: { messageId: string | null };
+  try {
+    sent = await whatsappProviderFor(wa).sendMedia({
+      to: conversation.customer.waId,
+      kind: asset.kind,
+      link: publicUrlFor(asset),
+      caption: caption ?? null,
+      filename: asset.originalName,
+    });
+  } catch (err) {
+    throw metaFailure(err) ?? err;
+  }
+
+  const msg = await recordOutboundMessage(
+    {
+      tenantId: tenantIdOf(req),
+      conversationId: conversation.id,
+      customerId: conversation.customerId,
+    },
+    {
+      type: asset.kind,
+      body: caption?.trim() || describeMedia(asset.kind, asset.originalName),
+      messageId: sent.messageId,
+      sentByUserId: userOf(req).id,
+      // Our own id, not the public link: the thread is read by an agent, and the
+      // authenticated route is the one that keeps working when the asset is later made
+      // private.
+      mediaUrl: `/api/media/${asset.id}/file`,
+    },
+  );
+
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { lastMessageAt: new Date() },
+  });
+
   res.status(201).json({ success: true, data: msg });
 });
 

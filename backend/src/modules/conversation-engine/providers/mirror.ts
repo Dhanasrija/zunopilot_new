@@ -2,6 +2,7 @@ import { Prisma, type MessageType } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { logger } from '../../../config/logger.js';
 import type { WhatsAppSender } from '../engine/types.js';
+import { describeMedia } from '../../media/inbound-media.js';
 
 // Mirror everything the engine says into the Inbox.
 //
@@ -42,13 +43,15 @@ type Options =
 export const recordOutboundMessage = async (
   ctx: MirrorContext,
   {
-    type, body, messageId, options, sentByUserId,
+    type, body, messageId, options, sentByUserId, mediaUrl,
   }: {
     type: MessageType;
     body: string;
     messageId: string | null;
     options?: Options;
     sentByUserId?: string | null;
+    /** Our own `/api/media/:id/file` path when the message carried a file. */
+    mediaUrl?: string | null;
   },
 ) => {
   const data = {
@@ -60,6 +63,9 @@ export const recordOutboundMessage = async (
     status: 'SENT' as const,
     body,
     sentByUserId: sentByUserId ?? null,
+    // In the same insert as the row, not a follow-up update: two writes can disagree, and the
+    // one that loses leaves a file in the thread that the thread cannot open.
+    mediaUrl: mediaUrl ?? null,
     ...(options ? { payload: { outbound: options } as Prisma.InputJsonValue } : {}),
   };
   const include = { sentByUser: { select: { id: true, fullName: true, role: true } } };
@@ -116,6 +122,18 @@ export const mirrorOutbound = (inner: WhatsAppSender, ctx: MirrorContext): Whats
     async sendText(args) {
       const sent = await inner.sendText(args);
       await safely(() => record(ctx, { type: 'TEXT', body: args.body, messageId: sent.messageId }));
+      return sent;
+    },
+
+    async sendMedia(args) {
+      const sent = await inner.sendMedia(args);
+      // The caption is the body, or a short description when there is none — the same shape
+      // an inbound file gets, so a thread reads consistently whichever direction it came from.
+      await safely(() => record(ctx, {
+        type: args.kind,
+        body: args.caption?.trim() || describeMedia(args.kind, args.filename),
+        messageId: sent.messageId,
+      }));
       return sent;
     },
 
