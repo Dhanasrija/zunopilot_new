@@ -159,6 +159,17 @@ const degradeToNonAi = async (args: RouteArgs, reasonCode: string): Promise<Rout
       body: args.message.body,
       payload: args.message.payload,
     } as never,
+    /*
+     * **The reason we are here in the first place.**
+     *
+     * Without this, degrading away from the model routed into a function that immediately
+     * called the model again: `handleInboundMessage` gated its LLM router on
+     * `isRouterEnabled()`, which only asks whether an API key is configured, never whether
+     * this workspace is allowed to use it. A tenant who switched the AI agent off went on
+     * getting model-classified replies, and the calls were invisible in their usage because
+     * `recordAiInteraction` is only reached on the path above.
+     */
+    useAi: false,
   });
   await recordDecision(args, { source: 'FALLBACK', decision: 'NO_MATCH', reasonCode });
   return { source: 'FALLBACK', decision: 'NO_MATCH', reasonCode, handled: true };

@@ -5,6 +5,7 @@ import { routeMessage, isRouterEnabled } from './router.service.js';
 import { startRun } from './workflow-engine/index.js';
 import { logger } from '../config/logger.js';
 import { channelForTenant } from './whatsapp-account.service.js';
+import { recordOutboundMessage } from '../modules/conversation-engine/providers/mirror.js';
 import type {
   Cart, Conversation, Customer, InboundContext, InboundMessage, KeywordRule,
   ReplyTarget, Tenant, WhatsappAccount,
@@ -49,37 +50,77 @@ const ESCAPE_RESTART = new Set(['menu', 'restart']);
 const matchesKeywords = (msgText: string, keywords: string[]): boolean =>
   keywords.some((k) => msgText.includes(String(k).toLowerCase()));
 
-const reply = (waAccount: WhatsappAccount, customer: Customer, body: string) =>
-  sendTextMessage({
+/** Everything a reply needs, including where to record it. */
+type ReplyIn = ReplyTarget & { conversation: Conversation };
+
+/**
+ * Send a reply **and put it in the Inbox.**
+ *
+ * The mirror is the fix for a bug that shipped silently. Every reply in this file went
+ * straight out through `sendTextMessage` and was never written to `Message`, so the customer
+ * received an answer that no agent could see. Opening the thread showed their questions and
+ * nothing else — which is exactly when a human replies to something the bot already handled.
+ *
+ * It stayed hidden because `degradeToNonAi` is this file's only caller, so the whole path
+ * runs only when a workspace has switched the AI agent off or gone past its spend cap.
+ * Neither is a state anybody tests in.
+ *
+ * A failed mirror is logged, not thrown. The message has already reached the customer by
+ * then, and the inbound job is at-least-once — so letting it fail would retry the job and
+ * send the reply a second time. A missing row is better than a duplicate message.
+ */
+const reply = async ({ waAccount, conversation, customer }: ReplyIn, body: string) => {
+  const sent = await sendTextMessage({
     accessToken: waAccount.accessToken,
     phoneNumberId: waAccount.phoneNumberId,
     to: customer.waId,
     body,
   });
 
-const escalateToHuman = async (
-  { conversation, waAccount, customer }: ReplyTarget & { conversation: Conversation },
-) => {
+  try {
+    await recordOutboundMessage(
+      {
+        tenantId: conversation.tenantId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+      },
+      { type: 'TEXT', body, messageId: sent?.messages?.[0]?.id ?? null },
+    );
+  } catch (err) {
+    logger.error('Sent a reply but could not record it in the Inbox', {
+      conversationId: conversation.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+
+const escalateToHuman = async ({ conversation, waAccount, customer }: ReplyIn) => {
   await prisma.conversation.update({
     where: { id: conversation.id },
     data: { status: 'HUMAN_TAKEOVER', automationPaused: true },
   });
-  await reply(waAccount, customer, 'Connecting you to a team member. They will reply shortly.');
+  await reply(
+    { waAccount, conversation, customer },
+    'Connecting you to a team member. They will reply shortly.',
+  );
 };
 
-const sendFallback = async ({ tenant, waAccount, customer }: ReplyTarget & { tenant: Tenant }) => {
+const sendFallback = async ({ tenant, conversation, waAccount, customer }: ReplyIn & { tenant: Tenant }) => {
   const fallback = await prisma.fallbackRule.findUnique({ where: { tenantId: tenant.id } });
-  await reply(waAccount, customer, fallback?.response || DEFAULT_FALLBACK);
+  await reply({ waAccount, conversation, customer }, fallback?.response || DEFAULT_FALLBACK);
 };
 
-const abandonFlow = async ({ cart, waAccount, customer }: ReplyTarget & { cart: Cart }) => {
+const abandonFlow = async ({ cart, conversation, waAccount, customer }: ReplyIn & { cart: Cart }) => {
   await prisma.cartItemAddon.deleteMany({ where: { cartItem: { cartId: cart.id } } });
   await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
   await prisma.cart.update({
     where: { id: cart.id },
     data: { state: 'IDLE', context: {}, customerName: null, deliveryAddr: null, deliveryLat: null, deliveryLng: null },
   });
-  await reply(waAccount, customer, "No problem, I've cancelled that. Type *Menu* whenever you'd like to start again.");
+  await reply(
+    { waAccount, conversation, customer },
+    "No problem, I've cancelled that. Type *Menu* whenever you'd like to start again.",
+  );
 };
 
 const activeKeywordRules = (tenantId: string) =>
@@ -129,7 +170,7 @@ const dispatchIntent = async ({ intent, args, tenant, conversation, waAccount, c
         logger.warn('Router chose an unknown faqId', { faqId: args.faqId });
         return false; // fall through to the fallback rule
       }
-      await reply(waAccount, customer, rule.response);
+      await reply({ waAccount, conversation, customer }, rule.response);
       return true;
     }
 
@@ -167,7 +208,7 @@ const dispatchByKeyword = async ({ text, tenant, conversation, waAccount, custom
   }
   for (const rule of rules) {
     if (matchesKeywords(text, rule.keywords)) {
-      await reply(waAccount, customer, rule.response);
+      await reply({ waAccount, conversation, customer }, rule.response);
       return true;
     }
   }
@@ -176,11 +217,27 @@ const dispatchByKeyword = async ({ text, tenant, conversation, waAccount, custom
 
 // ---------------------------------------------------------------------------
 
-export const handleInboundMessage = async ({ tenant, conversation, customer, message }: {
+export const handleInboundMessage = async ({
+  tenant, conversation, customer, message, useAi = true,
+}: {
   tenant: Tenant;
   conversation: Conversation;
   customer: Customer;
   message: InboundMessage;
+  /**
+   * Whether this workspace may use the model.
+   *
+   * **The caller decides, and the only caller that matters says no.** `degradeToNonAi` in the
+   * conversation engine routes here precisely *because* the AI agent has been switched off or
+   * the spend cap is reached — and this function then called the LLM router anyway, because
+   * `isRouterEnabled()` only asks whether an API key is configured. A workspace that turned
+   * the AI off got model-classified replies, and the usage was not even counted against the
+   * quota, since only the engine's path calls `recordAiInteraction`.
+   *
+   * Defaults to true so the deterministic-first ordering of this file is unchanged for any
+   * caller that has already decided the model is allowed.
+   */
+  useAi?: boolean;
 }): Promise<void> => {
   if (conversation.automationPaused) {
     logger.info('Automation paused for conversation', { conversationId: conversation.id });
@@ -233,7 +290,7 @@ export const handleInboundMessage = async ({ tenant, conversation, customer, mes
       return;
     }
     if (ESCAPE_ABANDON.has(text)) {
-      await abandonFlow({ cart: activeCart, waAccount, customer });
+      await abandonFlow({ cart: activeCart, conversation, waAccount, customer });
       return;
     }
     if (ESCAPE_RESTART.has(text)) {
@@ -279,7 +336,7 @@ export const handleInboundMessage = async ({ tenant, conversation, customer, mes
   // Free text in a state that expects a button/list tap is genuinely ambiguous —
   // that is where classification belongs, so "talk to a human" or "cancel my
   // order" can escape the flow instead of hitting its in-flow re-prompt.
-  const routed = isRouterEnabled()
+  const routed = useAi && isRouterEnabled()
     ? await routeMessage({ text: message.body, faqs: rules })
     : null;
 
@@ -315,5 +372,5 @@ export const handleInboundMessage = async ({ tenant, conversation, customer, mes
     await handleOrderingFlow({ tenant, waAccount, customer, cart: activeCart, message });
     return;
   }
-  await sendFallback({ tenant, waAccount, customer });
+  await sendFallback({ tenant, conversation, waAccount, customer });
 };
