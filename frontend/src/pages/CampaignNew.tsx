@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Megaphone, RefreshCw, ShieldCheck, Users } from 'lucide-react';
+import { ArrowLeft, Megaphone, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -47,19 +47,67 @@ interface CampaignTemplate {
 
 interface Audience { reachable: number; excludedNoConsent: number }
 
+interface DraftCampaign {
+  campaign: {
+    id: string;
+    name: string;
+    status: string;
+    templateId: string;
+    audienceFilter: { listIds?: string[] | null } | null;
+    variableValues: VariableValues | null;
+  };
+}
+
+/**
+ * Compose a campaign — or fix a draft.
+ *
+ * **The same page does both**, because they are the same decisions. Splitting them would mean
+ * two screens whose placeholder handling has to agree, and the first time they disagree is a
+ * campaign that starts with a blank in it.
+ *
+ * Editing exists because `startCampaign` now refuses unfilled placeholders. Without it, a draft
+ * made before that guard — or by a browser still running an older bundle — could never be given
+ * its values and could never be removed, so it sat there refusing to start forever.
+ */
 export default function CampaignNew() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [params] = useSearchParams();
+  const { campaignId } = useParams();
+  const isEditing = Boolean(campaignId);
 
   const [name, setName] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [variableValues, setVariableValues] = useState<VariableValues>({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
   /** Preselected when arriving from a list's Broadcast button. */
   const [listIds, setListIds] = useState<string[]>(() => {
     const fromUrl = params.get('listId');
     return fromUrl ? [fromUrl] : [];
   });
+
+  const existing = useQuery({
+    queryKey: ['campaign', campaignId],
+    queryFn: async () => (
+      await api.get<{ data: DraftCampaign }>(`/campaigns/${campaignId}`)
+    ).data.data.campaign,
+    enabled: isEditing,
+  });
+
+  /*
+   * Prefill once, keyed on the row's id.
+   *
+   * Not on the whole object: react-query hands back a new reference on every refetch, and an
+   * effect keyed on that would overwrite whatever the operator had just typed.
+   */
+  useEffect(() => {
+    const draft = existing.data;
+    if (!draft) return;
+    setName(draft.name);
+    setTemplateId(draft.templateId);
+    setVariableValues(draft.variableValues ?? {});
+    setListIds(draft.audienceFilter?.listIds ?? []);
+  }, [existing.data?.id]);
 
   /**
    * Marketing templates only, filtered by the **server**.
@@ -99,11 +147,25 @@ export default function CampaignNew() {
   });
 
   const save = useMutation({
-    mutationFn: async () => (await api.post<{ data: { id: string } }>('/campaigns', {
-      name, templateId, audienceFilter, variableValues,
-    })).data.data,
+    mutationFn: async () => {
+      const body = { name, templateId, audienceFilter, variableValues };
+      const res = isEditing
+        ? await api.patch<{ data: { id: string } }>(`/campaigns/${campaignId}`, body)
+        : await api.post<{ data: { id: string } }>('/campaigns', body);
+      return res.data.data;
+    },
     onSuccess: () => {
-      toast.success('Campaign created as a draft');
+      toast.success(isEditing ? 'Draft saved' : 'Campaign created as a draft');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
+      nav('/campaigns');
+    },
+  });
+
+  const discard = useMutation({
+    mutationFn: async () => api.delete(`/campaigns/${campaignId}`),
+    onSuccess: () => {
+      toast.success('Draft deleted');
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       nav('/campaigns');
     },
@@ -138,7 +200,7 @@ export default function CampaignNew() {
         <Button variant="outline" size="sm" className="gap-1 mb-3" onClick={() => nav('/campaigns')}>
           <ArrowLeft className="h-4 w-4" /> Campaigns
         </Button>
-        <h1 className="text-h2 font-semibold">New campaign</h1>
+        <h1 className="text-h2 font-semibold">{isEditing ? 'Edit draft' : 'New campaign'}</h1>
         <p className="text-sm text-muted-foreground">
           One approved template, sent to the people you choose who have opted in.
         </p>
@@ -315,16 +377,44 @@ export default function CampaignNew() {
 
       {unfilled.length > 0 && (
         <p className="text-right text-caption text-muted-foreground">
-          Fill {unfilled.map((v) => `{{${v}}}`).join(', ')} before creating the draft.
+          Fill {unfilled.map((v) => `{{${v}}}`).join(', ')} before {isEditing ? 'saving' : 'creating the draft'}.
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button variant="outline" onClick={() => nav('/campaigns')}>Cancel</Button>
-        <Button className="gap-1" disabled={!canSave} onClick={() => save.mutate()}>
-          <Megaphone className="h-4 w-4" />
-          {save.isPending ? 'Creating…' : 'Create draft'}
-        </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {isEditing && (
+          // Deleting is on the left, away from Save, and two-step. A draft is cheap to lose but
+          // annoying to rebuild, and the server refuses this outright once a campaign has
+          // started — the button is only ever here for something nobody has received.
+          confirmDelete ? (
+            <div className="flex items-center gap-2 rounded-md border border-danger p-2">
+              <span className="text-caption">Delete this draft?</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={discard.isPending}
+                onClick={() => discard.mutate()}
+              >
+                {discard.isPending ? 'Deleting…' : 'Delete'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Keep</Button>
+            </div>
+          ) : (
+            <Button variant="outline" className="gap-1" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="h-4 w-4 text-danger" /> Delete draft
+            </Button>
+          )
+        )}
+
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => nav('/campaigns')}>Cancel</Button>
+          <Button className="gap-1" disabled={!canSave} onClick={() => save.mutate()}>
+            <Megaphone className="h-4 w-4" />
+            {save.isPending
+              ? (isEditing ? 'Saving…' : 'Creating…')
+              : (isEditing ? 'Save draft' : 'Create draft')}
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -6,10 +6,10 @@ import { ApiError } from '../../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../../middleware/auth.js';
 import { queryEnum, queryString } from '../../utils/query.js';
 import {
-  campaignInclude, campaignOf, campaignProgress, pauseCampaign, previewAudience,
-  sendTestMessage, startCampaign, type AudienceFilter,
+  campaignInclude, campaignOf, campaignProgress, deleteCampaign, editCampaign, pauseCampaign,
+  previewAudience, sendTestMessage, startCampaign, type AudienceFilter,
 } from './campaign.service.js';
-import { variableValuesSchema } from './campaign-variables.js';
+import { variableValuesRecord, variableValuesSchema } from './campaign-variables.js';
 import { syncTemplatesFromMeta } from './template-sync.service.js';
 import { normalisePhone } from '../../services/otp.service.js';
 import { mediaFor } from '../media/media.service.js';
@@ -133,6 +133,25 @@ const campaignSchema = z.object({
   scheduledAt: z.string().datetime().nullish(),
 });
 
+/**
+ * Editing a draft: every field optional, and **written out rather than derived** from
+ * `campaignSchema` with `.partial()`.
+ *
+ * `.partial()` looks like the right tool and is not: it makes a field optional but still
+ * applies its `.default()` when the key is absent. So a PATCH that renamed a campaign arrived
+ * with `audienceFilter: {}` and `variableValues: {}` and silently blanked both — the audience
+ * back to everybody, and every placeholder emptied, which the start guard would then refuse
+ * with no clue why. Spelling the schema out is duller and cannot do that.
+ */
+const campaignPatchSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  templateId: z.string().regex(idParam).optional(),
+  audienceFilter: audienceSchema.optional(),
+  variableValues: variableValuesRecord.optional(),
+  headerMediaId: z.string().regex(idParam).nullish(),
+  scheduledAt: z.string().datetime().nullish(),
+});
+
 export const listCampaigns = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = tenantIdOf(req);
   const status = queryString(req.query.status);
@@ -212,6 +231,50 @@ export const postCampaign = asyncHandler(async (req: Request, res: Response) => 
   });
 
   res.status(201).json({ success: true, data: campaign });
+});
+
+/**
+ * Change a draft.
+ *
+ * `campaigns:write`, not `campaigns:send` — editing a message is drafting, and the service
+ * refuses anything that has already started regardless of who is asking.
+ */
+export const patchCampaign = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = tenantIdOf(req);
+  const campaignId = requireId(req.params.campaignId, 'campaign');
+  const body = campaignPatchSchema.parse(req.body);
+
+  if (body.headerMediaId) {
+    const asset = await mediaFor(tenantId, body.headerMediaId);
+    const templateId = body.templateId ?? (await campaignOf(tenantId, campaignId)).templateId;
+    const template = await prisma.campaignTemplate.findFirst({
+      where: { id: templateId, tenantId },
+      select: { headerFormat: true },
+    });
+    if (template && template.headerFormat !== asset.kind) {
+      throw ApiError.badRequest(
+        `That template needs a ${template.headerFormat.toLowerCase()}, but the chosen file `
+        + `is a ${asset.kind.toLowerCase()}.`,
+      );
+    }
+  }
+
+  const campaign = await editCampaign(tenantId, campaignId, {
+    ...body,
+    audienceFilter: body.audienceFilter as AudienceFilter | undefined,
+    scheduledAt: body.scheduledAt === undefined
+      ? undefined
+      : (body.scheduledAt ? new Date(body.scheduledAt) : null),
+  });
+
+  res.json({ success: true, data: campaign });
+});
+
+export const removeCampaign = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = tenantIdOf(req);
+  const campaignId = requireId(req.params.campaignId, 'campaign');
+  await deleteCampaign(tenantId, campaignId);
+  res.json({ success: true, data: { id: campaignId } });
 });
 
 /**

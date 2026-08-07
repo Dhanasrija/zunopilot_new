@@ -1,4 +1,4 @@
-import type { Campaign, Prisma, TemplateHeaderFormat } from '@prisma/client';
+import type { Campaign, CampaignStatus, Prisma, TemplateHeaderFormat } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { ApiError } from '../../utils/ApiError.js';
@@ -250,6 +250,92 @@ export const startCampaign = async (
 
   logger.info('Campaign started', { tenantId, campaignId, recipients: audience.length });
   return updated;
+};
+
+/**
+ * The states a campaign can still be changed in.
+ *
+ * Everything else has reached somebody. `SENDING` is obvious; `SENT`, `FAILED` and `CANCELLED`
+ * are records of what happened, and a record you can rewrite is not one. `PAUSED` is excluded
+ * for the same reason — some of its audience already has the message, so editing the text now
+ * would leave two different messages under one name.
+ */
+const EDITABLE: CampaignStatus[] = ['DRAFT', 'SCHEDULED'];
+
+const refuseUnlessEditable = (campaign: { status: CampaignStatus; name: string }, verb: string) => {
+  if (EDITABLE.includes(campaign.status)) return;
+  throw ApiError.badRequest(
+    `"${campaign.name}" is ${campaign.status.toLowerCase()}, so it cannot be ${verb}. `
+    + 'A campaign that has started is a record of what was sent.',
+  );
+};
+
+export interface CampaignEdit {
+  name?: string;
+  templateId?: string;
+  audienceFilter?: AudienceFilter;
+  variableValues?: unknown;
+  headerMediaId?: string | null;
+  scheduledAt?: Date | null;
+}
+
+/**
+ * Change a draft.
+ *
+ * **Why this exists.** `startCampaign` now refuses a template whose placeholders are unfilled,
+ * which is right — but with no way to edit a campaign, a draft created before that guard, or by
+ * a browser still running an older page, could never be given its values and could never be
+ * removed either. It just sat there refusing to start. Turning "sends badly" into "sits there
+ * forever" is not an improvement, and this is the other half of that change.
+ */
+export const editCampaign = async (
+  tenantId: string,
+  campaignId: string,
+  edit: CampaignEdit,
+): Promise<Campaign> => {
+  const campaign = await campaignOf(tenantId, campaignId);
+  refuseUnlessEditable(campaign, 'edited');
+
+  // A template id from the client is resolved against this workspace before it is stored, the
+  // same as on create — otherwise a campaign could be pointed at another tenant's template.
+  if (edit.templateId && edit.templateId !== campaign.templateId) {
+    const template = await prisma.campaignTemplate.findFirst({
+      where: { id: edit.templateId, tenantId },
+      select: { id: true },
+    });
+    if (!template) throw ApiError.badRequest('That template is not in this workspace');
+  }
+
+  return prisma.campaign.update({
+    where: { id: campaignId },
+    data: {
+      ...(edit.name !== undefined ? { name: edit.name } : {}),
+      ...(edit.templateId !== undefined ? { templateId: edit.templateId } : {}),
+      ...(edit.audienceFilter !== undefined
+        ? { audienceFilter: edit.audienceFilter as Prisma.InputJsonValue } : {}),
+      ...(edit.variableValues !== undefined
+        ? { variableValues: edit.variableValues as Prisma.InputJsonValue } : {}),
+      ...(edit.headerMediaId !== undefined ? { headerMediaId: edit.headerMediaId } : {}),
+      ...(edit.scheduledAt !== undefined
+        ? { scheduledAt: edit.scheduledAt, status: edit.scheduledAt ? 'SCHEDULED' : 'DRAFT' }
+        : {}),
+    },
+  });
+};
+
+/**
+ * Throw a draft away.
+ *
+ * Only ever a draft: a campaign that has sent anything is the only record of who received it,
+ * and `CampaignRecipient` cascades, so deleting one would erase the delivery history along with
+ * it. The refusal says which state it is in rather than just "no".
+ */
+export const deleteCampaign = async (tenantId: string, campaignId: string): Promise<void> => {
+  const campaign = await campaignOf(tenantId, campaignId);
+  refuseUnlessEditable(campaign, 'deleted');
+
+  await prisma.campaign.delete({ where: { id: campaignId } });
+  logger.info('Campaign deleted', { tenantId, campaignId, name: campaign.name });
 };
 
 /** Stop a running campaign. Pending recipients are simply never sent. */

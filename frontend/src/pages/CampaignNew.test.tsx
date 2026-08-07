@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import CampaignNew from './CampaignNew';
 
@@ -20,7 +20,7 @@ import CampaignNew from './CampaignNew';
  */
 
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/lib/customer-lists', () => ({ useCustomerLists: () => ({ data: [] }) }));
@@ -200,5 +200,97 @@ describe('the test send', () => {
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/campaigns/test', expect.anything()));
     expect(api.post).not.toHaveBeenCalledWith('/campaigns', expect.anything());
+  });
+});
+
+describe('editing a draft', () => {
+  /*
+   * A draft created before the start guard — or by a browser still running an older bundle —
+   * arrives with `variableValues: {}` and cannot be started. Without an editor it could never
+   * be given values and could never be deleted either, so it sat there refusing to start
+   * forever. This is the way out.
+   */
+  const DRAFT = {
+    id: 'c-draft-1',
+    name: 'Diwali week',
+    status: 'DRAFT',
+    templateId: TEMPLATE.id,
+    audienceFilter: {},
+    variableValues: {},
+  };
+
+  const renderEditor = () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[`/campaigns/${DRAFT.id}/edit`]}>
+          <Routes>
+            <Route path="/campaigns/:campaignId/edit" element={<CampaignNew />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.get).mockImplementation(((url: string) => {
+      if (url === `/campaigns/${DRAFT.id}`) {
+        return Promise.resolve({ data: { data: { campaign: DRAFT } } });
+      }
+      return Promise.resolve({ data: { data: [TEMPLATE, PLAIN] } });
+    }) as never);
+    vi.mocked(api.patch).mockResolvedValue({ data: { data: { id: DRAFT.id } } } as never);
+    vi.mocked(api.delete).mockResolvedValue({ data: { data: { id: DRAFT.id } } } as never);
+  });
+
+  it('**prefills the draft and asks for the placeholder it is missing**', async () => {
+    renderEditor();
+
+    expect(await screen.findByDisplayValue('Diwali week')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Value for {{1}}')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /edit draft/i })).toBeInTheDocument();
+  });
+
+  it('**PATCHes rather than creating a second campaign**', async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    await user.type(await screen.findByLabelText('Value for {{1}}'), 'friend');
+    await user.click(screen.getByRole('button', { name: /save draft/i }));
+
+    await waitFor(() => {
+      expect(api.patch).toHaveBeenCalledWith(`/campaigns/${DRAFT.id}`, expect.objectContaining({
+        variableValues: { 1: { kind: 'TEXT', value: 'friend' } },
+      }));
+    });
+    expect(api.post).not.toHaveBeenCalledWith('/campaigns', expect.anything());
+  });
+
+  it('will not save while the placeholder is still empty', async () => {
+    renderEditor();
+    await screen.findByLabelText('Value for {{1}}');
+    expect(screen.getByRole('button', { name: /save draft/i })).toBeDisabled();
+  });
+
+  it('**deletes the draft, behind a confirmation**', async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    await screen.findByDisplayValue('Diwali week');
+
+    await user.click(screen.getByRole('button', { name: /delete draft/i }));
+    // One click must not destroy it — the first only asks.
+    expect(api.delete).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith(`/campaigns/${DRAFT.id}`));
+  });
+
+  it('offers neither editing nor deleting on the create page', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.get).mockResolvedValue({ data: { data: [TEMPLATE, PLAIN] } } as never);
+    renderPage();
+    await compose(user);
+
+    expect(screen.queryByRole('button', { name: /delete draft/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /create draft/i })).toBeInTheDocument();
   });
 });

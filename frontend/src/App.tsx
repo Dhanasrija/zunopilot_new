@@ -112,6 +112,8 @@ export default function App() {
                 <Route path="campaigns" element={<Campaigns />} />
                 {/* Before `:campaignId`, or "new" is matched as a campaign id. */}
                 <Route path="campaigns/new" element={<CampaignNew />} />
+                {/* The composer doubles as the draft editor — same decisions, one screen. */}
+                <Route path="campaigns/:campaignId/edit" element={<CampaignNew />} />
                 <Route path="campaigns/:campaignId" element={<CampaignDetail />} />
               </Route>
               <Route path="workflows" element={<Workflows />} />

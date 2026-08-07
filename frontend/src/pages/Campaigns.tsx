@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Megaphone, Send, ShieldCheck, Users } from 'lucide-react';
+import { Megaphone, Pencil, Send, ShieldCheck, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
@@ -278,7 +278,17 @@ export default function Campaigns() {
                         <TableCell className="text-caption text-muted-foreground">
                           {formatDateTime(campaign.createdAt)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="flex items-center gap-2">
+                          {/* Only ever a draft: the server refuses to edit anything that has
+                              started, because a campaign that reached somebody is a record of
+                              what was sent. */}
+                          {canWrite && ['DRAFT', 'SCHEDULED'].includes(campaign.status) && (
+                            <Button size="sm" variant="outline" className="gap-1" asChild>
+                              <Link to={`/campaigns/${campaign.id}/edit`}>
+                                <Pencil className="h-3 w-3" /> Edit
+                              </Link>
+                            </Button>
+                          )}
                           {canSend && ['DRAFT', 'SCHEDULED', 'PAUSED'].includes(campaign.status) && (
                             <Button size="sm" disabled={start.isPending}
                               onClick={() => start.mutate(campaign.id)}
