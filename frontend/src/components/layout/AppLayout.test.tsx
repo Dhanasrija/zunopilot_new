@@ -186,8 +186,8 @@ describe('the whole menu, for the two seats that matter', () => {
 
     expect(navLabels()).toEqual([
       'Dashboard', 'Inbox', 'Orders', 'Catalogue', 'Customers', 'Leads', 'Campaigns',
-      'Support', 'Auto-replies', 'Assistants', 'Workflows', 'Connectors', 'Templates',
-      'Analytics', 'WhatsApp', 'Team', 'Billing', 'Settings',
+      'Support', 'Auto-replies', 'Knowledge', 'Assistants', 'Workflows', 'Connectors',
+      'Templates', 'Analytics', 'WhatsApp', 'Team', 'Billing', 'Settings',
     ]);
   });
 

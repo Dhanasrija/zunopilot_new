@@ -122,6 +122,7 @@ model Tenant {
   whatsappAccounts WhatsappAccount[]
   keywords         KeywordRule[]
   fallback         FallbackRule?
+  knowledge        KnowledgeEntry[]
   customers        Customer[]
   conversations    Conversation[]
   messages         Message[]
@@ -204,8 +205,14 @@ model MediaAsset {
   sizeBytes    Int
   /// As the uploader named it. Display only — never used to build a path.
   originalName String
-  /// The uuid filename on disk. Not the id, so the id can be rotated without moving bytes.
+  /// Where the bytes are: an S3 object key in production, a path under `MEDIA_DIR` locally.
+  /// Built by `storageKeyFor` and tenant-prefixed, so a workspace's files share one prefix.
+  /// Never taken from a request, and not the id — so an id can be rotated without moving bytes.
   storageKey   String @unique
+
+  /// Decides which route will hand this over, and it is a privacy boundary rather than
+  /// bookkeeping. See `MediaSource`.
+  source MediaSource @default(UPLOAD)
 
   uploadedByUserId String?
 
@@ -221,6 +228,22 @@ enum MediaKind {
   IMAGE
   VIDEO
   DOCUMENT
+
+  /// Inbound only. A customer can send a voice note or an audio file; a template header
+  /// cannot be one, so this never appears in the upload rules.
+  AUDIO
+}
+
+/// Why a file is here, and therefore who may read it.
+///
+/// **The distinction is a privacy boundary, not bookkeeping.** `UPLOAD` is a template header
+/// the business chose to send, and Meta fetches it from an unauthenticated URL because it
+/// cannot present a token — that route has always been public and has to stay public.
+/// `INBOUND` is a photograph a customer sent: a damaged delivery, an ID, a prescription.
+/// Serving those from the same open route would publish them to anyone holding the id.
+enum MediaSource {
+  UPLOAD
+  INBOUND
 }
 
 model User {
@@ -285,6 +308,7 @@ model User {
   ticketEvents     TicketEvent[] @relation("TicketEventActor")
   // Module 22: marketing
   createdCampaigns Campaign[]    @relation("CampaignCreator")
+  knowledgeWritten KnowledgeEntry[] @relation("KnowledgeAuthor")
   leadEvents       LeadEvent[]   @relation("LeadEventActor")
   calls            CallLog[]     @relation("CallActor")
   reminders        Reminder[]    @relation("ReminderAssignee")
@@ -592,6 +616,51 @@ model FallbackRule {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   response  String
   updatedAt DateTime @updatedAt
+}
+
+/// What the business has told the assistant about itself.
+///
+/// **The thing the AI agent was missing.** Its only knowledge until now was `KeywordRule`,
+/// which is `keyword → exact canned reply` — so answering "do you build mobile apps?" required
+/// somebody to have guessed that phrasing in advance. A workspace with no rules got a prompt
+/// whose knowledge section read "(none configured)" above an instruction never to guess, which
+/// is an assistant that can only ever say it will check with the team.
+///
+/// Prose instead: paste what the business does, and the model answers questions nobody
+/// anticipated. `KeywordRule` still feeds the same prompt — an exact canned answer is worth
+/// keeping for the questions where the wording matters.
+///
+/// **Shaped like a chunk on purpose.** Today every active entry is injected whole, which is
+/// correct while the corpus is a few pages. When documents arrive, a long one is split into
+/// several of these rows and an embedding column is added beside `body` — retrieval slots in
+/// without the page, the API or the prompt builder changing shape.
+model KnowledgeEntry {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// What this is about — "Services", "Delivery area". Shown to the model as a heading, so a
+  /// useful one measurably improves which passage it draws from.
+  title String
+
+  /// The prose itself.
+  body String
+
+  /// Off keeps the text without feeding it to the model — how you retire an answer that has
+  /// gone out of date without losing what it said.
+  isActive Boolean @default(true)
+
+  /// Lowest first. Also decides what survives when the corpus is over the prompt budget, so
+  /// the order is "what matters most", not decoration.
+  sortOrder Int @default(0)
+
+  createdById String?
+  createdBy   User?   @relation("KnowledgeAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, isActive, sortOrder])
 }
 
 // ---------------- Module 6: Menu management ----------------

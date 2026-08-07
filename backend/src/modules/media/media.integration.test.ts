@@ -281,3 +281,146 @@ describe('sending a media template', () => {
     expect((sent[0]!.meta as { headerMedia?: unknown }).headerMedia).toBeUndefined();
   });
 });
+
+// ── Sending a file from the Inbox ─────────────────────────────────────────────
+
+describe('an agent sending a customer a file', () => {
+  /** A conversation with an inbound message `agoHours` old, which is what opens the window. */
+  const conversationAged = async (agoHours: number | null) => {
+    const customer = await prisma.customer.create({
+      data: { tenantId: TENANT, waId: `1555700${Math.floor(Math.random() * 9000) + 1000}` },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { tenantId: TENANT, customerId: customer.id, status: 'OPEN' },
+    });
+    if (agoHours !== null) {
+      await prisma.message.create({
+        data: {
+          tenantId: TENANT,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          direction: 'INBOUND',
+          type: 'TEXT',
+          body: 'hello',
+          createdAt: new Date(Date.now() - agoHours * 60 * 60 * 1000),
+        },
+      });
+    }
+    return conversation;
+  };
+
+  const send = (conversationId: string, body: Record<string, unknown>) => request(app)
+    .post(`/api/inbox/conversations/${conversationId}/media`)
+    .set(auth(token))
+    .send(body);
+
+  it('**sends the file and puts it in the thread**', async () => {
+    // Both halves matter. A send the agent cannot see afterwards is the bug that made every
+    // bot reply invisible in this inbox for months.
+    const conversation = await conversationAged(1);
+    const asset = (await uploadPng(token, 'receipt.png').expect(201)).body.data;
+
+    const response = await send(conversation.id, { mediaId: asset.id, caption: 'Your receipt' })
+      .expect(201);
+
+    const sent = mockProviderFor(channelId).sent.filter((m) => m.kind === 'media');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.meta).toMatchObject({ mediaKind: 'IMAGE' });
+    expect((sent[0]!.meta as { link: string }).link).toContain(`/media/${asset.id}/`);
+    expect(sent[0]!.body).toBe('Your receipt');
+
+    expect(response.body.data.direction).toBe('OUTBOUND');
+    expect(response.body.data.type).toBe('IMAGE');
+    // The authenticated path, not the public link — the thread is read by an agent.
+    expect(response.body.data.mediaUrl).toBe(`/api/media/${asset.id}/file`);
+
+    // Asserted on the row the Inbox will actually read back, not only on the response. The
+    // two used to be built separately, so a stored row with no url still answered correctly.
+    const stored = await prisma.message.findUnique({ where: { id: response.body.data.id } });
+    expect(stored?.mediaUrl).toBe(`/api/media/${asset.id}/file`);
+    expect(stored?.type).toBe('IMAGE');
+    expect(stored?.sentByUserId).not.toBeNull();
+  });
+
+  it('describes a file sent with no caption, rather than leaving the bubble empty', async () => {
+    const conversation = await conversationAged(1);
+    const asset = (await uploadPng(token, 'plan.png').expect(201)).body.data;
+
+    const response = await send(conversation.id, { mediaId: asset.id }).expect(201);
+    // The same wording an inbound file gets, so a thread reads consistently either way.
+    expect(response.body.data.body).toBe('[photo]');
+  });
+
+  it('**refuses outside the 24-hour window**', async () => {
+    /*
+     * Not merely blocked — impossible. Outside the window WhatsApp accepts templates only, and
+     * a template's media is fixed at approval, so there is no version of this send that would
+     * have worked. Refusing here means the agent is told, instead of a Meta error they cannot
+     * act on.
+     */
+    const conversation = await conversationAged(25);
+    const asset = (await uploadPng(token, 'late.png').expect(201)).body.data;
+
+    const response = await send(conversation.id, { mediaId: asset.id }).expect(400);
+    expect(response.body.message).toMatch(/24 hours/i);
+    expect(mockProviderFor(channelId).sent.filter((m) => m.kind === 'media')).toHaveLength(0);
+  });
+
+  it('refuses when the customer has never written', async () => {
+    const conversation = await conversationAged(null);
+    const asset = (await uploadPng(token, 'cold.png').expect(201)).body.data;
+
+    const response = await send(conversation.id, { mediaId: asset.id }).expect(400);
+    expect(response.body.message).toMatch(/never messaged/i);
+  });
+
+  it("**will not forward a customer's own file back to them**", async () => {
+    /*
+     * An INBOUND asset is deliberately unreachable on the public route — that is what stops a
+     * photograph of somebody's ID being served to anyone holding the URL. Meta fetches the
+     * link itself, so forwarding one would fail at Meta with a download error and read like
+     * our bug. Refused here, with the reason.
+     */
+    const conversation = await conversationAged(1);
+    const inbound = await prisma.mediaAsset.create({
+      data: {
+        tenantId: TENANT,
+        kind: 'IMAGE',
+        mimeType: 'image/png',
+        sizeBytes: 10,
+        originalName: 'their-photo.png',
+        storageKey: `tenants/${TENANT}/inbound/2026/08/x.png`,
+        source: 'INBOUND',
+      },
+    });
+
+    const response = await send(conversation.id, { mediaId: inbound.id }).expect(400);
+    expect(response.body.message).toMatch(/came from a customer/i);
+  });
+
+  it('cannot send another workspace\'s file', async () => {
+    const conversation = await conversationAged(1);
+    const theirs = (await uploadPng(otherToken, 'theirs.png').expect(201)).body.data;
+
+    await send(conversation.id, { mediaId: theirs.id }).expect(404);
+  });
+
+  it('cannot send into another workspace\'s conversation', async () => {
+    const conversation = await conversationAged(1);
+    const asset = (await uploadPng(token, 'mine.png').expect(201)).body.data;
+
+    await request(app)
+      .post(`/api/inbox/conversations/${conversation.id}/media`)
+      .set(auth(otherToken))
+      .send({ mediaId: asset.id })
+      .expect(404);
+  });
+
+  it('needs a signed-in agent', async () => {
+    const conversation = await conversationAged(1);
+    await request(app)
+      .post(`/api/inbox/conversations/${conversation.id}/media`)
+      .send({ mediaId: '11111111-1111-4111-8111-111111111111' })
+      .expect(401);
+  });
+});

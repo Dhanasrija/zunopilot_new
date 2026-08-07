@@ -15,7 +15,7 @@ import type {
 
 export interface RecordedMessage {
   to: string;
-  kind: 'text' | 'buttons' | 'list' | 'template';
+  kind: 'text' | 'buttons' | 'list' | 'template' | 'media';
   body: string;
   meta?: Record<string, unknown>;
 }
@@ -38,6 +38,20 @@ export class MockWhatsAppProvider implements WhatsAppSender {
 
   async sendText({ to, body }: { to: string; body: string }) {
     this.sent.push({ to, kind: 'text', body });
+    return { messageId: this.nextId() };
+  }
+
+  async sendMedia({ to, kind, link, caption, filename }: {
+    to: string;
+    kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO';
+    link: string;
+    caption?: string | null;
+    filename?: string | null;
+  }) {
+    // The link is recorded, not fetched. A test asserting "the agent sent the right file"
+    // wants the URL that would have gone to Meta, and a mock that downloaded it would make
+    // the suite depend on the network.
+    this.sent.push({ to, kind: 'media', body: caption ?? '', meta: { mediaKind: kind, link, filename } });
     return { messageId: this.nextId() };
   }
 

@@ -2,7 +2,7 @@ import type { WhatsappAccount } from '@prisma/client';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import {
-  sendInteractiveButtons, sendInteractiveList, sendTemplate, sendTextMessage,
+  sendInteractiveButtons, sendInteractiveList, sendMediaMessage, sendTemplate, sendTextMessage,
   type TemplateComponent,
 } from '../../../services/whatsapp.service.js';
 import type { WhatsAppSender } from '../engine/types.js';
@@ -27,6 +27,17 @@ export class MetaWhatsAppProvider implements WhatsAppSender {
 
   async sendText({ to, body }: { to: string; body: string }) {
     const sent = await sendTextMessage({ ...this.credentials, to, body });
+    return { messageId: sent?.messages?.[0]?.id ?? null };
+  }
+
+  async sendMedia({ to, kind, link, caption, filename }: {
+    to: string;
+    kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO';
+    link: string;
+    caption?: string | null;
+    filename?: string | null;
+  }) {
+    const sent = await sendMediaMessage({ ...this.credentials, to, kind, link, caption, filename });
     return { messageId: sent?.messages?.[0]?.id ?? null };
   }
 
@@ -100,6 +111,16 @@ export class ConsoleWhatsAppProvider implements WhatsAppSender {
 
   async sendText({ to, body }: { to: string; body: string }) {
     return this.log('text', to, body);
+  }
+
+  async sendMedia({ to, kind, link, caption, filename }: {
+    to: string;
+    kind: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO';
+    link: string;
+    caption?: string | null;
+    filename?: string | null;
+  }) {
+    return this.log('media', to, caption ?? '', { mediaKind: kind, link, filename });
   }
 
   async sendButtons({ to, body, buttons }: {

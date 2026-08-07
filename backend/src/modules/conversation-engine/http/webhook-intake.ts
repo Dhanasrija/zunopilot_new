@@ -103,8 +103,18 @@ const textOf = (message: Record<string, any>): string => {
       const l = message.location ?? {};
       return [l.name, l.address].filter(Boolean).join(', ');
     }
-    // Media and anything else carry no text the router can use. The worker
-    // sends an "I can't read that" fallback rather than guessing.
+    /*
+     * A caption if there is one, and otherwise nothing.
+     *
+     * **The empty string is meaningful and the worker depends on it.** A photo with no caption
+     * is not a question, so `process-inbound` acknowledges it rather than routing an empty
+     * message into a model that cannot see the image. The stored `Message.body` gets a short
+     * description instead — this returns the customer's own words or none.
+     *
+     * This comment used to claim the worker "sends an 'I can't read that' fallback rather than
+     * guessing". No such code existed. A bare photo went to the router as an empty string and
+     * got the generic fallback, which reads to a customer as though nothing arrived.
+     */
     default: return message[message.type]?.caption ?? '';
   }
 };

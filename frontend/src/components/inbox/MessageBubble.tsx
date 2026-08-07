@@ -1,5 +1,6 @@
 import { cn, formatDateTime } from '@/lib/utils';
 import { outboundOptions, type Message } from './types';
+import { MediaAttachment, hasAttachment } from './MediaAttachment';
 
 // One message.
 //
@@ -42,7 +43,20 @@ export function MessageBubble({ message, myId }: { message: Message; myId?: stri
           </p>
         )}
 
-        <p className="whitespace-pre-wrap break-words">{message.body || `[${message.type}]`}</p>
+        {/*
+          The body, then the file.
+
+          `message.body` for a photo with no caption is now a short description written when
+          the message was stored — "[photo]" — rather than the empty string it used to be. The
+          fallback below still exists for a message type nothing understands, but it no longer
+          fires for every image, video and document, which is what made an agent's screen read
+          `[SYSTEM]`.
+        */}
+        {(message.body || !hasAttachment(message)) && (
+          <p className="whitespace-pre-wrap break-words">{message.body || `[${message.type}]`}</p>
+        )}
+
+        {hasAttachment(message) && <MediaAttachment message={message} outbound={outbound} />}
 
         {/*
           The choices a list or button message offered. Without these the transcript shows

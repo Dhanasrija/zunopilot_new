@@ -105,6 +105,46 @@ export const sendTextMessage = ({ accessToken, phoneNumberId, to, body }: Creden
     return data;
   });
 
+/** The message types that carry a file. Audio is send-capable even though a header cannot be. */
+export type OutboundMediaKind = 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO';
+
+/**
+ * Send a file.
+ *
+ * **By link, not by upload.** Meta accepts either a `link` it fetches itself or a media id
+ * from a prior upload to their store. The link is the better trade here for the same reason
+ * campaign headers use it: nothing to pre-upload, nothing to expire, and one copy of the file
+ * — ours. The cost is that the URL must be publicly fetchable while Meta collects it, which is
+ * why only `source: UPLOAD` assets are servable on the open route.
+ *
+ * A caption is not allowed on audio. Meta rejects the whole message rather than dropping the
+ * field, so it is omitted here rather than left to the caller to remember.
+ */
+export const sendMediaMessage = ({
+  accessToken, phoneNumberId, to, kind, link, caption, filename,
+}: Credentials & {
+  to: string;
+  kind: OutboundMediaKind;
+  link: string;
+  caption?: string | null;
+  filename?: string | null;
+}): Promise<SendResponse> =>
+  graphCall('sendMediaMessage', async () => {
+    const type = kind.toLowerCase() as 'image' | 'video' | 'document' | 'audio';
+    const payload: Record<string, unknown> = { link };
+
+    // Only a document shows a filename, and only image, video and document take a caption.
+    if (kind === 'DOCUMENT' && filename) payload.filename = filename;
+    if (kind !== 'AUDIO' && caption?.trim()) payload.caption = caption.trim();
+
+    const { data } = await http.post<SendResponse>(
+      graphUrl(`/${phoneNumberId}/messages`),
+      { messaging_product: 'whatsapp', to, type, [type]: payload },
+      authHeaders(accessToken),
+    );
+    return data;
+  });
+
 export const sendInteractiveList = ({
   accessToken, phoneNumberId, to, header, body, button, sections,
 }: Credentials & {

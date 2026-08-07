@@ -947,6 +947,100 @@
         }
       }
     },
+    "/inbox/conversations/{id}/media": {
+      "post": {
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send a customer a file",
+        "description": "Needs `inbox:reply`. Upload the file first with `POST /media`, then send its id here. **Only within 24 hours of the customer's last message** — outside that window WhatsApp accepts templates only, and this returns 400 saying so. A file a customer sent you cannot be forwarded back; upload your own copy.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mediaId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "From `POST /media`"
+                  },
+                  "caption": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "mediaId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The message that was sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/WhatsappRefused"
+          },
+          "424": {
+            "$ref": "#/components/responses/WhatsappDisconnected"
+          }
+        }
+      }
+    },
     "/inbox/conversations/{id}/read": {
       "post": {
         "tags": [

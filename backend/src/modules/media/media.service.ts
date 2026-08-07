@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
 import type { MediaKind } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { env } from '../../config/env.js';
 import { ApiError } from '../../utils/ApiError.js';
+import {
+  deleteObject, getObjectStream, putObject, storageKeyFor,
+} from './storage.js';
 
 // Media uploaded to fill a template's media header.
 //
@@ -17,19 +16,6 @@ import { ApiError } from '../../utils/ApiError.js';
 // rather than leaving somebody to infer it from an unauthenticated route.
 
 /**
- * Where the bytes go.
- *
- * Under the OS temp directory in tests, so a suite run never leaves files in the working
- * tree — the earlier default wrote to `backend/.media`, which is exactly the kind of thing
- * that ends up committed once. `MEDIA_DIR` overrides both, and is what a deployment sets to
- * point at a mounted volume.
- */
-const MEDIA_DIR = resolve(
-  process.env.MEDIA_DIR
-  || (process.env.NODE_ENV === 'test' ? join(tmpdir(), 'zunopilot-media-test') : join(process.cwd(), '.media')),
-);
-
-/**
  * What each header format will accept, and how large.
  *
  * The ceilings are **Meta's**, not ours — a file over them is rejected by the Graph API at
@@ -37,7 +23,11 @@ const MEDIA_DIR = resolve(
  * reason visible only in a log. Refusing at upload is the same rule enforced somewhere a
  * person can act on it.
  */
-const RULES: Record<MediaKind, { mimeTypes: string[]; maxBytes: number; label: string }> = {
+type HeaderKind = Extract<MediaKind, 'IMAGE' | 'VIDEO' | 'DOCUMENT'>;
+
+// AUDIO is deliberately absent: a customer can send a voice note, a template header cannot
+// be one, and this table is only about what may be uploaded to fill a header.
+const RULES: Record<HeaderKind, { mimeTypes: string[]; maxBytes: number; label: string }> = {
   IMAGE: {
     mimeTypes: ['image/jpeg', 'image/png'],
     maxBytes: 5 * 1024 * 1024,
@@ -75,9 +65,9 @@ export const MAX_UPLOAD_BYTES = Math.max(...Object.values(RULES).map((r) => r.ma
  * MP4 would produce a template send Meta refuses, and the file itself is the only honest
  * source.
  */
-export const kindForMime = (mimeType: string): MediaKind | null => {
+export const kindForMime = (mimeType: string): HeaderKind | null => {
   for (const [kind, rule] of Object.entries(RULES)) {
-    if (rule.mimeTypes.includes(mimeType)) return kind as MediaKind;
+    if (rule.mimeTypes.includes(mimeType)) return kind as HeaderKind;
   }
   return null;
 };
@@ -140,9 +130,14 @@ export const storeUpload = async (input: {
     );
   }
 
-  await mkdir(MEDIA_DIR, { recursive: true });
-  const storageKey = randomUUID();
-  await writeFile(join(MEDIA_DIR, storageKey), input.buffer);
+  const id = randomUUID();
+  const storageKey = storageKeyFor({
+    tenantId: input.tenantId,
+    purpose: 'upload',
+    id,
+    extension: input.originalName.split('.').pop(),
+  });
+  await putObject(storageKey, input.buffer, input.mimeType);
 
   const asset = await prisma.mediaAsset.create({
     data: {
@@ -196,7 +191,7 @@ export const deleteMedia = async (tenantId: string, id: string): Promise<void> =
   await prisma.mediaAsset.delete({ where: { id: asset.id } });
   // The row is the record; a leftover file is untidy, a missing row is a broken campaign.
   // So the database goes first and a failed unlink is logged rather than thrown.
-  await unlink(join(MEDIA_DIR, asset.storageKey)).catch(() => {});
+  await deleteObject(asset.storageKey);
 };
 
 /**
@@ -209,19 +204,83 @@ export const deleteMedia = async (tenantId: string, id: string): Promise<void> =
 export const openForServing = async (id: string) => {
   const asset = await prisma.mediaAsset.findUnique({
     where: { id },
+    select: {
+      storageKey: true, mimeType: true, sizeBytes: true, originalName: true, source: true,
+    },
+  });
+  if (!asset) return null;
+
+  /*
+   * **An inbound file is never served here.** This route is unauthenticated because Meta has
+   * to fetch template media without a token, and that trade is acceptable for an image a
+   * business chose to broadcast. It is not acceptable for a photograph a customer sent —
+   * a damaged delivery, an ID, a prescription. Those go through `openForTenant` below, which
+   * checks who is asking. Same answer as a missing file, so the route cannot be used to
+   * discover that an id exists.
+   */
+  if (asset.source !== 'UPLOAD') return null;
+
+  const stream = await getObjectStream(asset.storageKey);
+  if (!stream) return null;
+  return { ...asset, stream: () => stream };
+};
+
+/**
+ * Open an inbound file for somebody who works at the business that received it.
+ *
+ * The tenant is in the `where`, not checked afterwards, so there is no version of this that
+ * returns another workspace's customer's photograph.
+ */
+export const openForTenant = async (tenantId: string, id: string) => {
+  const asset = await prisma.mediaAsset.findFirst({
+    where: { id, tenantId },
     select: { storageKey: true, mimeType: true, sizeBytes: true, originalName: true },
   });
   if (!asset) return null;
 
-  const path = join(MEDIA_DIR, asset.storageKey);
-  // Belt and braces: `storageKey` is a uuid we wrote, but re-checking that the resolved
-  // path is still inside MEDIA_DIR costs nothing and closes the door for good.
-  if (!resolve(path).startsWith(MEDIA_DIR)) return null;
+  const stream = await getObjectStream(asset.storageKey);
+  if (!stream) return null;
+  return { ...asset, stream: () => stream };
+};
 
-  try {
-    await stat(path);
-  } catch {
-    return null;
-  }
-  return { ...asset, stream: () => createReadStream(path) };
+/**
+ * Store a file a customer sent us.
+ *
+ * Separate from `storeUpload` because the rules are different in both directions: the MIME
+ * type is whatever the customer's phone produced rather than something from our list, and
+ * there is no uploading user. What it must not do is inherit `source: UPLOAD` and become
+ * publicly readable.
+ */
+export const storeInboundMedia = async (input: {
+  tenantId: string;
+  kind: MediaKind;
+  mimeType: string;
+  originalName: string;
+  buffer: Buffer;
+}): Promise<{ id: string; storageKey: string }> => {
+  const id = randomUUID();
+  const storageKey = storageKeyFor({
+    tenantId: input.tenantId,
+    purpose: 'inbound',
+    id,
+    extension: input.mimeType.split('/').pop(),
+  });
+
+  await putObject(storageKey, input.buffer, input.mimeType);
+
+  const asset = await prisma.mediaAsset.create({
+    data: {
+      id,
+      tenantId: input.tenantId,
+      kind: input.kind,
+      mimeType: input.mimeType,
+      sizeBytes: input.buffer.length,
+      originalName: input.originalName.slice(0, 200),
+      storageKey,
+      source: 'INBOUND',
+    },
+    select: { id: true, storageKey: true },
+  });
+
+  return asset;
 };

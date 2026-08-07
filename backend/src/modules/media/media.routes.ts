@@ -5,8 +5,8 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { requireAuth, requirePermission, tenantIdOf, userOf } from '../../middleware/auth.js';
 import {
-  MAX_UPLOAD_BYTES, deleteMedia, listMedia, mediaRules, openForServing, publicUrlIsReachable,
-  storeUpload,
+  MAX_UPLOAD_BYTES, deleteMedia, listMedia, mediaRules, openForServing, openForTenant,
+  publicUrlIsReachable, storeUpload,
 } from './media.service.js';
 
 // Media for template headers.
@@ -17,6 +17,12 @@ import {
 //   • `publicMediaRoutes` — **unauthenticated**, mounted at `/media`. Meta fetches template
 //     media itself and cannot present a token, so this route has to be open. See the model
 //     comment in schema.prisma; the uuid in the path is the capability.
+//
+// **What a customer sends is not served by the public router.** `MediaAsset.source` is
+// `INBOUND` for those, `openForServing` refuses them, and `/api/media/:id/file` below hands
+// them over only to somebody signed in to the workspace that received them. The two are
+// deliberately different routes rather than one with a flag, because a flag is a thing
+// somebody eventually gets backwards.
 
 /**
  * In memory, not to a temp file.
@@ -80,6 +86,32 @@ mediaRoutes.post(
 mediaRoutes.delete('/:id', requirePermission('campaigns:write'), asyncHandler(async (req, res) => {
   await deleteMedia(tenantIdOf(req), req.params.id!);
   res.json({ success: true, data: { deleted: true } });
+}));
+
+/**
+ * The bytes of something a customer sent us.
+ *
+ * Authenticated and tenant-scoped: `openForTenant` puts the tenant in the `where`, so there is
+ * no version of this that returns another workspace's customer's photograph. `inbox:read`
+ * rather than a media permission — if you can read the conversation you can see what was sent
+ * in it, and any other answer would show an agent a message they cannot open.
+ *
+ * Streamed from S3 through this process rather than redirecting to a presigned URL. It costs
+ * bandwidth, and it buys a URL that stops working the moment the session does, instead of one
+ * that keeps working for anyone who has it until it expires.
+ */
+mediaRoutes.get('/:id/file', requirePermission('inbox:read'), asyncHandler(async (req, res) => {
+  const asset = await openForTenant(tenantIdOf(req), req.params.id!);
+  if (!asset) throw ApiError.notFound('Media not found');
+
+  res.setHeader('Content-Type', asset.mimeType);
+  res.setHeader('Content-Length', String(asset.sizeBytes));
+  // Private: this is one customer's file, and no shared cache should hold it.
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(asset.originalName)}"`);
+
+  asset.stream().pipe(res);
 }));
 
 // ── Public ────────────────────────────────────────────────────────────────────

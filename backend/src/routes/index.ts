@@ -4,6 +4,7 @@ import tenant from './tenant.routes.js';
 import whatsapp from './whatsapp.routes.js';
 import webhook from './webhook.routes.js';
 import automation from './automation.routes.js';
+import knowledge from '../modules/knowledge/knowledge.routes.js';
 import inbox from './inbox.routes.js';
 import menu from './menu.routes.js';
 import order from './order.routes.js';
@@ -39,6 +40,8 @@ routes.use('/webhook', webhook);
 // The one router whose module gate is per-route rather than `router.use`: `KEYWORD_RULES`
 // covers the keyword rules, and deliberately not the fallback message. See the file's header.
 routes.use('/automation', automation);
+// What the assistant knows about the business. Not module-gated — see the router's header.
+routes.use('/knowledge', knowledge);
 routes.use('/inbox', inbox);
 /*
  * The catalogue, served at both names.

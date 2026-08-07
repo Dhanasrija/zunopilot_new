@@ -327,6 +327,31 @@ export const openapi = {
         },
       },
     },
+    '/inbox/conversations/{id}/media': {
+      post: {
+        tags: ['Inbox'], security: auth, summary: 'Send a customer a file',
+        description:
+          'Needs `inbox:reply`. Upload the file first with `POST /media`, then send its id'
+          + ' here. **Only within 24 hours of the customer\'s last message** — outside that'
+          + ' window WhatsApp accepts templates only, and this returns 400 saying so. A file'
+          + ' a customer sent you cannot be forwarded back; upload your own copy.',
+        parameters: [pathParam('id', 'Conversation id')],
+        requestBody: jsonBody({
+          type: 'object',
+          properties: {
+            mediaId: { type: 'string', format: 'uuid', description: 'From `POST /media`' },
+            caption: { type: 'string', maxLength: 1024, nullable: true },
+          },
+          required: ['mediaId'],
+        }),
+        responses: {
+          201: ok('The message that was sent', ref('Message')),
+          422: { $ref: '#/components/responses/WhatsappRefused' },
+          424: { $ref: '#/components/responses/WhatsappDisconnected' },
+          ...errors,
+        },
+      },
+    },
     '/inbox/conversations/{id}/read': {
       post: {
         tags: ['Inbox'], security: auth, summary: 'Clear the unread count',
