@@ -3,7 +3,7 @@ import { requireAuth, requireModule, requirePermission } from '../../middleware/
 import {
   getCampaign, getConsentSummary, listCampaignRecipients, listCampaigns, listTemplates,
   patchTemplate, postAudiencePreview, postCampaign, postCampaignPause, postCampaignStart,
-  postTemplate, postTemplateSync,
+  postCampaignTest, postTemplate, postTemplateSync,
 } from './campaign.controller.js';
 
 // Marketing.
@@ -27,6 +27,10 @@ router.patch('/templates/:templateId', requirePermission('campaigns:write'), pat
 // A count, not a send — `campaigns:read` is enough.
 router.post('/audience-preview', requirePermission('campaigns:read'), postAudiencePreview);
 router.get('/consent', requirePermission('campaigns:read'), getConsentSummary);
+
+// A real message to one number, so `campaigns:send` — the same authority as pressing start.
+// Literal path, so it stays above `/:campaignId`.
+router.post('/test', requirePermission('campaigns:send'), postCampaignTest);
 
 router.get('/', requirePermission('campaigns:read'), listCampaigns);
 router.post('/', requirePermission('campaigns:write'), postCampaign);

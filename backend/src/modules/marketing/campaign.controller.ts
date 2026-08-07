@@ -7,9 +7,11 @@ import { tenantIdOf, userOf } from '../../middleware/auth.js';
 import { queryEnum, queryString } from '../../utils/query.js';
 import {
   campaignInclude, campaignOf, campaignProgress, pauseCampaign, previewAudience,
-  startCampaign, type AudienceFilter,
+  sendTestMessage, startCampaign, type AudienceFilter,
 } from './campaign.service.js';
+import { variableValuesSchema } from './campaign-variables.js';
 import { syncTemplatesFromMeta } from './template-sync.service.js';
+import { normalisePhone } from '../../services/otp.service.js';
 import { mediaFor } from '../media/media.service.js';
 
 const idParam = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,7 +125,9 @@ const campaignSchema = z.object({
   name: z.string().trim().min(1).max(160),
   templateId: z.string().regex(idParam),
   audienceFilter: audienceSchema.default({}),
-  variableValues: z.record(z.string(), z.string().max(1_000)).default({}),
+  // A value is a literal or a reference to a field on each recipient — see
+  // `campaign-variables.ts`. A bare string is still accepted and read as a literal.
+  variableValues: variableValuesSchema,
   /** The media filling the template's header, when it declares one. */
   headerMediaId: z.string().regex(idParam).nullish(),
   scheduledAt: z.string().datetime().nullish(),
@@ -224,6 +228,37 @@ export const postCampaignStart = asyncHandler(async (req: Request, res: Response
 
   const campaign = await startCampaign(tenantId, campaignId);
   res.json({ success: true, data: { ...campaign, progress: await campaignProgress(campaignId) } });
+});
+
+const testSendSchema = z.object({
+  templateId: z.string().regex(idParam),
+  to: z.string().trim().min(1),
+  variableValues: variableValuesSchema,
+  headerMediaId: z.string().regex(idParam).nullish(),
+});
+
+/**
+ * Send one message to a number of your own, before committing to the broadcast.
+ *
+ * Behind `campaigns:send`, not `campaigns:write`. It is a real WhatsApp message: it costs
+ * the business a conversation, it lands on somebody's phone, and it is the same authority
+ * as pressing start — just aimed at one number.
+ */
+export const postCampaignTest = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = tenantIdOf(req);
+  const body = testSendSchema.parse(req.body);
+
+  const result = await sendTestMessage(tenantId, {
+    templateId: body.templateId,
+    // The same normaliser sign-in uses, so "+91 77020 00350" and "917702000350" are one
+    // number — and so a test against an existing customer actually finds them, which is
+    // what makes the consent check below it work.
+    to: normalisePhone(body.to),
+    variableValues: body.variableValues,
+    headerMediaId: body.headerMediaId,
+  });
+
+  res.json({ success: true, data: result });
 });
 
 export const postCampaignPause = asyncHandler(async (req: Request, res: Response) => {
