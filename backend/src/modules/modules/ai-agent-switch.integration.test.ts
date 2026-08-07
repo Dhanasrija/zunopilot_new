@@ -24,6 +24,36 @@ vi.mock('../../services/whatsapp.service.js', () => ({
   graphHttp: { get: vi.fn(), post: vi.fn() },
 }));
 
+/*
+ * **The legacy router, and why "no LLM call is made" was not true.**
+ *
+ * `FORBIDDEN_LLM` below guards the *engine's* provider, installed through `setLlmProvider`.
+ * `services/router.service.ts` does not use it — it builds its own OpenAI client at module
+ * scope. So a whole classifier sat outside the apparatus this file calls "the whole
+ * apparatus", and the degraded path called it on every message.
+ *
+ * The second reason it hid: the legacy call is `isRouterEnabled() ? routeMessage(...) : null`,
+ * and `isRouterEnabled()` is `Boolean(client)` — false wherever no API key is configured,
+ * which is every CI run. The branch could only execute somewhere with a real key. It reached
+ * production and was found in a live log:
+ *
+ *   11:36:26  Router classified message  intent "fallback"  usage.completion_tokens 10
+ *
+ * on a workspace whose AI_AGENT module was off. So this mock forces `isRouterEnabled()` true
+ * — the state a real deployment is always in — and counts the calls.
+ */
+const legacyRouter = vi.hoisted(() => ({ calls: 0 }));
+
+vi.mock('../../services/router.service.js', () => ({
+  isRouterEnabled: () => true,
+  routeMessage: async () => {
+    legacyRouter.calls += 1;
+    // Null means "router declined", so the legacy path degrades to keyword matching exactly
+    // as it would with the model switched off. The count is the assertion, not the answer.
+    return null;
+  },
+}));
+
 import { prisma } from '../../config/prisma.js';
 import { buildApp } from '../../app.js';
 import { signToken } from '../../utils/jwt.js';
@@ -164,6 +194,7 @@ beforeEach(async () => {
   await wipe();
   await seed();
   setLlmProvider(FORBIDDEN_LLM);
+  legacyRouter.calls = 0;
 });
 
 afterEach(() => { setLlmProvider(null); });
@@ -337,5 +368,70 @@ describe('what the session tells the browser', () => {
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${ownerToken}`);
     expect(res.body.data.modules).toContain('AI_AGENT');
+  });
+});
+
+describe('the legacy router, which the switch did not reach', () => {
+  it('**is not called when the operator has revoked the agent**', async () => {
+    // The production failure, as a test. AI_AGENT off, and a model was still consulted —
+    // `degradeToNonAi` handed the message to `handleInboundMessage`, which gated its own
+    // classifier on "is an API key configured" rather than on this workspace's permission.
+    await setOperatorModule(false);
+
+    await askSomethingOpenEnded();
+
+    expect(legacyRouter.calls).toBe(0);
+  });
+
+  it('**is not called when the workspace has switched it off**', async () => {
+    await setOwnerPreference(false);
+    await askSomethingOpenEnded();
+    expect(legacyRouter.calls).toBe(0);
+  });
+
+  it('the customer is still answered — silence was never the intent', async () => {
+    await setOwnerPreference(false);
+    await askSomethingOpenEnded();
+
+    const replies = await prisma.message.findMany({
+      where: { tenantId: TENANT, direction: 'OUTBOUND' },
+    });
+    expect(replies.map((m) => m.body)).toContain('A colleague will be with you shortly.');
+  });
+});
+
+describe('what the Inbox sees', () => {
+  it('**records the bot reply, so an agent can see what was already said**', async () => {
+    /*
+     * The second half of the same report: the customer received an answer and the Inbox
+     * showed nothing. Every reply in `automation.service.ts` went out through
+     * `sendTextMessage` and was never written to `Message` — so an agent opening the thread
+     * saw the customer's question and no response, and answered something the bot had
+     * already handled.
+     *
+     * In production the give-away was three status callbacks at 11:36:29–30 for a message
+     * with no row behind it.
+     */
+    await setOwnerPreference(false);
+
+    await askSomethingOpenEnded();
+
+    const outbound = await prisma.message.findMany({
+      where: { tenantId: TENANT, conversationId, direction: 'OUTBOUND' },
+    });
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0].body).toBe('A colleague will be with you shortly.');
+    // Null `sentByUserId` is what marks a row as the bot rather than a person — the
+    // distinction the shared inbox is built on.
+    expect(outbound[0].sentByUserId).toBeNull();
+    expect(outbound[0].type).toBe('TEXT');
+  });
+
+  it('threads the reply onto the same conversation as the question', async () => {
+    // A reply hung off a new conversation would be as invisible to the agent as no reply.
+    await setOwnerPreference(false);
+    await askSomethingOpenEnded();
+
+    expect(await prisma.conversation.count({ where: { tenantId: TENANT } })).toBe(1);
   });
 });
