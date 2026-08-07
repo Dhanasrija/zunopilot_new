@@ -65,10 +65,11 @@ export type Permission = string;
 /**
  * A module an operator controls for this workspace.
  *
- * The first three are add-ons, absent until granted. `AI_AGENT` and `ECOMMERCE` are the
- * inverse: present for everyone, absent only where we have revoked them.
+ * The first three are add-ons, absent until granted. `AI_AGENT`, `ECOMMERCE` and
+ * `KEYWORD_RULES` are the inverse: present for everyone, absent only where we have revoked them.
  */
-export type ModuleKey = 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE';
+export type ModuleKey =
+  | 'MARKETING' | 'LEADS' | 'SUPPORT' | 'AI_AGENT' | 'ECOMMERCE' | 'KEYWORD_RULES';
 
 interface AuthState {
   token: string | null;

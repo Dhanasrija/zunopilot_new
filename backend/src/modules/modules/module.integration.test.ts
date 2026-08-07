@@ -103,13 +103,19 @@ const setModule = (tenantId: string, module: string, enabled: boolean, note?: st
 
 describe('a module nobody was given', () => {
   it('is off for a workspace that has never been configured', async () => {
-    // **The add-ons are off and `AI_AGENT` is on**, and the asymmetry is the point rather than
-    // an oversight. Marketing, Leads and Support are things a workspace does not have until an
-    // operator grants one, so off-by-default protects us from handing out what nobody bought.
-    // The AI agent is already running for every workspace on the platform, so off-by-default
-    // would have muted all of them the moment it shipped — the same rule pointing the other way.
+    // **The add-ons are off and the three revocable ones are on**, and the asymmetry is the
+    // point rather than an oversight. Marketing, Leads and Support are things a workspace does
+    // not have until an operator grants one, so off-by-default protects us from handing out what
+    // nobody bought. The AI agent, Orders/Menu and the keyword replies are already running for
+    // every workspace on the platform, so off-by-default would have muted all of them the moment
+    // each shipped — the same rule pointing the other way.
     expect(await moduleStateFor(TENANT_A)).toEqual({
-      MARKETING: false, LEADS: false, SUPPORT: false, AI_AGENT: true, ECOMMERCE: true,
+      MARKETING: false,
+      LEADS: false,
+      SUPPORT: false,
+      AI_AGENT: true,
+      ECOMMERCE: true,
+      KEYWORD_RULES: true,
     });
   });
 
@@ -258,9 +264,9 @@ describe('the operator console view', () => {
     // copy by module key — `MODULE_COPY[setting.module].label` — and crashes on a key it does not
     // know. So a new enum value that reaches this endpoint without a matching entry in
     // `superadmin/src/pages/TenantDetail.tsx` breaks the page, and this is the test that says so.
-    expect(response.body.data).toHaveLength(5);
+    expect(response.body.data).toHaveLength(6);
     expect(response.body.data.map((s: { module: string }) => s.module).sort())
-      .toEqual(['AI_AGENT', 'ECOMMERCE', 'LEADS', 'MARKETING', 'SUPPORT']);
+      .toEqual(['AI_AGENT', 'ECOMMERCE', 'KEYWORD_RULES', 'LEADS', 'MARKETING', 'SUPPORT']);
     // On by default, and reported as such so the console shows it already enabled.
     expect(response.body.data.find((s: { module: string }) => s.module === 'AI_AGENT').enabled).toBe(true);
     expect(response.body.data.find((s: { module: string }) => s.module === 'LEADS').enabled).toBe(true);

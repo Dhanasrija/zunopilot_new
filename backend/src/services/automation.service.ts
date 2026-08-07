@@ -6,6 +6,7 @@ import { startRun } from './workflow-engine/index.js';
 import { logger } from '../config/logger.js';
 import { channelForTenant } from './whatsapp-account.service.js';
 import { recordOutboundMessage } from '../modules/conversation-engine/providers/mirror.js';
+import { moduleEnabled } from '../modules/modules/module.service.js';
 import type {
   Cart, Conversation, Customer, InboundContext, InboundMessage, KeywordRule,
   ReplyTarget, Tenant, WhatsappAccount,
@@ -123,11 +124,30 @@ const abandonFlow = async ({ cart, conversation, waAccount, customer }: ReplyIn 
   );
 };
 
-const activeKeywordRules = (tenantId: string) =>
-  prisma.keywordRule.findMany({
+/**
+ * The workspace's FAQ answers, or nothing if an operator has switched them off.
+ *
+ * **The gate is here rather than at the three call sites**, because this one function feeds all
+ * of them: `dispatchByKeyword`'s matching loop, the `faqs` handed to the LLM router, and
+ * `dispatchIntent`'s `answer_faq` lookup. An empty list makes each of them a no-op on its own
+ * terms, with no branch to forget.
+ *
+ * Switching the module off has to stop the rules *firing*, not merely stop them being edited.
+ * Hiding the editor alone would leave a workspace watching replies go out that it can no longer
+ * see, let alone turn off. The rows are untouched and answer again the moment it is switched
+ * back on.
+ *
+ * `HUMAN_KEYWORDS`, `MENU_KEYWORDS` and the `ESCAPE_*` sets are deliberately unaffected: they
+ * are hardcoded escape hatches, not the workspace's FAQs. Somebody typing "agent" mid-checkout
+ * must still reach a person in a workspace that has no keyword rules at all.
+ */
+const activeKeywordRules = async (tenantId: string) => {
+  if (!await moduleEnabled(tenantId, 'KEYWORD_RULES')) return [];
+  return prisma.keywordRule.findMany({
     where: { tenantId, isActive: true },
     orderBy: { priority: 'desc' },
   });
+};
 
 // ---------------------------------------------------------------------------
 // LLM routing

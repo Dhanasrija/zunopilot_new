@@ -2248,6 +2248,21 @@ enum ModuleKey {
   /// admissions has no catalogue, and two permanently empty screens in the nav are clutter that
   /// makes the product look like it was built for someone else.
   ECOMMERCE
+
+  /// Keyword replies: the workspace's own FAQ answers, and the AI's knowledge of them.
+  ///
+  /// **Defaults ON, for the same reason as `AI_AGENT` and `ECOMMERCE`** — these rules already
+  /// answer messages everywhere, so an off-by-default module would mute them all on deploy.
+  /// Revoked, not granted.
+  ///
+  /// Switching it off stops the rules **firing**, not just being edited: `activeKeywordRules`
+  /// and the AI general response both return nothing. Hiding the editor alone would leave a
+  /// workspace unable to stop replies it can no longer see. `KeywordRule` rows survive and
+  /// answer again when it is switched back on.
+  ///
+  /// **`FallbackRule` is not gated by this.** What a customer gets when nothing matched is
+  /// needed by every workspace, with or without keyword rules.
+  KEYWORD_RULES
 }
 
 /// Whether one workspace has one module.

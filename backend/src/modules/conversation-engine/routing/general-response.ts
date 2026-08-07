@@ -2,6 +2,7 @@ import type { Assistant, Conversation, Customer, Tenant } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { withContext } from '../../../config/logger.js';
 import { llmProvider } from '../providers/llm.js';
+import { moduleEnabled } from '../../modules/module.service.js';
 import type { WhatsAppSender } from '../engine/types.js';
 
 // The assistant answering on its own.
@@ -138,16 +139,30 @@ export const respondGenerally = async ({
 
   if (!assistant.generalResponseEnabled) return { handled: false, reason: 'DISABLED' };
 
+  const keywordRulesEnabled = await moduleEnabled(tenant.id, 'KEYWORD_RULES');
+
   const [faqs, menuCount, recent] = await Promise.all([
-    // The tenant's existing keyword rules are their FAQ knowledge base. Reusing
-    // them means everything they already configured keeps working, answered in
-    // natural language instead of by substring match.
-    prisma.keywordRule.findMany({
-      where: { tenantId: tenant.id, isActive: true },
-      orderBy: { priority: 'desc' },
-      take: 40,
-      select: { keywords: true, response: true },
-    }),
+    /*
+     * The tenant's existing keyword rules are their FAQ knowledge base. Reusing
+     * them means everything they already configured keeps working, answered in
+     * natural language instead of by substring match.
+     *
+     * **Behind `KEYWORD_RULES` for the same reason the matcher is.** An operator who switches
+     * the module off expects those answers to stop; without this gate the model would carry on
+     * quoting them, which is a stranger failure than the matcher still firing — the words come
+     * back reworded, from a source the workspace can no longer see or edit.
+     *
+     * `take: 40` predates this: a workspace with more than forty rules already has the rest
+     * invisible to the model, though the substring matcher still uses all of them.
+     */
+    keywordRulesEnabled
+      ? prisma.keywordRule.findMany({
+        where: { tenantId: tenant.id, isActive: true },
+        orderBy: { priority: 'desc' },
+        take: 40,
+        select: { keywords: true, response: true },
+      })
+      : [],
     prisma.menuItem.count({ where: { tenantId: tenant.id, inStock: true } }),
     prisma.message.findMany({
       where: { conversationId: conversation.id },

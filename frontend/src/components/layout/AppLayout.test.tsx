@@ -178,17 +178,32 @@ describe('the whole menu, for the two seats that matter', () => {
   it('an owner with everything sees every entry', () => {
     const all: Permission[] = [
       'inbox:read', 'orders:read', 'catalogue:read', 'customers:read', 'leads:read',
-      'campaigns:read', 'tickets:read', 'workflows:read', 'connectors:read',
+      'campaigns:read', 'tickets:read', 'automation:write', 'workflows:read', 'connectors:read',
       'templates:write', 'analytics:read', 'settings:read', 'team:read',
     ];
-    signIn(all, ['ECOMMERCE', 'LEADS', 'MARKETING', 'SUPPORT']);
+    signIn(all, ['ECOMMERCE', 'LEADS', 'MARKETING', 'SUPPORT', 'KEYWORD_RULES']);
     renderInApp(<AppLayout />);
 
     expect(navLabels()).toEqual([
       'Dashboard', 'Inbox', 'Orders', 'Catalogue', 'Customers', 'Leads', 'Campaigns',
-      'Support', 'Assistants', 'Workflows', 'Connectors', 'Templates', 'Analytics',
-      'WhatsApp', 'Team', 'Billing', 'Settings',
+      'Support', 'Auto-replies', 'Assistants', 'Workflows', 'Connectors', 'Templates',
+      'Analytics', 'WhatsApp', 'Team', 'Billing', 'Settings',
     ]);
+  });
+
+  it('**shows Auto-replies without the keyword module**, because the fallback is not gated', () => {
+    // The asymmetry this page is built around: `KEYWORD_RULES` gates the keyword rules, not the
+    // line a customer gets when nothing matched. A workspace with the module revoked still needs
+    // to reach that, so the entry must not carry a `module`.
+    signIn(['automation:write'], []);
+    renderInApp(<AppLayout />);
+    expect(navLabels()).toContain('Auto-replies');
+  });
+
+  it('hides Auto-replies from a seat without automation:write', () => {
+    signIn(['inbox:read'], ['KEYWORD_RULES']);
+    renderInApp(<AppLayout />);
+    expect(navLabels()).not.toContain('Auto-replies');
   });
 
   it('an inbox-only agent sees a two-item menu', () => {
