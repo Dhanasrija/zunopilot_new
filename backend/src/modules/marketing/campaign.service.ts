@@ -6,6 +6,10 @@ import { whatsappProviderFor } from '../conversation-engine/providers/whatsapp.j
 import { publicUrlFor } from '../media/media.service.js';
 import { recordOutboundMessage } from '../conversation-engine/providers/mirror.js';
 import { mayReceiveMarketing } from './consent.service.js';
+import { metaFailure, metaFailureMessage } from '../../services/meta-error.js';
+import {
+  missingVariables, renderBody, resolveVariables, type ResolvableCustomer,
+} from './campaign-variables.js';
 
 // Campaigns.
 //
@@ -23,6 +27,8 @@ export const campaignInclude = {
     select: {
       id: true, name: true, metaTemplate: true, language: true, category: true,
       status: true, bodyPreview: true, headerFormat: true,
+      // Needed at send time to know which placeholders to fill, and in what order.
+      variables: true,
     },
   },
   createdBy: { select: { id: true, fullName: true } },
@@ -196,6 +202,26 @@ export const startCampaign = async (
     );
   }
 
+  /*
+   * A placeholder with nothing behind it is refused **here**, for the same reason as the
+   * media header above — and this one has already happened.
+   *
+   * A campaign went out against a template opening `Hi {{1}},` with `variableValues: {}`.
+   * Meta rejected every single recipient with 132000, "number of localizable_params (0) does
+   * not match the expected number of params (1)". Two recipients, so two rejections; the
+   * same campaign with a real audience would have made four hundred identical Graph calls,
+   * every one of them doomed before the first was sent, and reported success at the end.
+   */
+  const unfilled = missingVariables(campaign.template.variables, campaign.variableValues);
+  if (unfilled.length > 0) {
+    throw ApiError.badRequest(
+      `The template "${campaign.template.name}" has `
+      + `${unfilled.length === 1 ? 'a placeholder' : `${unfilled.length} placeholders`} `
+      + `with no value: ${unfilled.map((v) => `{{${v}}}`).join(', ')}. `
+      + 'WhatsApp rejects a message whose placeholders are not all filled.',
+    );
+  }
+
   const channel = await prisma.whatsappAccount.findFirst({ where: { tenantId } });
   if (!channel) throw ApiError.badRequest('No WhatsApp number is connected.');
 
@@ -279,7 +305,6 @@ export const sendCampaignBatch = async (
   });
 
   const provider = whatsappProviderFor(channel);
-  const params = Object.values((campaign.variableValues ?? {}) as Record<string, string>);
 
   /*
    * The header media, resolved once for the whole batch rather than per recipient.
@@ -313,6 +338,19 @@ export const sendCampaignBatch = async (
       continue;
     }
 
+    /*
+     * Resolved per recipient, not once for the batch.
+     *
+     * `{{1}}` in a marketing template is almost always the customer's name, so the values
+     * cannot be hoisted out of the loop — which is what the old code did, taking
+     * `Object.values(variableValues)` before the first send.
+     */
+    const params = resolveVariables(
+      campaign.template.variables,
+      campaign.variableValues,
+      recipient.customer as ResolvableCustomer,
+    );
+
     try {
       const sent = await provider.sendTemplate({
         to: recipient.customer.waId,
@@ -332,7 +370,14 @@ export const sendCampaignBatch = async (
           conversationId: conversation.id,
           customerId: recipient.customerId,
         },
-        { type: 'TEXT', body: campaign.template.bodyPreview, messageId: sent.messageId },
+        // The rendered body, not the raw template. Mirroring `bodyPreview` put a literal
+        // "Hi {{1}}," in the Inbox thread, so the agent who picked up the reply saw
+        // something the customer never received.
+        {
+          type: 'TEXT',
+          body: renderBody(campaign.template.bodyPreview, params),
+          messageId: sent.messageId,
+        },
       );
 
       await prisma.campaignRecipient.update({
@@ -351,7 +396,11 @@ export const sendCampaignBatch = async (
         data: {
           status: 'FAILED',
           failedAt: new Date(),
-          error: err instanceof Error ? err.message.slice(0, 500) : 'Send failed',
+          // Meta's own sentence. This column used to hold "Request failed with status code
+          // 400" for every failure, which is true of a rejected template, an expired token
+          // and a rate limit alike — so the one screen that exists to explain a failed
+          // campaign explained nothing.
+          error: metaFailureMessage(err).slice(0, 500),
         },
       });
       outcome.failed += 1;
@@ -361,14 +410,164 @@ export const sendCampaignBatch = async (
   outcome.remaining = await prisma.campaignRecipient.count({ where: { campaignId, status: 'PENDING' } });
 
   if (outcome.remaining === 0) {
+    /*
+     * The terminal status describes the whole campaign, not this batch.
+     *
+     * `outcome` counts one slice; a campaign of four hundred settles over many, so asking
+     * the recipients is the only way to know whether anything actually went out.
+     *
+     * **A campaign where nothing sent is FAILED.** It used to be marked SENT
+     * unconditionally the moment the queue drained — the production campaign that failed
+     * every recipient on a missing placeholder was recorded as `status SENT, error null`,
+     * so the list said it worked and the only contradiction was a count on another screen.
+     * Reporting a total failure as a success is worse than the failure.
+     */
+    const [totals, firstFailure] = await Promise.all([
+      prisma.campaignRecipient.groupBy({
+        by: ['status'],
+        where: { campaignId },
+        _count: { _all: true },
+      }),
+      prisma.campaignRecipient.findFirst({
+        where: { campaignId, status: 'FAILED', error: { not: null } },
+        select: { error: true },
+      }),
+    ]);
+    const count = (status: string) =>
+      totals.find((row) => row.status === status)?._count._all ?? 0;
+
+    const sent = count('SENT');
+    const failed = count('FAILED');
+    const nothingSent = sent === 0 && failed > 0;
+
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'SENT', completedAt: new Date() },
+      data: {
+        status: nothingSent ? 'FAILED' : 'SENT',
+        completedAt: new Date(),
+        // Carried up from the recipients so the reason is on the campaign itself. The
+        // failures are all the same one often enough — a template Meta will not accept,
+        // an expired token — that the first is a fair summary, and the per-recipient rows
+        // are still there for the cases where it is not.
+        ...(nothingSent
+          ? { error: firstFailure?.error ?? 'Every message was refused by WhatsApp.' }
+          : {}),
+      },
     });
-    logger.info('Campaign finished', { campaignId, ...outcome });
+    // Campaign totals alongside this batch's, so a log line for the last slice of a long
+    // send does not read as though the whole campaign delivered two messages.
+    logger.info('Campaign finished', {
+      campaignId, totalSent: sent, totalFailed: failed, ...outcome,
+    });
   }
 
   return outcome;
+};
+
+export interface TestSend {
+  templateId: string;
+  to: string;
+  variableValues: unknown;
+  headerMediaId?: string | null;
+}
+
+/**
+ * Send one message to a number the operator names, before any campaign exists.
+ *
+ * The gap this closes: everything about a broadcast is checkable on screen except the one
+ * thing that matters, which is whether Meta accepts the message. A wrong placeholder count,
+ * a template whose approved body drifted from our preview, a header that needs media — all
+ * of it is invisible until the send, and by then it has happened to everybody.
+ *
+ * Deliberately **not** a campaign: no `Campaign` row, no `CampaignRecipient`, and no mirror
+ * into the Inbox. A test is the operator talking to their own phone, and turning that into a
+ * conversation would put a message in the CRM that no customer ever asked for. The composer
+ * says so on screen.
+ */
+export const sendTestMessage = async (
+  tenantId: string,
+  input: TestSend,
+): Promise<{ to: string; body: string; messageId: string | null }> => {
+  const template = await prisma.campaignTemplate.findFirst({
+    where: { id: input.templateId, tenantId },
+  });
+  if (!template) throw ApiError.badRequest('That template is not in this workspace');
+  if (template.status !== 'APPROVED') {
+    throw ApiError.badRequest(
+      `The template "${template.name}" is ${template.status.toLowerCase()}. `
+      + 'Meta only delivers approved templates.',
+    );
+  }
+
+  const unfilled = missingVariables(template.variables, input.variableValues);
+  if (unfilled.length > 0) {
+    throw ApiError.badRequest(
+      `Fill every placeholder before testing: ${unfilled.map((v) => `{{${v}}}`).join(', ')}.`,
+    );
+  }
+
+  const needsMediaHeader = MEDIA_HEADERS.includes(template.headerFormat);
+  if (needsMediaHeader && !input.headerMediaId) {
+    throw ApiError.badRequest(
+      `That template has a ${template.headerFormat.toLowerCase()} header, so it needs a `
+      + `${template.headerFormat.toLowerCase()} attached before it can be tested.`,
+    );
+  }
+
+  const channel = await prisma.whatsappAccount.findFirst({ where: { tenantId } });
+  if (!channel) throw ApiError.badRequest('No WhatsApp number is connected.');
+
+  /*
+   * If the test number belongs to a customer, their consent applies.
+   *
+   * Calling it a test does not make it a different message: the person receives a marketing
+   * template on WhatsApp either way. Without this, "send a test" would be the one path in
+   * the module that reaches somebody who replied STOP — and the whole module is arranged
+   * around that never happening.
+   */
+  const customer = await prisma.customer.findFirst({
+    where: { tenantId, waId: input.to },
+  });
+  if (customer && !mayReceiveMarketing(customer)) {
+    throw ApiError.badRequest(
+      'That number belongs to a customer who has not opted in to marketing, or who replied '
+      + 'STOP. Test with a number of your own instead.',
+    );
+  }
+
+  // A matching customer also makes the test truthful: `{{1}}` bound to the customer name
+  // renders theirs rather than the fallback, which is the version worth checking.
+  const params = resolveVariables(template.variables, input.variableValues, customer);
+
+  const headerMedia = input.headerMediaId && needsMediaHeader
+    ? await (async () => {
+      const asset = await prisma.mediaAsset.findFirst({
+        where: { id: input.headerMediaId!, tenantId },
+      });
+      if (!asset) throw ApiError.badRequest('That attachment is not in this workspace');
+      return { kind: asset.kind, link: publicUrlFor(asset), filename: asset.originalName };
+    })()
+    : undefined;
+
+  try {
+    const sent = await whatsappProviderFor(channel).sendTemplate({
+      to: input.to,
+      templateName: template.metaTemplate,
+      language: template.language,
+      params,
+      headerMedia,
+    });
+    logger.info('Campaign test message sent', { tenantId, templateId: template.id });
+    return {
+      to: input.to,
+      body: renderBody(template.bodyPreview, params),
+      messageId: sent.messageId,
+    };
+  } catch (err) {
+    // The entire point of a test is to read Meta's objection, so it is surfaced rather than
+    // swallowed into a 500.
+    throw metaFailure(err) ?? err;
+  }
 };
 
 /** The open conversation for this customer, or a new one to hang the send on. */

@@ -10,6 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { TemplatePreview, type TemplateButton } from '@/components/campaigns/TemplatePreview';
+import {
+  VariableFields, missingVariables, previewParams, renderBody, type VariableValues,
+} from '@/components/campaigns/VariableFields';
+import { TestSend } from '@/components/campaigns/TestSend';
 import { useCustomerLists } from '@/lib/customer-lists';
 import { needsMedia, type TemplateHeaderFormat } from '@/lib/media';
 
@@ -50,6 +54,7 @@ export default function CampaignNew() {
 
   const [name, setName] = useState('');
   const [templateId, setTemplateId] = useState('');
+  const [variableValues, setVariableValues] = useState<VariableValues>({});
   /** Preselected when arriving from a list's Broadcast button. */
   const [listIds, setListIds] = useState<string[]>(() => {
     const fromUrl = params.get('listId');
@@ -95,7 +100,7 @@ export default function CampaignNew() {
 
   const save = useMutation({
     mutationFn: async () => (await api.post<{ data: { id: string } }>('/campaigns', {
-      name, templateId, audienceFilter,
+      name, templateId, audienceFilter, variableValues,
     })).data.data,
     onSuccess: () => {
       toast.success('Campaign created as a draft');
@@ -104,7 +109,28 @@ export default function CampaignNew() {
     },
   });
 
-  const canSave = !!name.trim() && !!templateId && !save.isPending;
+  /*
+   * A draft with an unfilled placeholder cannot be created.
+   *
+   * The server refuses to *start* one either, but stopping it here means the operator finds
+   * out while they are still looking at the field, rather than on the campaign screen a day
+   * later when they press send.
+   */
+  const unfilled = template ? missingVariables(template.variables, variableValues) : [];
+  const variablesReady = unfilled.length === 0;
+  const canSave = !!name.trim() && !!templateId && variablesReady && !save.isPending;
+
+  // The body as the customer will read it, with per-recipient fields shown as bracketed
+  // labels — see `previewParams`.
+  const previewTemplate = template
+    ? {
+      ...template,
+      bodyPreview: renderBody(
+        template.bodyPreview,
+        previewParams(template.variables, variableValues),
+      ),
+    }
+    : null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -150,7 +176,12 @@ export default function CampaignNew() {
               id="c-template"
               value={templateId}
               className="h-10 w-full rounded-md border border-ink-400 bg-surface-1 px-2 text-sm text-ink-900"
-              onChange={(e) => setTemplateId(e.target.value)}
+              onChange={(e) => {
+                setTemplateId(e.target.value);
+                // Values belong to the template they were typed for. Carrying "Diwali" over
+                // to a template whose {{1}} is a name would quietly send the wrong word.
+                setVariableValues({});
+              }}
             >
               <option value="">Choose a template…</option>
               {(templates.data ?? []).map((t) => (
@@ -185,6 +216,14 @@ export default function CampaignNew() {
           </div>
 
           {template && (
+            <VariableFields
+              variables={template.variables}
+              values={variableValues}
+              onChange={setVariableValues}
+            />
+          )}
+
+          {template && previewTemplate && (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={template.status === 'APPROVED' ? 'default' : 'secondary'}>
@@ -198,7 +237,13 @@ export default function CampaignNew() {
                 )}
               </div>
 
-              <TemplatePreview template={template} />
+              <TemplatePreview template={previewTemplate} />
+
+              {template.variables.length > 0 && (
+                <p className="text-caption text-muted-foreground">
+                  Anything in [brackets] is filled in per recipient.
+                </p>
+              )}
 
               {!template.syncedAt && (
                 <p className="text-caption text-muted-foreground">
@@ -207,6 +252,14 @@ export default function CampaignNew() {
                 </p>
               )}
             </div>
+          )}
+
+          {template && (
+            <TestSend
+              templateId={template.id}
+              variableValues={variableValues}
+              ready={variablesReady}
+            />
           )}
 
           <div className="space-y-1">
@@ -259,6 +312,12 @@ export default function CampaignNew() {
           )}
         </CardContent>
       </Card>
+
+      {unfilled.length > 0 && (
+        <p className="text-right text-caption text-muted-foreground">
+          Fill {unfilled.map((v) => `{{${v}}}`).join(', ')} before creating the draft.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button variant="outline" onClick={() => nav('/campaigns')}>Cancel</Button>
