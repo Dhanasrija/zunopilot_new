@@ -16,12 +16,17 @@ import { logger } from '../../config/logger.js';
  * run this project without an AWS account, and the alternative to *that* is a disk write on a
  * server whose release directory is replaced on every deploy.
  *
- * **The choice is made once, at boot, and production has no fallback.** If `S3_BUCKET` is
- * unset in production the process refuses to start. Quietly writing to disk instead is exactly
- * the failure this codebase has had five separate times: an absent environment variable that
- * reads as a working configuration, discovered weeks later when the files are gone. A server
- * that will not start is a loud, immediate, five-minute problem; a server that silently stores
- * customer photographs in a directory the next deploy deletes is not.
+ * **Production has no disk fallback.** With `S3_BUCKET` unset in production, every operation
+ * here throws. Quietly writing to disk instead is exactly the failure this codebase has had
+ * five separate times: an absent environment variable that reads as a working configuration,
+ * discovered weeks later when the files are gone.
+ *
+ * **What it does NOT do is stop the server.** It used to: `assertStorageConfigured` threw at
+ * boot and `server.ts` called `process.exit(1)`. That was disproportionate and it cost an
+ * outage — a missing storage variable took down messaging, billing and the console, the health
+ * gate failed, and the deploy rolled back. The blast radius should match the thing that is
+ * broken. So the API starts, says loudly and repeatedly that media is unconfigured, and
+ * refuses the media operations alone. Everything that does not touch a file carries on.
  */
 
 const BUCKET = process.env.S3_BUCKET?.trim() || null;
@@ -39,23 +44,54 @@ const MEDIA_DIR = resolve(
     : join(process.cwd(), '.media')),
 );
 
-/**
- * Fail at boot rather than at the first photograph.
- *
- * Called from the startup checks. The message names the variable and the consequence, because
- * the person reading it at 2am is not the person who wrote this.
- */
-export const assertStorageConfigured = (): void => {
-  if (process.env.NODE_ENV === 'production' && !BUCKET) {
-    throw new Error(
-      'S3_BUCKET is not set. Media would be written to the release directory, which the next '
-      + 'deploy replaces — every customer photograph and campaign attachment would be lost with '
-      + 'it. Set S3_BUCKET (and AWS_REGION) in the environment. See deploy/S3_SETUP.md.',
+/** Thrown by every operation when production has nowhere safe to put a file. */
+export class StorageUnconfiguredError extends Error {
+  readonly isStorageUnconfigured = true;
+
+  constructor() {
+    // The message names the variable and the consequence, because the person reading it at 2am
+    // is not the person who wrote this.
+    super(
+      'S3_BUCKET is not set, so there is nowhere to store files. Writing them to the release '
+      + 'directory is not an option — the next deploy replaces it, and every customer '
+      + 'photograph and campaign attachment would go with it. Set S3_BUCKET (and AWS_REGION) '
+      + 'in the environment. See deploy/S3_SETUP.md.',
     );
   }
+}
+
+/** Why media is unavailable, or null when it is fine. */
+export const storageUnavailable = (): StorageUnconfiguredError | null =>
+  (process.env.NODE_ENV === 'production' && !BUCKET ? new StorageUnconfiguredError() : null);
+
+const requireStorage = (): void => {
+  const problem = storageUnavailable();
+  if (problem) throw problem;
 };
 
-export const storageBackend = (): 'S3' | 'DISK' => (BUCKET ? 'S3' : 'DISK');
+/**
+ * Say so at boot, without refusing to boot.
+ *
+ * Returns whether media works, so the caller can decide how loud to be. It is deliberately not
+ * fatal — see the note at the top of this file.
+ */
+export const reportStorageAtBoot = (): boolean => {
+  const problem = storageUnavailable();
+  if (problem) {
+    logger.error(
+      `${problem.message} The API is starting anyway; everything except files will work, and `
+      + 'every attempt to send or store one will be refused until this is set.',
+    );
+    return false;
+  }
+  logger.info('Media storage', { backend: storageBackend() });
+  return true;
+};
+
+export const storageBackend = (): 'S3' | 'DISK' | 'UNCONFIGURED' => {
+  if (BUCKET) return 'S3';
+  return process.env.NODE_ENV === 'production' ? 'UNCONFIGURED' : 'DISK';
+};
 
 /**
  * One client for the process.
@@ -104,6 +140,7 @@ const diskPath = (key: string): string | null => {
 };
 
 export const putObject = async (key: string, body: Buffer, contentType: string): Promise<void> => {
+  requireStorage();
   if (!BUCKET) {
     const path = diskPath(key);
     if (!path) throw new Error(`Refusing to write outside the media directory: ${key}`);
@@ -130,6 +167,10 @@ export const putObject = async (key: string, body: Buffer, contentType: string):
  * are the same thing to a caller, and both mean 404.
  */
 export const getObjectStream = async (key: string): Promise<Readable | null> => {
+  // Throws rather than returning null: "unconfigured" and "this file does not exist" are very
+  // different problems, and collapsing them would show an operator a missing-file message when
+  // the truth is that nothing was ever stored.
+  requireStorage();
   if (!BUCKET) {
     const path = diskPath(key);
     if (!path) return null;
@@ -154,6 +195,7 @@ export const getObjectStream = async (key: string): Promise<Readable | null> => 
 
 /** For the rare caller that needs the whole thing in memory. */
 export const getObjectBuffer = async (key: string): Promise<Buffer | null> => {
+  requireStorage();
   if (!BUCKET) {
     const path = diskPath(key);
     if (!path) return null;
@@ -175,6 +217,9 @@ export const getObjectBuffer = async (key: string): Promise<Buffer | null> => {
  * succeeded from the user's point of view.
  */
 export const deleteObject = async (key: string): Promise<void> => {
+  // No `requireStorage()`, and not an oversight: this one never throws by contract, and with
+  // nowhere configured nothing was ever stored, so there is nothing to remove.
+  if (storageUnavailable()) return;
   if (!BUCKET) {
     const path = diskPath(key);
     if (path) await unlink(path).catch(() => {});

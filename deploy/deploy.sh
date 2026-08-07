@@ -24,7 +24,10 @@ HOST="${DEPLOY_HOST:?DEPLOY_HOST is not set}"
 USER="${DEPLOY_USER:?DEPLOY_USER is not set}"
 REL="${BITBUCKET_COMMIT:?BITBUCKET_COMMIT is not set}"
 DEPS="$(cat deps.sha)"
-ROOT=/srv/zunopilot
+# Overridable for one reason: `deploy/rollback.test.sh` points it at a temp directory so it can
+# run this script for real against a fake box. Nothing in bitbucket-pipelines.yml sets it, so
+# production always gets the default.
+ROOT="${DEPLOY_ROOT:-/srv/zunopilot}"
 # Content-addressed runtime trees: DEPS_ROOT/<hash>/node_modules/. The `node_modules` level is
 # load-bearing, not cosmetic — see step 3.
 DEPS_ROOT="${ROOT}/shared/deps"
@@ -132,18 +135,33 @@ say "5/9  carrying previous assets forward"
 say "6/9  prisma migrate deploy"
 "${SSH[@]}" "cd ${ROOT}/backend/releases/${REL} && ./node_modules/.bin/prisma migrate deploy"
 
+# Where each pointer was, so a failed deploy can put ALL of them back.
+#
+# **Captured per app, and reverted per app.** This used to record only the backend, so a health
+# failure rolled the API back and left the new frontend live — production served a UI built
+# against an API one release behind it. That happened: the Inbox offered a control whose
+# endpoint did not exist yet, and the failure surfaced to an operator as a nonsense error from
+# a route that was never going to answer. A partial rollback is a state nobody tested.
+#
 # `test -L` first. `readlink -f` on a path that does not exist still PRINTS that path, so on
 # the very first deploy this came back as `/srv/zunopilot/backend/current` — its own location.
 # The revert below then pointed `current` at itself, and every command after it died with
 # ELOOP: "Too many levels of symbolic links". A rollback that wedges the release pointer is
 # worse than no rollback at all.
-PREV="$("${SSH[@]}" "test -L ${ROOT}/backend/current && readlink -f ${ROOT}/backend/current || true")"
+APPS='frontend ops backend'
+PREV_OF="$("${SSH[@]}" "for app in ${APPS}; do
+  if [ -L ${ROOT}/\$app/current ]; then
+    printf '%s %s\\n' \$app \$(readlink -f ${ROOT}/\$app/current)
+  else
+    printf '%s -\\n' \$app
+  fi
+done")"
 
 # `mv -Tf` is rename(2) and atomic. `ln -sfn` over an existing symlink is unlink-then-symlink,
 # which leaves a window where `current` does not exist — nginx 404s into it.
 say "7/9  atomic swap"
 "${SSH[@]}" "set -e
-  for app in frontend ops backend; do
+  for app in ${APPS}; do
     ln -sfn ${ROOT}/\$app/releases/${REL} ${ROOT}/\$app/current.new
     mv -Tf  ${ROOT}/\$app/current.new     ${ROOT}/\$app/current
   done"
@@ -179,17 +197,35 @@ if ! "${SSH[@]}" "
   echo
   echo "UNHEALTHY after 80s"
   echo "NOTE: the migration is NOT reverted. Additive migrations are safe to leave applied."
-  # Belt as well as braces: never point `current` at the release that just failed, and never
-  # at itself. On a first deploy there is simply nothing to go back to — say so and leave the
-  # pointer alone rather than inventing a target.
-  if [ -z "${PREV}" ] || [ "${PREV}" = "${ROOT}/backend/releases/${REL}" ] \
-     || [ "${PREV}" = "${ROOT}/backend/current" ]; then
-    echo "No previous release to revert to. Leaving current where it is; fix forward."
-  else
+
+  # Every pointer goes back, or the ones that can. Belt as well as braces on each: never point
+  # `current` at the release that just failed, and never at itself. On a first deploy there is
+  # simply nothing to go back to — say so and leave that pointer alone rather than inventing a
+  # target for it.
+  reverted_backend=0
+  while read -r app prev; do
+    [ -n "${app}" ] || continue
+    if [ "${prev}" = '-' ] || [ -z "${prev}" ] \
+       || [ "${prev}" = "${ROOT}/${app}/releases/${REL}" ] \
+       || [ "${prev}" = "${ROOT}/${app}/current" ]; then
+      echo "  ${app}: nothing to revert to — leaving it; fix forward."
+      continue
+    fi
     "${SSH[@]}" "set -e
-      ln -sfn ${PREV} ${ROOT}/backend/current.new
-      mv -Tf  ${ROOT}/backend/current.new ${ROOT}/backend/current
-      cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env ${PM2_ONLY}"
+      ln -sfn ${prev} ${ROOT}/${app}/current.new
+      mv -Tf  ${ROOT}/${app}/current.new ${ROOT}/${app}/current"
+    echo "  ${app}: reverted to $(basename "${prev}")"
+    # An `if`, not `[ … ] && reverted_backend=1`. Under `set -e` that one-liner returns
+    # non-zero on every app that is not the backend, and as the last command in the loop body
+    # it would abort the script mid-rollback — leaving exactly the half-reverted state this
+    # loop exists to prevent.
+    if [ "${app}" = backend ]; then reverted_backend=1; fi
+  done <<< "${PREV_OF}"
+
+  # One restart, after every symlink is back — restarting mid-loop would run the old API
+  # against whatever the other pointers happened to be at that moment.
+  if [ "${reverted_backend}" = 1 ]; then
+    "${SSH[@]}" "cd ${ROOT}/backend/current && pm2 startOrReload ecosystem.config.cjs --update-env ${PM2_ONLY}"
   fi
   "${SSH[@]}" "pm2 logs --nostream --lines 40 --raw ${ONLY}" || true
   exit 1

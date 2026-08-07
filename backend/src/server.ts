@@ -2,7 +2,7 @@ import { buildApp } from './app.js';
 import { env, jwtSecretWeakness } from './config/env.js';
 import { logger } from './config/logger.js';
 import { prisma } from './config/prisma.js';
-import { assertStorageConfigured, storageBackend } from './modules/media/storage.js';
+import { reportStorageAtBoot } from './modules/media/storage.js';
 import { startResumeWorker, stopResumeWorker } from './services/workflow-engine/resume-worker.js';
 import { startWorkers } from './modules/conversation-engine/jobs/workers.js';
 import { stopQueue } from './modules/conversation-engine/jobs/queue.js';
@@ -25,21 +25,20 @@ if (weakness) {
 }
 
 /*
- * Where media goes, checked before anything can write one.
+ * Where media goes — reported at boot, but **not** a reason to refuse to boot.
  *
- * Same reasoning as the secret above. A production server with no `S3_BUCKET` would happily
- * write customer photographs into the release directory — which the next deploy replaces — and
- * nothing would look wrong until somebody opened a conversation from last week and the image
- * was gone. Refusing to start turns a silent, delayed data loss into a five-minute
- * configuration fix.
+ * Unlike the secret above, this one does not `process.exit(1)`, and that is a correction. It
+ * used to: a production server with no `S3_BUCKET` would have written customer photographs
+ * into the release directory that the next deploy replaces, so exiting looked like the
+ * cautious choice. It was not. The variable went missing once and took down messaging,
+ * billing and the console with it — the health gate failed, the deploy rolled back, and the
+ * blast radius of a file-storage setting was the entire product.
+ *
+ * The data is still protected: `storage.ts` refuses every read and write rather than falling
+ * back to disk, so nothing is quietly lost. What changed is that the refusal is scoped to the
+ * thing that is broken.
  */
-try {
-  assertStorageConfigured();
-  logger.info('Media storage', { backend: storageBackend() });
-} catch (err) {
-  logger.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-}
+reportStorageAtBoot();
 
 const app = buildApp();
 
