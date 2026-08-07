@@ -496,7 +496,7 @@ export default function Billing() {
             {invoices.length === 0 ? (
               <p className="px-6 pb-6 text-sm text-muted-foreground">No invoices yet.</p>
             ) : (
-              <table className="w-full text-sm">
+              <table className="table-stack w-full text-sm">
                 <thead className="border-y bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 font-medium">Invoice</th>
@@ -509,15 +509,15 @@ export default function Billing() {
                 <tbody>
                   {invoices.map((invoice) => (
                     <tr key={invoice.id} className="border-b last:border-0">
-                      <td className="px-4 py-2 font-mono text-caption">{invoice.number}</td>
-                      <td className="px-4 py-2">
+                      <td data-label="Invoice" className="px-4 py-2 font-mono text-caption">{invoice.number}</td>
+                      <td data-label="Plan" className="px-4 py-2">
                         {invoice.planName}
                         <span className="text-muted-foreground"> · {invoice.intervalLabel}</span>
                       </td>
-                      <td className="px-4 py-2 text-caption text-muted-foreground">
+                      <td data-label="Period" className="px-4 py-2 text-caption text-muted-foreground">
                         {formatDateTime(invoice.periodStart)} – {formatDateTime(invoice.periodEnd)}
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums">
+                      <td data-label="Amount" className="px-4 py-2 text-right tabular-nums">
                         {formatRupees(invoice.totalPaise, { decimals: true })}
                       </td>
                       <td className="px-4 py-2 text-right">

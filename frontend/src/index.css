@@ -166,3 +166,85 @@
 .animate-marquee:hover {
   animation-play-state: paused;
 }
+
+/*
+ * Tables that become a list of cards on a phone.
+ *
+ * A six-column table cannot fit 375px. `w-full` does not save it either — a table's
+ * min-content width always wins, so the table overflows its parent and, with nothing to
+ * catch it, pushes the whole document sideways. The visible symptom is not a scrolling
+ * table: it is the entire page, header and nav included, sliding under the thumb.
+ *
+ * Horizontal scroll inside the card would stop that, but it is a poor read on a phone —
+ * you cannot see a row and its column headings at the same time. So below `sm` each row
+ * becomes its own card and each cell carries its heading with it, taken from the
+ * `label` prop on TableCell via `data-label`.
+ *
+ * Kept here rather than as `max-sm:` variants in the component: the rule set needs a
+ * pseudo-element and six coordinated display changes, and that is unreadable spelled out
+ * as arbitrary variants on a className.
+ */
+@media (max-width: 639px) {
+  .table-stack,
+  .table-stack thead,
+  .table-stack tbody,
+  .table-stack tr,
+  .table-stack td {
+    display: block;
+  }
+
+  /* The headings move into the cells, so the header row has nothing left to say. */
+  .table-stack thead {
+    display: none;
+  }
+
+  .table-stack tr {
+    @apply mb-3 rounded-md border border-ink-300 bg-surface-1 p-4;
+  }
+
+  .table-stack tr:last-child {
+    @apply mb-0;
+  }
+
+  /*
+   * Label left, value right — the shape people already read in a receipt.
+   *
+   * Grid rather than flex, because cells are not all single values. The member cell holds
+   * a name and a contact line; the dashboard's customer cell adds an avatar. Under flex
+   * those children become siblings of the label and spread out along the row, which put
+   * the email hard against the screen edge. Pinning the label to row 1 / column 1 and
+   * sending every child to column 2 lets a composite cell stack its own lines on the right
+   * while the label stays put beside the first of them.
+   */
+  .table-stack td {
+    @apply grid items-baseline gap-x-4 border-0 px-0 py-1 text-right;
+    grid-template-columns: max-content 1fr;
+  }
+
+  .table-stack td::before {
+    content: attr(data-label);
+    @apply eyebrow text-left text-ink-500;
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .table-stack td > * {
+    grid-column: 2;
+  }
+
+  /*
+   * A cell with no heading spans the card instead of pairing label-to-value.
+   *
+   * `block`, not a flex alignment: these cells already say where they want their content
+   * — an actions column carries `text-right`, a colSpan empty state carries `text-center`
+   * — and forcing `justify-end` here would quietly override both. Staying block lets the
+   * cell's own class win, which is the only way one rule serves both.
+   */
+  .table-stack td:not([data-label]) {
+    @apply block pt-3;
+  }
+
+  .table-stack td:not([data-label])::before {
+    content: none;
+  }
+}

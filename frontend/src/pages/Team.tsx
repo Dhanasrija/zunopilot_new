@@ -162,7 +162,7 @@ export default function Team() {
           {isLoading ? (
             <p className="p-6 text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 font-medium">Member</th>
@@ -187,7 +187,7 @@ export default function Team() {
 
                   return (
                     <tr key={member.id} className={cn('border-b last:border-0', !member.isActive && 'opacity-50')}>
-                      <td className="px-4 py-3">
+                      <td data-label="Member" className="px-4 py-3">
                         <div className="flex items-center gap-1 font-medium">
                           {member.fullName}
                           {member.isYou && (
@@ -204,7 +204,7 @@ export default function Team() {
                             .filter(Boolean).join(' · ') || 'No sign-in details'}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td data-label="Role" className="px-4 py-3">
                         {manage && !lockedRole ? (
                           <Select
                             value={member.roleId ?? ''}
@@ -223,8 +223,8 @@ export default function Team() {
                           </Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{member.openConversations}</td>
-                      <td className="px-4 py-3 text-caption text-muted-foreground">
+                      <td data-label="Open chats" className="px-4 py-3 text-muted-foreground">{member.openConversations}</td>
+                      <td data-label="Joined" className="px-4 py-3 text-caption text-muted-foreground">
                         {formatDateTime(member.createdAt)}
                       </td>
                       {manage && (
