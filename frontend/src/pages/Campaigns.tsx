@@ -314,35 +314,14 @@ export default function Campaigns() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-body">Templates ({(templates.data ?? []).length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {(templates.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              None yet. A campaign can only be sent with a template Meta has approved.
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {(templates.data ?? []).map((template) => (
-                <li key={template.id} className="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{template.name}</span>
-                      <Badge variant={template.status === 'APPROVED' ? 'secondary' : 'outline'}>
-                        {template.status.toLowerCase()}
-                      </Badge>
-                    </div>
-                    <p className="mt-px text-caption text-muted-foreground">{template.bodyPreview}</p>
-                    <p className="font-mono text-caption text-muted-foreground">{template.metaTemplate}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {/*
+        There used to be a read-only "Templates (n)" card here, listing every template under
+        the campaigns. It was removed: nothing on it could be clicked, the composer already
+        shows each template with a full preview at the moment you choose one, and it pushed
+        the thing this page is actually about — the campaigns — up above the fold and out of
+        sight. "Add a template" is still in the header, and the query behind it still feeds the
+        empty state below.
+      */}
 
       <NewTemplateDialog
         open={newTemplate}
