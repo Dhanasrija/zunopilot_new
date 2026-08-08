@@ -7,6 +7,10 @@ import { ApiError } from '../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../middleware/auth.js';
 import { ROLE_DESCRIPTIONS, permissionsFor } from '../config/permissions.js';
 import { assertCanAddTeamMember } from '../modules/billing/limits.js';
+// `NO_ADMIN_LEFT` is deliberately not used here. This screen's refusal is about one named
+// person — "This is the only person who can manage the team" — while the role editor's is about
+// an edit to a role. Same guard, different sentence, because the reader's next move differs.
+import { activeAdminCount } from '../services/membership.service.js';
 
 // Team management.
 //
@@ -95,29 +99,9 @@ const deactivateMember = (tenantId: string, userId: string) => prisma.$transacti
   }),
 ]);
 
-/**
- * How many active people can still administer the workspace, ignoring one user.
- *
- * Asks about **permissions**, not the legacy enum: with custom roles "owner" is no
- * longer a fixed thing, and the property that actually matters is whether anybody
- * left can reach the team screen. An owner role counts implicitly.
- */
-const activeAdminCount = async (tenantId: string, excludingUserId?: string) => {
-  const adminRoles = await prisma.role.findMany({
-    where: { tenantId, OR: [{ isOwner: true }, { permissions: { has: 'team:manage' } }] },
-    select: { id: true },
-  });
-  if (adminRoles.length === 0) return 0;
-
-  return prisma.user.count({
-    where: {
-      tenantId,
-      isActive: true,
-      roleId: { in: adminRoles.map((r) => r.id) },
-      ...(excludingUserId ? { id: { not: excludingUserId } } : {}),
-    },
-  });
-};
+// `activeAdminCount` used to live here, in a near-identical copy of the one in
+// `role.controller`. Both now come from `membership.service`, so "who can still administer this
+// workspace" has one answer — and it keeps having one when membership moves off `User`.
 
 export const listTeam = asyncHandler(async (req, res) => {
   const members = await prisma.user.findMany({
@@ -225,7 +209,7 @@ export const updateMember = asyncHandler(async (req, res) => {
     || (nextRole !== null && !nextRole.isOwner && !nextRole.permissions.includes('team:manage'))
   );
 
-  if (wouldStopAdministering && (await activeAdminCount(tenantId, member.id)) === 0) {
+  if (wouldStopAdministering && (await activeAdminCount(tenantId, { excludingUserId: member.id })) === 0) {
     throw ApiError.badRequest(
       'This is the only person who can manage the team. Give someone else a role that '
       + 'can, first.',
@@ -289,7 +273,7 @@ export const removeMember = asyncHandler(async (req, res) => {
   const administers = member.assignedRole?.isOwner
     || member.assignedRole?.permissions.includes('team:manage')
     || false;
-  if (administers && (await activeAdminCount(tenantId, member.id)) === 0) {
+  if (administers && (await activeAdminCount(tenantId, { excludingUserId: member.id })) === 0) {
     throw ApiError.badRequest(
       'This is the only person who can manage the team. Give someone else a role that can, first.',
     );

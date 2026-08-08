@@ -8,6 +8,7 @@ import { ApiError } from '../../utils/ApiError.js';
 import { whatsappProviderFor } from '../conversation-engine/providers/whatsapp.js';
 import { metaFailureMessage } from '../../services/meta-error.js';
 import { recordOutboundMessage } from '../conversation-engine/providers/mirror.js';
+import { requireActiveMember } from '../../services/membership.service.js';
 
 // Support tickets.
 //
@@ -138,13 +139,7 @@ export const raiseTicket = async (
     if (!customer) throw ApiError.badRequest('That customer is not in this workspace');
   }
 
-  if (input.assigneeId) {
-    const assignee = await prisma.user.findFirst({
-      where: { id: input.assigneeId, tenantId, isActive: true },
-      select: { id: true },
-    });
-    if (!assignee) throw ApiError.badRequest('That person is not an active member of this workspace');
-  }
+  if (input.assigneeId) await requireActiveMember(tenantId, input.assigneeId);
 
   // Retried, because "read the highest sequence then insert" is a read-modify-write
   // and Postgres' default isolation lets concurrent raises read the same value.
@@ -262,12 +257,7 @@ export const assignTicket = async (
 
   let name = 'nobody';
   if (assigneeId) {
-    const assignee = await prisma.user.findFirst({
-      where: { id: assigneeId, tenantId, isActive: true },
-      select: { fullName: true },
-    });
-    if (!assignee) throw ApiError.badRequest('That person is not an active member of this workspace');
-    name = assignee.fullName;
+    name = (await requireActiveMember(tenantId, assigneeId)).fullName;
   }
 
   return prisma.$transaction(async (tx) => {

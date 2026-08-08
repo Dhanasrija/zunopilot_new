@@ -21,10 +21,19 @@ import { seedDefaultRoles } from '../services/role.service.js';
  */
 
 const TENANT = '66666666-6666-6666-6666-66666666a001';
+/*
+ * A second workspace, with a fixed id and torn down by `wipe`.
+ *
+ * It used to be created inside the test that needed it and deleted on the line after the
+ * assertions — so the first time an assertion failed, the teardown never ran, the row leaked,
+ * and every later run died on a unique-phone collision instead of on the real failure. Fixture
+ * state has to be cleaned by something that runs whether the test passed or not.
+ */
+const OUTSIDE = '66666666-6666-6666-6666-66666666a002';
 const app = buildApp();
 
 const wipe = async () => {
-  await prisma.tenant.deleteMany({ where: { id: TENANT } });
+  await prisma.tenant.deleteMany({ where: { id: { in: [TENANT, OUTSIDE] } } });
 };
 
 /** A workspace, a conversation already assigned to one agent, and three people. */
@@ -170,17 +179,18 @@ describe('taking a conversation off a colleague', () => {
   it('refuses an agent from another workspace', async () => {
     // Tenant scoping on the assignee, not just on the conversation — assigning to a stranger
     // would park a live customer where nobody in this workspace can see them.
-    const other = await prisma.tenant.create({
-      data: { businessName: 'Elsewhere', category: 'RESTAURANT' },
+    await prisma.tenant.create({
+      data: { id: OUTSIDE, businessName: 'Elsewhere', category: 'RESTAURANT' },
     });
     const outsider = await prisma.user.create({
-      data: { tenantId: other.id, phone: '15557770009', fullName: 'Outsider', role: 'OWNER' },
+      data: { tenantId: OUTSIDE, phone: '15557770009', fullName: 'Outsider', role: 'OWNER' },
     });
 
     const res = await assign(ctx.leadToken, outsider.id).expect(400);
-    expect(res.body.message).toMatch(/agent/i);
+    // The shared sentence from `requireActiveMember`. This assertion used to match `/agent/i`,
+    // against the old `'Invalid agent'` — which named a request field rather than the problem and
+    // told the reader nothing to act on. Leads and tickets already said this.
+    expect(res.body.message).toMatch(/not an active member of this workspace/i);
     expect(await assigneeOf()).toBe(ctx.holder.id);
-
-    await prisma.tenant.deleteMany({ where: { id: other.id } });
   });
 });

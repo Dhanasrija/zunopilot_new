@@ -23,6 +23,7 @@ import { issueInvoiceForPayment } from './invoice.service.js';
 import {
   GST_RATE_PERCENT, GST_STATES, grossPaise, isGstin, sellerTaxIdentity, stateCodeOfGstin,
 } from './gst.js';
+import { countSeats } from '../../services/membership.service.js';
 
 // Billing endpoints.
 //
@@ -159,7 +160,8 @@ export const getSubscription = asyncHandler(async (req: Request, res: Response) 
       },
     }),
     Promise.all([
-      prisma.user.count({ where: { tenantId, isActive: true } }),
+      // Shared with `assertCanAddTeamMember`, so what is shown and what is enforced cannot drift.
+      countSeats(tenantId),
       prisma.whatsappAccount.count({ where: { tenantId } }),
       prisma.workflow.count({ where: { tenantId, status: 'PUBLISHED' } }),
     ]),

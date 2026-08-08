@@ -8,6 +8,7 @@ import { holds, tenantIdOf, userOf } from '../middleware/auth.js';
 import {
   PERMISSIONS, PERMISSION_GROUPS, isPermission, type Permission,
 } from '../config/permissions.js';
+import { NO_ADMIN_LEFT, activeAdminCount } from '../services/membership.service.js';
 
 // Roles a workspace defines for itself.
 //
@@ -100,26 +101,12 @@ const assertStillAdministrable = async (
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   tenantId: string,
 ) => {
-  // Two explicit queries rather than a relation filter: which roles confer
-  // administration is a question about roles, and asking it separately keeps the
-  // implicit "owner holds everything" rule in one readable place.
-  const adminRoles = await tx.role.findMany({
-    where: {
-      tenantId,
-      OR: [{ isOwner: true }, { permissions: { has: 'team:manage' } }],
-    },
-    select: { id: true },
-  });
-
-  const admins = adminRoles.length === 0 ? 0 : await tx.user.count({
-    where: { tenantId, isActive: true, roleId: { in: adminRoles.map((r) => r.id) } },
-  });
-
-  if (admins === 0) {
-    throw ApiError.badRequest(
-      'That would leave nobody able to manage the team. Give someone a role with '
-      + '"Add people, change their role, deactivate them" first.',
-    );
+  // `client: tx` is the load-bearing argument. This runs after the write, inside the same
+  // transaction, so it must see the state that *would result* — reading through `prisma` instead
+  // would see the pre-write state and the guard would pass on exactly the edit it exists to
+  // refuse.
+  if (await activeAdminCount(tenantId, { client: tx }) === 0) {
+    throw ApiError.badRequest(NO_ADMIN_LEFT);
   }
 };
 
