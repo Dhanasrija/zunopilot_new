@@ -8,6 +8,7 @@ import { logger } from '../../config/logger.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { adminOf, audit, signSuperAdminToken } from './auth.js';
+import { syncMembership } from '../../services/membership.service.js';
 import { dailyMessageCounts, tenantActivity } from './activity.js';
 import { entitlementsFor, usageFor } from '../billing/billing.service.js';
 import { OVERAGE, PLANS, planByCode } from '../billing/catalogue.js';
@@ -650,6 +651,17 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
     },
     select: { id: true, email: true, role: true, isActive: true },
   });
+
+  /*
+   * Mirror it onto the membership.
+   *
+   * This endpoint writes the *login* — `isActive` and the legacy `role` — with no notion of which
+   * workspace it means, which is coherent today because a user has exactly one. It stops being
+   * coherent under memberships, and splitting it is deliberately deferred to its own commit
+   * because it touches the operator console. Until then this keeps the two in step, so the split
+   * is a change of shape rather than a repair of drifted data.
+   */
+  await syncMembership(userId);
 
   await audit(req, {
     action: 'user.updated',

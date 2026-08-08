@@ -203,6 +203,27 @@ describe('verifying a code', () => {
     expect(user.role).toBe('OWNER');
     expect(user.passwordHash).toBeNull();
     expect(user.tenant.onboardingCompletedAt).toBeNull();
+
+    /*
+     * **And a membership for the founder, on the owner role.**
+     *
+     * The membership is what will decide which workspaces a login can reach. A signup that
+     * created the user and not the membership would produce an account that works today and can
+     * reach nothing at all the moment the switch flips — the worst failure available here.
+     *
+     * Asserted at this path rather than left to the whole-database invariant in
+     * `membership-backfill.integration.test.ts`: that file scans persistent rows, and this suite
+     * deletes its tenant in teardown, so an un-synced founder is gone before the scan. Removing
+     * the sync from signup left that invariant green.
+     */
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: user.id, tenantId: user.tenantId } },
+    });
+    expect(membership.isActive).toBe(true);
+    expect(membership.legacyRole).toBe('OWNER');
+    // Synced *after* the role attach, so it copies the seeded owner role rather than a null.
+    expect(membership.roleId).toBe(user.roleId);
+    expect(membership.roleId).not.toBeNull();
   });
 
   it('cannot be used twice', async () => {

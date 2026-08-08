@@ -122,3 +122,107 @@ export const NO_ADMIN_LEFT = 'That would leave nobody able to manage the team. G
  */
 export const countSeats = (tenantId: string, client: Client = prisma): Promise<number> =>
   client.user.count({ where: { tenantId, isActive: true } });
+
+// ── Keeping `Membership` in step with `User` ──────────────────────────────────
+//
+// **A transition state, and deliberately one-directional.** `User` is still the source of truth
+// for which workspace somebody is in and what they may do; `Membership` is written alongside it so
+// that by the time anything *reads* memberships, the table is already correct for every account —
+// including ones created after the backfill ran.
+//
+// The rule that makes this safe: `syncMembership` **derives** everything from the user row rather
+// than taking values from its caller. A call site cannot pass the wrong role or forget `isActive`,
+// because it does not pass them at all. The cost is one extra read on a handful of low-frequency
+// paths — signup, invite, a role change, a deactivation — which is the right trade for "the two
+// cannot disagree".
+
+/**
+ * Create or update this person's membership so it matches their user row.
+ *
+ * Idempotent, and safe to call after any write to a user. Call it **inside the same transaction**
+ * as that write where one exists, or a failure halfway leaves the two out of step — which is the
+ * whole thing this function is for.
+ *
+ * `invitedById` is the one value that cannot be derived, because `User` has nowhere to record who
+ * added somebody. It is only meaningful on the first write and is ignored afterwards.
+ */
+export const syncMembership = async (
+  userId: string,
+  { client = prisma, invitedById }: { client?: Client; invitedById?: string | null } = {},
+): Promise<void> => {
+  const user = await client.user.findUnique({
+    where: { id: userId },
+    select: { tenantId: true, roleId: true, role: true, isActive: true, createdAt: true },
+  });
+  // Not an error. A caller that deleted the user, or raced one, has nothing to sync — and this
+  // must never be the reason a write path fails.
+  if (!user) return;
+
+  const where = { userId_tenantId: { userId, tenantId: user.tenantId } };
+  const existing = await client.membership.findUnique({
+    where,
+    select: { id: true, isActive: true, revokedAt: true },
+  });
+
+  if (!existing) {
+    await client.membership.create({
+      data: {
+        userId,
+        tenantId: user.tenantId,
+        roleId: user.roleId,
+        legacyRole: user.role,
+        isActive: user.isActive,
+        // The account's own creation time, matching what the backfill did, so the team screen's
+        // ordering does not depend on whether a row came from the migration or from this path.
+        joinedAt: user.createdAt,
+        revokedAt: user.isActive ? null : new Date(),
+        invitedById: invitedById ?? null,
+      },
+    });
+    return;
+  }
+
+  await client.membership.update({
+    where,
+    data: {
+      roleId: user.roleId,
+      legacyRole: user.role,
+      isActive: user.isActive,
+      /*
+       * `revokedAt` marks *when they left*, so it moves only on a transition.
+       *
+       * Recomputing it on every sync would push the timestamp forward each time anything else
+       * about a revoked person changed — so "left in March" would silently become "left today",
+       * and the team screen would be confidently wrong about something nobody would think to
+       * check.
+       */
+      ...(user.isActive
+        ? { revokedAt: null }
+        : (existing.isActive || existing.revokedAt === null ? { revokedAt: new Date() } : {})),
+    },
+  });
+};
+
+/**
+ * Sync every member of one workspace.
+ *
+ * For the seeds, which build a whole tenant with users nested inside a single `tenant.create` and
+ * so have no convenient moment to sync each person individually. One call at the end is both
+ * shorter and harder to get wrong than threading a sync through each nested create — and it stays
+ * correct if a seed later adds another user.
+ *
+ * Also the shape a one-off repair would take, if a write path is ever found that forgot to sync.
+ */
+export const syncMembershipsForTenant = async (
+  tenantId: string,
+  client: Client = prisma,
+): Promise<number> => {
+  const users = await client.user.findMany({ where: { tenantId }, select: { id: true } });
+  for (const user of users) {
+    // Sequential on purpose. These are seeds and repairs, never a hot path, and each call does a
+    // read then a write — running them in parallel buys nothing and makes a failure harder to read.
+    // eslint-disable-next-line no-await-in-loop
+    await syncMembership(user.id, { client });
+  }
+  return users.length;
+};

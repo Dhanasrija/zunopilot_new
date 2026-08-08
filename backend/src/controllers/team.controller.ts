@@ -10,7 +10,7 @@ import { assertCanAddTeamMember } from '../modules/billing/limits.js';
 // `NO_ADMIN_LEFT` is deliberately not used here. This screen's refusal is about one named
 // person — "This is the only person who can manage the team" — while the role editor's is about
 // an edit to a role. Same guard, different sentence, because the reader's next move differs.
-import { activeAdminCount } from '../services/membership.service.js';
+import { activeAdminCount, syncMembership } from '../services/membership.service.js';
 
 // Team management.
 //
@@ -91,13 +91,17 @@ const updateSchema = z.object({
  *
  * Both routes now come through here, so the two cannot drift again.
  */
-const deactivateMember = (tenantId: string, userId: string) => prisma.$transaction([
-  prisma.user.update({ where: { id: userId }, data: { isActive: false } }),
-  prisma.conversation.updateMany({
+const deactivateMember = (tenantId: string, userId: string) => prisma.$transaction(async (tx) => {
+  await tx.user.update({ where: { id: userId }, data: { isActive: false } });
+  await tx.conversation.updateMany({
     where: { tenantId, assignedAgentId: userId, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
     data: { assignedAgentId: null },
-  }),
-]);
+  });
+  // Inside the transaction, so a failure cannot leave the user deactivated and the membership
+  // still active. An interactive transaction rather than the array form for exactly that reason —
+  // `syncMembership` reads the row it is mirroring.
+  await syncMembership(userId, { client: tx });
+});
 
 // `activeAdminCount` used to live here, in a near-identical copy of the one in
 // `role.controller`. Both now come from `membership.service`, so "who can still administer this
@@ -177,6 +181,9 @@ export const inviteMember = asyncHandler(async (req, res) => {
     select: memberSelect,
   });
 
+  // `invitedById` is the one thing a membership knows that `User` has nowhere to record.
+  await syncMembership(member.id, { invitedById: userOf(req).id });
+
   res.status(201).json({ success: true, data: member });
 });
 
@@ -246,6 +253,11 @@ export const updateMember = asyncHandler(async (req, res) => {
     },
     select: memberSelect,
   });
+
+  // Covers a role change and a reactivation. A deactivation already synced inside
+  // `deactivateMember`'s transaction; calling again is idempotent and cheaper than reasoning
+  // about which branch ran.
+  await syncMembership(member.id);
 
   res.json({ success: true, data: updated });
 });

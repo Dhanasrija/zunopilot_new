@@ -10,8 +10,8 @@ import { signToken } from '../utils/jwt.js';
 import {
   countryFromPhone, normalisePhone, requestOtp, verifyOtp,
 } from '../services/otp.service.js';
-import { DEFAULT_ROLE_NAMES, ownerRoleFor } from '../services/role.service.js';
-import { ROLE_PERMISSIONS } from '../config/permissions.js';
+import { ownerRoleFor } from '../services/role.service.js';
+import { syncMembership } from '../services/membership.service.js';
 
 // Customer authentication: phone plus a one-time code, and nothing else.
 //
@@ -198,17 +198,15 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
       // "My Business" — a blank field asks to be completed, a plausible-looking
       // default gets left alone and then appears on an invoice.
       businessName: '',
-      // The workspace's starting roles. Created with the tenant, because without
-      // them there is nothing to assign when the founder invites a colleague.
-      roles: {
-        create: (['OWNER', 'MANAGER', 'AGENT'] as const).map((key, index) => ({
-          name: DEFAULT_ROLE_NAMES[key],
-          permissions: [...ROLE_PERMISSIONS[key]],
-          isOwner: key === 'OWNER',
-          isSystem: true,
-          sortOrder: (index + 1) * 10,
-        })),
-      },
+      /*
+       * The workspace's starting roles.
+       *
+       * **Not seeded here any more.** This block used to re-implement `seedDefaultRoles` inline —
+       * the same three names, permissions and sort orders, written out a second time — so the next
+       * permission added to `ROLE_PERMISSIONS` would land in one place and not the other, and a
+       * workspace created by signup would differ from one repaired by the role service. Seeded
+       * just below instead, by the function that owns the question.
+       */
       users: {
         create: { phone, fullName: '', role: 'OWNER', country },
       },
@@ -221,8 +219,9 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
     include: { users: true },
   });
 
-  // Attach the founder to the owner role. Done after creation rather than nested,
-  // because the role ids only exist once the tenant is written.
+  // Seed the workspace's roles and attach the founder to the owner one. Done after creation
+  // rather than nested, because the role ids only exist once the tenant is written —
+  // `ownerRoleFor` seeds and then picks.
   const ownerRole = await ownerRoleFor(created.id);
   if (ownerRole) {
     await prisma.user.update({
@@ -230,6 +229,9 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
       data: { roleId: ownerRole.id },
     });
   }
+
+  // The founder's membership. After the role attach, so it copies the role rather than a null.
+  await syncMembership(created.users[0].id);
 
   const user = await prisma.user.findUniqueOrThrow({
     where: { id: created.users[0].id },

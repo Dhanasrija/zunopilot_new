@@ -21,17 +21,18 @@ import { prisma } from '../config/prisma.js';
  * would violate `Membership_userId_tenantId_key`, but a hand-edited variant might not, and
  * duplicate memberships would double every seat count in the product.
  *
- * ── The direction it deliberately does NOT assert, yet ───────────────────────
+ * ── The direction that only just became assertable ───────────────────────────
  *
- * "Every user has a membership" is **not checked here**, and that is not an oversight. Nothing in
- * the application writes memberships yet — that is the next commit — so a user created *after* the
- * migration legitimately has none, and this suite runs alongside twenty others that create users.
- * Asserting it now would make the file fail depending on which tests ran first.
+ * "Every user has a membership" was deliberately absent from the first version of this file: at
+ * that point nothing in the application wrote memberships, so a user created by any other suite
+ * legitimately had none, and asserting it would have made the file pass or fail on test ordering.
  *
- * So this file asserts the direction that *is* an invariant today: **every membership corresponds
- * correctly to its user.** The converse becomes true once every write path creates one, and the
- * assertion moves here then. Written down because a half-invariant that looks whole is worse than
- * a stated gap.
+ * It is here now, because every write path that creates or changes a user also syncs the
+ * membership — signup, invite, role change, deactivation, the operator console, and the seeds. So
+ * the converse holds too, and **that is the property C5 depends on**: the moment `requireAuth`
+ * reads memberships instead of `User.tenantId`, a user without one cannot sign in anywhere.
+ *
+ * It is also the test that will catch the *next* write path somebody adds and forgets to sync.
  */
 
 describe('every membership matches the user the backfill copied it from', () => {
@@ -128,19 +129,33 @@ describe('every membership matches the user the backfill copied it from', () => 
     expect(duplicated).toEqual([]);
   });
 
-  it('**is not vacuous: the backfill actually inserted rows**', async () => {
+  it('**no login is left without a membership**', async () => {
     /*
-     * Every check above is a "nothing is wrong" assertion, and all of them pass trivially against
-     * an empty table. So one positive claim: if there are users at all, the backfill produced
-     * memberships. It cannot be an equality — other suites create users while this one runs, and
-     * nothing writes memberships for them until the next commit.
+     * The property C5 depends on, and the one that could not be asserted until every write path
+     * synced. The failure it catches is the worst available: a person whose login works today and
+     * who, the moment `requireAuth` reads memberships instead of `User.tenantId`, belongs to no
+     * workspace and cannot sign in anywhere.
+     *
+     * It is also the test that catches the *next* write path somebody adds and forgets to sync —
+     * which is why it reads the whole table rather than a fixture. Any suite that creates a user
+     * without a membership fails this, wherever it lives.
      */
+    const orphans = await prisma.user.findMany({
+      where: { memberships: { none: {} } },
+      select: { id: true, phone: true, tenantId: true },
+    });
+
+    expect(orphans, `logins with no membership: ${JSON.stringify(orphans)}`).toEqual([]);
+  });
+
+  it('**is not vacuous: there are rows to have got wrong**', async () => {
+    // Every check above is a "nothing is wrong" assertion and passes trivially against an empty
+    // table. One positive claim, so an empty database cannot make this file meaningless in silence.
     const [users, memberships] = await Promise.all([
       prisma.user.count(),
       prisma.membership.count(),
     ]);
 
-    if (users > 0) expect(memberships).toBeGreaterThan(0);
-    expect(memberships).toBeLessThanOrEqual(users);
+    expect(memberships).toBe(users);
   });
 });
