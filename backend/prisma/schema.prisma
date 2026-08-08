@@ -81,7 +81,7 @@ model Tenant {
   /// ISO alpha-2. Defaults from the owner's phone country.
   billingCountry      String?
   logoUrl             String?
-  isActive            Boolean  @default(true)
+  isActive            Boolean @default(true)
 
   /// Hide most of every customer's phone number from team members.
   ///
@@ -94,7 +94,7 @@ model Tenant {
   /// would silently change what every existing team can see.
   ///
   /// The stored numbers are untouched — they are how WhatsApp messages are addressed.
-  maskCustomerNumbers Boolean  @default(false)
+  maskCustomerNumbers Boolean @default(false)
 
   /// Whether this workspace wants the AI agent answering its customers.
   ///
@@ -114,11 +114,13 @@ model Tenant {
   ///
   /// Turning it off does not silence the bot. Carts, keyword rules and published workflows keep
   /// running; only the model is skipped. See `degradeToNonAi` in conversation-engine/routing.
-  aiAgentEnabled      Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  aiAgentEnabled Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   users            User[]
+  /// Who may reach this workspace, and as what. See the `Membership` model.
+  memberships      Membership[]
   whatsappAccounts WhatsappAccount[]
   keywords         KeywordRule[]
   fallback         FallbackRule?
@@ -302,22 +304,100 @@ model User {
   roleId                 String?
 
   // Module 20: leads
-  ownedLeads       Lead[]        @relation("LeadOwner")
+  ownedLeads       Lead[]           @relation("LeadOwner")
   // Module 21: customer support
-  assignedTickets  Ticket[]      @relation("TicketAssignee")
-  openedTickets    Ticket[]      @relation("TicketOpener")
-  ticketEvents     TicketEvent[] @relation("TicketEventActor")
+  assignedTickets  Ticket[]         @relation("TicketAssignee")
+  openedTickets    Ticket[]         @relation("TicketOpener")
+  ticketEvents     TicketEvent[]    @relation("TicketEventActor")
   // Module 22: marketing
-  createdCampaigns Campaign[]    @relation("CampaignCreator")
+  createdCampaigns Campaign[]       @relation("CampaignCreator")
   knowledgeWritten KnowledgeEntry[] @relation("KnowledgeAuthor")
-  leadEvents       LeadEvent[]   @relation("LeadEventActor")
-  calls            CallLog[]     @relation("CallActor")
-  reminders        Reminder[]    @relation("ReminderAssignee")
+  leadEvents       LeadEvent[]      @relation("LeadEventActor")
+  calls            CallLog[]        @relation("CallActor")
+  reminders        Reminder[]       @relation("ReminderAssignee")
 
   // Module 23: notifications
   notifications          Notification[]          @relation("NotificationRecipient")
   notificationPreference NotificationPreference?
   pushSubscriptions      PushSubscription[]
+
+  // ── Memberships ────────────────────────────────────────────────────────────
+  /// The workspaces this login may reach. See the `Membership` model.
+  memberships        Membership[]
+  /// People this person added to a workspace. Kept so the team screen can say who invited whom.
+  membershipsInvited Membership[] @relation("MembershipInviter")
+}
+
+/// One person's place in one workspace.
+///
+/// **This is what tenant scoping is read from.** `User` is identity — a phone number, a name,
+/// notification preferences — and says nothing about which workspaces that login may reach.
+/// Somebody with three memberships has one login, one name, and three roles.
+///
+/// Before this existed, "which workspace" and "which role" were columns on `User`, which made
+/// one phone number mean exactly one workspace. That is why adding a colleague who already has
+/// an account anywhere on the platform was refused outright.
+model Membership {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// This workspace's own role. **What permissions are read from**, per workspace — the same
+  /// person can be an owner here and hold two inbox permissions there.
+  ///
+  /// Nullable for the two reasons `User.roleId` is: rows that predate it, and `onDelete: SetNull`
+  /// when a role is deleted. When null, `resolvePermissions` falls back to `legacyRole` below
+  /// rather than granting nothing — a seat with no permissions at all cannot even reach the
+  /// screen that would fix it.
+  assignedRole Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roleId       String?
+
+  /// The legacy enum, **per membership**.
+  ///
+  /// Carried here rather than left on `User` because the fallback has to be workspace-correct:
+  /// an owner in one workspace and an agent in another cannot share one floor without the
+  /// null-`roleId` case silently granting the wrong thing in one of them. Never policy — only the
+  /// floor under a null `roleId`, and a label for screens that still show one.
+  legacyRole UserRole @default(AGENT)
+
+  /// Whether this person may reach **this** workspace.
+  ///
+  /// Deliberately distinct from `User.isActive`, which is the operator's global kill switch for a
+  /// login. Both are checked. Collapsing them is the bug this separation exists to prevent:
+  /// removing somebody from one workspace must not sign them out of the others.
+  isActive Boolean @default(true)
+
+  /// When they joined **this** workspace, which is what the team screen wants — not the date the
+  /// account was created, possibly in somebody else's workspace years earlier.
+  joinedAt  DateTime  @default(now())
+  revokedAt DateTime?
+
+  /// The last time this workspace was the one they were working in. Written by login and by the
+  /// switcher only, never per request — that would be a write on every call. Decides which
+  /// workspace a fresh login lands in.
+  lastSelectedAt DateTime?
+
+  /// Who added them. `SetNull`: losing the record of who invited somebody must not remove the
+  /// person.
+  invitedBy   User?   @relation("MembershipInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One row per person per workspace, reused on rejoin rather than kept as history. No partial
+  /// unique index: this schema already carries two hand-written ones that `prisma migrate` cannot
+  /// express, and a third is a third thing to lose.
+  @@unique([userId, tenantId])
+  /// The roster query, and the seat count.
+  @@index([tenantId, isActive])
+  /// The switcher's list, and the per-request membership lookup.
+  @@index([userId, isActive])
+  @@index([roleId])
 }
 
 // ---------------- Module 2: WhatsApp embedded signup ----------------
@@ -349,10 +429,10 @@ model WhatsappAccount {
 // ---------------- Module 3-5: Customers, conversations, messages ----------------
 
 model Customer {
-  id            String    @id @default(uuid())
-  tenantId      String
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  waId String
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  waId     String
 
   /// **The agent's own label for this person.** Null unless somebody typed one.
   ///
@@ -648,9 +728,9 @@ model Message {
   /// not: the 24-hour window (`windowStateFor`), the analytics counters, the super admin's
   /// activity view, and webhook deduplication. Deleting a row from our inbox cannot be allowed
   /// to change what WhatsApp permits or what the operator sees.
-  deletedAt      DateTime?
+  deletedAt       DateTime?
   deletedByUserId String?
-  deletedByUser   User?    @relation("DeletedMessages", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deletedByUser   User?     @relation("DeletedMessages", fields: [deletedByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
@@ -2357,7 +2437,10 @@ model Role {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users       User[]
+  /// The people holding this role. `users` above is the pre-membership relation and is on its
+  /// way out; this is the one that survives a person belonging to several workspaces.
+  memberships Membership[]
 
   @@unique([tenantId, name])
   @@index([tenantId, sortOrder])
