@@ -1193,7 +1193,8 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Clear the unread count",
+        "summary": "Mark the thread read",
+        "description": "Clears both counters that say nobody has looked at this thread: the conversation’s `unreadCount`, and any unread notification about it that the caller can see. One transaction, so the bell and the badge cannot disagree. Idempotent — call it on every thread open.",
         "parameters": [
           {
             "name": "id",
@@ -1219,7 +1220,16 @@
                       "example": true
                     },
                     "data": {
-                      "$ref": "#/components/schemas/Conversation"
+                      "type": "object",
+                      "properties": {
+                        "cleared": {
+                          "type": "boolean",
+                          "description": "False when the id matched no conversation."
+                        },
+                        "notificationsRead": {
+                          "type": "integer"
+                        }
+                      }
                     }
                   },
                   "required": [

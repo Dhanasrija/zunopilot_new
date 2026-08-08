@@ -14,6 +14,7 @@ import { recordOutboundMessage } from '../modules/conversation-engine/providers/
 import { mediaFor, publicUrlFor, publicUrlIsReachable } from '../modules/media/media.service.js';
 import { describeMedia } from '../modules/media/inbound-media.js';
 import { windowStateFor } from '../modules/support/ticket.service.js';
+import { markReadForConversation } from '../modules/notifications/notification.service.js';
 import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
 import { maskContact } from '../utils/mask-number.js';
 import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
@@ -183,13 +184,40 @@ export const listMessages = asyncHandler(async (req, res) => {
   res.json({ success: true, data: visible });
 });
 
+/**
+ * The agent has read this thread.
+ *
+ * **Clears both counters, in one transaction.** `Conversation.unreadCount` draws the badge on
+ * the row; unread `Notification` rows draw the bell. They describe the same fact, so an agent
+ * who reads a thread must not be left with a bell insisting eight things are waiting — and
+ * letting the two writes half-succeed is precisely how they would drift apart again.
+ *
+ * `updateMany` rather than `update`, so an unknown or other-tenant id is a no-op rather than a
+ * throw. This fires from a poll-driven page on every thread open; a 404 race with a colleague
+ * clearing a thread is not something worth surfacing to anyone.
+ *
+ * Idempotent by construction — `unreadCount: 0` on an already-zero row and `readAt: null` on
+ * an already-read notification both change nothing.
+ */
 export const markRead = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  await prisma.conversation.updateMany({
-    where: { id, tenantId: tenantIdOf(req) },
-    data: { unreadCount: 0 },
+  const tenantId = tenantIdOf(req);
+
+  const { cleared, notificationsRead } = await prisma.$transaction(async (tx) => {
+    const conversation = await tx.conversation.updateMany({
+      where: { id, tenantId },
+      data: { unreadCount: 0 },
+    });
+    /*
+     * An interactive transaction rather than the array form, so the recipient scoping lives in
+     * `markReadForConversation` and nowhere else. Two updateManys against one database — the
+     * transaction holds nothing slow, unlike the routing path this rule was written for.
+     */
+    const notificationsRead = await markReadForConversation(tenantId, userOf(req).id, id, tx);
+    return { cleared: conversation.count > 0, notificationsRead };
   });
-  res.json({ success: true });
+
+  res.json({ success: true, data: { cleared, notificationsRead } });
 });
 
 /**
@@ -514,9 +542,27 @@ export const deleteThread = asyncHandler(async (req, res) => {
   });
   if (!conversation) throw ApiError.notFound('Conversation not found');
 
-  const { count } = await prisma.message.updateMany({
-    where: { conversationId: conversation.id, deletedAt: null },
-    data: { deletedAt: new Date(), deletedByUserId: userOf(req).id },
+  const count = await prisma.$transaction(async (tx) => {
+    const removed = await tx.message.updateMany({
+      where: { conversationId: conversation.id, deletedAt: null },
+      data: { deletedAt: new Date(), deletedByUserId: userOf(req).id },
+    });
+
+    /*
+     * The counters go with the messages.
+     *
+     * An unread badge of 10 on a thread with nothing in it is the most obvious way this could
+     * lie, and a bell entry quoting a message that no longer exists is the same lie one screen
+     * over. Clearing a thread is unambiguously "I have dealt with this", so both are stale the
+     * moment the messages are hidden.
+     */
+    await tx.conversation.updateMany({
+      where: { id: conversation.id, tenantId: tenantIdOf(req) },
+      data: { unreadCount: 0 },
+    });
+    await markReadForConversation(tenantIdOf(req), userOf(req).id, conversation.id, tx);
+
+    return removed.count;
   });
 
   /*
