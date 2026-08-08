@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from './types';
 
@@ -128,5 +129,60 @@ describe('the delivery tick', () => {
     expect(screen.getByRole('img')).toHaveAccessibleName(/^Delivered/);
     // The bubble's own timestamp is still rendered.
     expect(screen.getByText(/2026|Aug/)).toBeInTheDocument();
+  });
+});
+
+describe('removing a message', () => {
+  const remove = () => screen.queryByRole('button', { name: /Remove from inbox/i });
+
+  it('**is offered only to someone who may do it**', () => {
+    const { unmount } = render(<MessageBubble message={message()} myId={MY_ID} />);
+    expect(remove()).not.toBeInTheDocument();
+    unmount();
+
+    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
+    expect(remove()).toBeInTheDocument();
+  });
+
+  it('reports the click, without confirming first', async () => {
+    // One row, visibly identified. A dialog on every tidy-up trains people to click through
+    // dialogs, which is what makes the one on "clear the whole thread" worth having.
+    const onDelete = vi.fn();
+    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={onDelete} />);
+
+    await userEvent.click(remove()!);
+    expect(onDelete).toHaveBeenCalledOnce();
+  });
+
+  it('is reachable by keyboard', async () => {
+    /*
+     * A real focus target, which is what a `<div onClick>` would quietly lose.
+     *
+     * There is no hover-reveal to test any more: the control is always rendered, quietly. An
+     * earlier version hid it behind `group-hover`, which meant it never appeared at all on a
+     * touch screen — and this Inbox goes down to 375px.
+     */
+    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
+
+    await userEvent.tab();
+    expect(remove()).toHaveFocus();
+  });
+
+  it('**says the customer keeps their copy**', () => {
+    /*
+     * The label is the only place a person learns this. WhatsApp has no unsend, so "Delete" would
+     * promise something the platform cannot do — an agent would believe they had recalled a
+     * message that is still sitting on somebody's phone.
+     */
+    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
+    expect(remove()).toHaveAccessibleName(/customer keeps their copy/i);
+  });
+
+  it('is offered on an inbound message too', () => {
+    // A customer can send something an agent needs out of a shared screen just as easily.
+    render(<MessageBubble
+      message={message({ direction: 'INBOUND' })} myId={MY_ID} canDelete onDelete={vi.fn()}
+    />);
+    expect(remove()).toBeInTheDocument();
   });
 });

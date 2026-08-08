@@ -13,7 +13,7 @@ import { useAuthStore } from '@/stores/auth.store';
 
 export type Permission =
   | 'inbox:read' | 'inbox:reply' | 'inbox:assign_self' | 'inbox:assign_others'
-  | 'inbox:toggle_automation' | 'inbox:add_note'
+  | 'inbox:toggle_automation' | 'inbox:add_note' | 'inbox:delete'
   | 'customers:read' | 'customers:write' | 'orders:read' | 'orders:write'
   | 'catalogue:read' | 'catalogue:write'
   | 'workflows:read' | 'workflows:author' | 'workflows:publish'

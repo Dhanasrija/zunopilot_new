@@ -284,6 +284,7 @@ model User {
   assignedConversations Conversation[] @relation("AssignedAgent")
   internalNotes         InternalNote[]
   sentMessages          Message[]      @relation("SentMessages")
+  deletedMessages       Message[]      @relation("DeletedMessages")
 
   impersonationResponses ImpersonationGrant[] @relation("ImpersonationResponder")
   impersonationSubjectOf ImpersonationGrant[] @relation("ImpersonationSubject")
@@ -594,6 +595,24 @@ model Message {
   /// of what they said to customers.
   sentByUserId String?
   sentByUser   User?   @relation("SentMessages", fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  /// Removed from the Inbox by somebody, and **not removed from the customer's phone.**
+  ///
+  /// The WhatsApp Cloud API has no unsend, so this is only ever about our own record. A soft
+  /// delete rather than a `DELETE`, because a message is the evidence in a payment dispute and
+  /// the context of a support ticket — an agent tidying a thread must not be able to destroy
+  /// what a customer was promised.
+  ///
+  /// **Which reads honour it is a rule, not a convention.** Anything a person browses filters
+  /// these out — the Inbox thread, the conversation preview, the customer's history, and the
+  /// history handed to the assistant, since an assistant quoting a removed message back to the
+  /// customer would undo the removal. Anything that reasons about what *actually happened* does
+  /// not: the 24-hour window (`windowStateFor`), the analytics counters, the super admin's
+  /// activity view, and webhook deduplication. Deleting a row from our inbox cannot be allowed
+  /// to change what WhatsApp permits or what the operator sees.
+  deletedAt      DateTime?
+  deletedByUserId String?
+  deletedByUser   User?    @relation("DeletedMessages", fields: [deletedByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 

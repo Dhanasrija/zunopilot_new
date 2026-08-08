@@ -5,6 +5,7 @@ import { tenantIdOf, userOf } from '../middleware/auth.js';
 import { can } from '../config/permissions.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
+import { logger } from '../config/logger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { metaFailure } from '../services/meta-error.js';
@@ -16,6 +17,21 @@ import { windowStateFor } from '../modules/support/ticket.service.js';
 import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
 import { maskContact } from '../utils/mask-number.js';
 import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
+
+/**
+ * The filter every human-facing message read must carry.
+ *
+ * A named constant rather than `deletedAt: null` written out five times, because the failure mode
+ * is one site missing it — a removed message reappearing in the conversation preview, or on the
+ * customer's profile, while being absent from the thread. One expression means one thing to get
+ * right.
+ *
+ * Deliberately **not** used by `windowStateFor`, the analytics counters, the super admin activity
+ * view or webhook deduplication. Those reason about what actually happened, and hiding a row from
+ * them would let an agent change what WhatsApp permits by tidying a thread. See the note on
+ * `Message.deletedAt` in schema.prisma.
+ */
+export const VISIBLE_MESSAGE = { deletedAt: null } as const;
 
 // Gets-or-creates an OPEN conversation for the given customer.
 // Used by the CRM "Start conversation" button so agents can jump from a
@@ -71,7 +87,9 @@ export const listConversations = asyncHandler(async (req, res) => {
       // on this screen in the first place, and it would ship the next new column too.
       customer: { select: CUSTOMER_VIEW_SELECT },
       assignedAgent: { select: { id: true, fullName: true, email: true } },
-      messages: { take: 1, orderBy: { createdAt: 'desc' } },
+      // Filtered too. Removing the newest message and still seeing it quoted in the list is
+      // the most obvious way a half-applied soft delete announces itself.
+      messages: { take: 1, orderBy: { createdAt: 'desc' }, where: VISIBLE_MESSAGE },
       // **The workflow occupying this conversation, if any.**
       //
       // Needed because a conversation holds one active instance at a time, and while it
@@ -127,7 +145,7 @@ export const listMessages = asyncHandler(async (req, res) => {
   const conversation = await prisma.conversation.findFirst({ where: { id, tenantId: tenantIdOf(req) } });
   if (!conversation) throw ApiError.notFound('Conversation not found');
   const messages = await prisma.message.findMany({
-    where: { conversationId: id },
+    where: { conversationId: id, ...VISIBLE_MESSAGE },
     orderBy: { createdAt: 'asc' },
     take: 500,
     include: { sentByUser: { select: { id: true, fullName: true, role: true } } },
@@ -362,6 +380,88 @@ export const sendAgentMedia = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ success: true, data: msg });
+});
+
+/*
+ * ── Removing messages from a thread ──────────────────────────────────────────
+ *
+ * **This is not an unsend, and the wording everywhere says so.** The WhatsApp Cloud API has no
+ * endpoint to delete a message the business already sent, so the customer keeps their copy no
+ * matter what happens here. Calling the button "Delete" would promise something WhatsApp does not
+ * offer; it says "Remove from inbox".
+ *
+ * A soft delete for a reason beyond reversibility: a message is the evidence in a payment dispute
+ * and the context of a support ticket. An agent tidying a thread must not be able to destroy the
+ * record of what a customer was promised. So the row stays, `deletedAt` hides it from the five
+ * human-facing reads, and `deletedByUserId` answers the question a shared inbox always asks next.
+ */
+
+/** Remove one message. */
+export const deleteMessage = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  /*
+   * `updateMany` with the tenant in the `where`, not `findUnique` then `update`.
+   *
+   * One statement means there is no window between the check and the write, and no version of
+   * this that can touch another workspace's message. `count === 0` covers both "no such message"
+   * and "not yours" with the same 404, which is also the answer that does not confirm an id
+   * exists in a workspace the caller cannot see.
+   *
+   * `deletedAt: null` in the where makes it idempotent: removing the same message twice keeps
+   * the first person's name and timestamp rather than overwriting them with the second's.
+   */
+  const { count } = await prisma.message.updateMany({
+    where: { id, tenantId: tenantIdOf(req), deletedAt: null },
+    data: { deletedAt: new Date(), deletedByUserId: userOf(req).id },
+  });
+
+  if (count === 0) {
+    // Already removed, never existed, or belongs to someone else. A 404 for all three.
+    throw ApiError.notFound('Message not found');
+  }
+
+  logger.info('Message removed from the inbox', {
+    tenantId: tenantIdOf(req), messageId: id, byUserId: userOf(req).id,
+  });
+
+  res.json({ success: true, data: { removed: 1 } });
+});
+
+/**
+ * Remove every message in a thread.
+ *
+ * **Messages only.** The conversation, the customer, their orders, the internal notes and any
+ * linked support ticket all survive — the thread stays in the list and reads as empty. Deleting
+ * the conversation row instead would cascade into its notes and workflow instances and unlink a
+ * ticket, which is a great deal of collateral for "clear this chat".
+ */
+export const deleteThread = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId: tenantIdOf(req) },
+    select: { id: true },
+  });
+  if (!conversation) throw ApiError.notFound('Conversation not found');
+
+  const { count } = await prisma.message.updateMany({
+    where: { conversationId: conversation.id, deletedAt: null },
+    data: { deletedAt: new Date(), deletedByUserId: userOf(req).id },
+  });
+
+  /*
+   * `lastMessageAt` is deliberately left alone.
+   *
+   * It orders the conversation list, and rewriting it would jump a thread somebody had just
+   * tidied to the bottom of the queue — or to the top, depending on the null handling. It is a
+   * record of when the customer last made contact, which is still true.
+   */
+  logger.info('Thread cleared', {
+    tenantId: tenantIdOf(req), conversationId: id, removed: count, byUserId: userOf(req).id,
+  });
+
+  res.json({ success: true, data: { removed: count } });
 });
 
 export const addNote = asyncHandler(async (req, res) => {

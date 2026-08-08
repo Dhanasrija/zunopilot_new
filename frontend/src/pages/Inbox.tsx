@@ -243,6 +243,31 @@ export default function Inbox() {
     // refusals here — an expired window, a file too large — are all worth reading verbatim.
   });
 
+  /*
+   * Removing messages.
+   *
+   * No optimistic update: the list refetches every second anyway, so the message vanishes within
+   * one tick either way — and an optimistic removal that the server then refuses would put it
+   * back, which reads as the click not having worked rather than as an error.
+   */
+  const removeMessage = useMutation({
+    mutationFn: async (messageId: string) => api.delete(`/inbox/messages/${messageId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+
+  const clearThread = useMutation({
+    mutationFn: async () => api.delete(`/inbox/conversations/${selectedId}/messages`),
+    onSuccess: (response) => {
+      const { removed } = (response.data as { data: { removed: number } }).data;
+      toast.success(removed === 1 ? '1 message removed' : `${removed} messages removed`);
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+
   const mediaRules = useMediaRules();
 
   /*
@@ -344,6 +369,8 @@ export default function Inbox() {
                 handingBack={handBackToBot.isPending}
                 onToggleAutomation={(paused) => toggleAutomation.mutate(paused)}
                 onRaiseTicket={() => setRaisingTicket(true)}
+                canDelete={can('inbox:delete')}
+                onClearThread={() => clearThread.mutate()}
               />
 
               <RaiseFromConversation
@@ -366,7 +393,15 @@ export default function Inbox() {
                 */}
                 <div className="mt-auto space-y-2">
                   {messages.data
-                    ? messages.data.map((m) => <MessageBubble key={m.id} message={m} myId={myId} />)
+                    ? messages.data.map((m) => (
+                      <MessageBubble
+                        key={m.id}
+                        message={m}
+                        myId={myId}
+                        canDelete={can('inbox:delete')}
+                        onDelete={() => removeMessage.mutate(m.id)}
+                      />
+                    ))
                     : <p className="text-sm text-ink-500">Loading…</p>}
                 </div>
               </div>

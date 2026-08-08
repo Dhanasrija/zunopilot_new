@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { cn, formatDateTime } from '@/lib/utils';
 import { outboundOptions, type Message } from './types';
 import { MediaAttachment, hasAttachment } from './MediaAttachment';
@@ -12,12 +13,25 @@ import { DeliveryTick } from './DeliveryTick';
 // The tail (one square corner on the side the message came from) is the only decoration:
 // it survives at a glance in a way that alignment alone does not once bubbles are short.
 
-export function MessageBubble({ message, myId }: { message: Message; myId?: string }) {
+export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
+  message: Message;
+  myId?: string;
+  /** `inbox:delete`. Absent for an agent unless the workspace grants it. */
+  canDelete?: boolean;
+  onDelete?: () => void;
+}) {
   const outbound = message.direction === 'OUTBOUND';
   const options = outboundOptions(message);
+  const removable = canDelete && !!onDelete;
 
   return (
-    <div className={cn('flex', outbound && 'justify-end')}>
+    <div className={cn('flex items-center gap-1', outbound && 'justify-end')}>
+      {/*
+        On the leading edge for an outbound message and the trailing edge for an inbound one, so
+        it always sits on the outside of the bubble and never over the text.
+      */}
+      {removable && outbound && <RemoveButton onDelete={onDelete!} />}
+
       <div
         className={cn(
           'max-w-[70%] px-3 py-2 text-sm',
@@ -96,6 +110,47 @@ export function MessageBubble({ message, myId }: { message: Message; myId?: stri
           <DeliveryTick message={message} />
         </div>
       </div>
+
+      {removable && !outbound && <RemoveButton onDelete={onDelete!} />}
     </div>
+  );
+}
+
+/**
+ * Take one message out of the thread.
+ *
+ * **"Remove", not "Delete", and the title says where it goes.** WhatsApp has no unsend, so the
+ * customer keeps their copy whatever this does — a button labelled "Delete" would promise
+ * something the platform does not offer. It is also a soft delete: the row survives for reports
+ * and for the record of what was said.
+ *
+ * **Always present, quiet rather than hidden.** The first version revealed it on `group-hover`,
+ * which is wrong here for a reason that has nothing to do with taste: **there is no hover on a
+ * touch screen**, and this Inbox is built down to 375px — so on a phone the control would simply
+ * never appear. Hover-reveal also hides a destructive action behind a gesture, and it depends on
+ * a `group-hover` / `focus-within` interaction I could not verify in a browser harness, which is
+ * a poor thing to rest an accessibility property on. `ink-350` keeps it from competing with the
+ * message; hover and focus bring it to `danger`.
+ *
+ * No confirmation on a single message. It is one row, an agent can see exactly which one, and a
+ * dialog on every tidy-up is the kind of friction that trains people to click through dialogs.
+ * Clearing a whole thread does confirm — see `ThreadHeader`.
+ */
+function RemoveButton({ onDelete }: { onDelete: () => void }) {
+  const label = 'Remove from inbox — the customer keeps their copy';
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onDelete}
+      className={cn(
+        'shrink-0 rounded-md p-1 text-ink-350 transition-colors',
+        'hover:bg-surface-2 hover:text-danger focus-visible:text-danger',
+      )}
+    >
+      <X aria-hidden className="h-3.5 w-3.5" />
+    </button>
   );
 }

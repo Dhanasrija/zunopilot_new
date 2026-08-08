@@ -83,7 +83,15 @@ export const candidateWorkflows = async (assistantId: string): Promise<RouterCap
 /** Recent turns, oldest first, for the router's context window. */
 const recentMessages = async (conversationId: string, limit: number) => {
   const rows = await prisma.message.findMany({
-    where: { conversationId },
+    /*
+     * Removed messages are withheld from the model as well.
+     *
+     * Not obvious, and worth stating: an agent who deletes a message has said it should not
+     * inform what happens next. Leaving it in the history means the assistant can quote it
+     * straight back to the customer, which undoes the removal in the most public way available.
+     * The customer still has their own copy — that is Meta's, not ours to take.
+     */
+    where: { conversationId, deletedAt: null },
     orderBy: { createdAt: 'desc' },
     take: Math.max(0, limit),
     select: { direction: true, body: true },
