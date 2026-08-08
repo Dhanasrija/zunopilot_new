@@ -443,11 +443,14 @@ export default function TenantDetail() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-            {tenant.businessName}
+            {tenant.businessName || <span className="italic text-slate-400">unnamed workspace</span>}
             {tenant.isActive ? <Badge tone="green">active</Badge> : <Badge tone="red">suspended</Badge>}
+            {/* Verified a code, never filled in the profile. The most useful thing to know first. */}
+            {!tenant.onboardingCompletedAt && <Badge tone="amber">setup unfinished</Badge>}
           </h1>
           <p className="mt-0.5 text-xs text-slate-500">
-            {tenant.category.replace(/_/g, ' ').toLowerCase()} · joined {day(tenant.createdAt)} ·{' '}
+            {/* The label they chose, never the legacy enum — which says RESTAURANT for everybody. */}
+            {tenant.businessCategory?.label ?? 'category not set'} · joined {day(tenant.createdAt)} ·{' '}
             <span className="font-mono">{tenant.id}</span>
           </p>
         </div>

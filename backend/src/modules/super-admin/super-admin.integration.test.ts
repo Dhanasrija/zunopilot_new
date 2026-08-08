@@ -555,6 +555,185 @@ describe('the connector type catalog', () => {
   });
 });
 
+describe('what a workspace is listed as', () => {
+  /*
+   * The console showed `Tenant.category`, the enum that predates the categories table — which reads
+   * `RESTAURANT` for every workspace on the platform because nothing has written it since. So every
+   * customer looked like a restaurant, including the IT consultancies.
+   *
+   * The fixture's workspaces have the enum set and **no category row**, which is what makes the
+   * assertion decisive: the label must be null rather than "restaurant".
+   */
+  it('**reports the category the workspace chose, not the legacy enum**', async () => {
+    const token = await login();
+    const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+    // No category row on this fixture, so there is nothing to report — and "not set" is the truth.
+    expect(row.category).toBeNull();
+    // The enum is still carried, under a name that says what it is.
+    expect(row.legacyCategory).toBe('RESTAURANT');
+  });
+
+  it('reports the label once a category is chosen', async () => {
+    const token = await login();
+    const category = await prisma.businessCategory.create({
+      data: { key: `SA_TEST_LABEL_${Date.now()}`, label: 'Test Trade' },
+    });
+    try {
+      await prisma.tenant.update({
+        where: { id: TENANT_A }, data: { businessCategoryId: category.id },
+      });
+
+      const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+      const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+      expect(row.category).toBe('Test Trade');
+    } finally {
+      await prisma.tenant.update({ where: { id: TENANT_A }, data: { businessCategoryId: null } });
+      await prisma.businessCategory.delete({ where: { id: category.id } });
+    }
+  });
+
+  it('**flags a workspace that verified a code and never finished setup**', async () => {
+    // The unnamed rows in the workspace list. Without this the console gives an operator no way to
+    // tell an abandoned signup from a real workspace whose owner has not named it yet.
+    const token = await login();
+    const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+    // The fixture never completes onboarding, so this is the flag's true state here.
+    expect(row.onboardingCompletedAt).toBeNull();
+  });
+});
+
+describe('the signup funnel', () => {
+  /*
+   * The two lists worth getting right are the ones that could mislead:
+   *
+   *   • Somebody who mistyped a code, let it expire and then got in **must not** appear as an
+   *     abandonment — their first challenge is still sitting there unconsumed, and counting it would
+   *     put live customers on a chase list.
+   *   • "Left at the code" covers 24 hours because the sweep deletes older rows. The window is
+   *     asserted in the query rather than assumed, so a box whose sweep is behind still reports the
+   *     period the page claims.
+   */
+  const PHONE_GAVE_UP = '15550007001';
+  const PHONE_TRIED_THEN_SUCCEEDED = '15550007002';
+
+  afterEach(async () => {
+    await prisma.otpChallenge.deleteMany({
+      where: { phone: { in: [PHONE_GAVE_UP, PHONE_TRIED_THEN_SUCCEEDED] } },
+    });
+  });
+
+  /** An expired, unconsumed challenge — somebody who asked for a code and never used it. */
+  const expiredUnused = (phone: string, minutesAgo: number, attempts = 0) =>
+    prisma.otpChallenge.create({
+      data: {
+        phone,
+        codeHash: 'not-a-real-hash',
+        attempts,
+        createdAt: new Date(Date.now() - minutesAgo * 60_000),
+        expiresAt: new Date(Date.now() - (minutesAgo - 10) * 60_000),
+      },
+    });
+
+  it('**lists a number that asked for a code and never entered it**', async () => {
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 60, 2);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.abandonedAtCode.find((r: { phone: string }) => r.phone === PHONE_GAVE_UP);
+    expect(row).toBeDefined();
+    // Wrong entries carried separately: somebody who tried and failed is a delivery or usability
+    // problem, and somebody who never opened the SMS is not the same person.
+    expect(row.wrongCodeAttempts).toBe(2);
+    expect(res.body.data.abandonedWindowHours).toBe(24);
+  });
+
+  it('**does not list somebody who failed once and then got in**', async () => {
+    const token = await login();
+    await expiredUnused(PHONE_TRIED_THEN_SUCCEEDED, 30);
+    // …and then asked again and verified.
+    await prisma.otpChallenge.create({
+      data: {
+        phone: PHONE_TRIED_THEN_SUCCEEDED,
+        codeHash: 'not-a-real-hash',
+        expiresAt: new Date(Date.now() + 600_000),
+        consumedAt: new Date(),
+      },
+    });
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    expect(res.body.data.abandonedAtCode.map((r: { phone: string }) => r.phone))
+      .not.toContain(PHONE_TRIED_THEN_SUCCEEDED);
+  });
+
+  it('**counts one person per number, not one per code they asked for**', async () => {
+    // The resend cooldown means a determined person generates several challenges. Three rows is one
+    // person who did not sign up.
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 90);
+    await expiredUnused(PHONE_GAVE_UP, 70);
+    await expiredUnused(PHONE_GAVE_UP, 50);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    const rows = res.body.data.abandonedAtCode
+      .filter((r: { phone: string }) => r.phone === PHONE_GAVE_UP);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].requests).toBe(3);
+  });
+
+  it('ignores a request older than the retention window', async () => {
+    // Asserted in the query, not left to the sweep — which is a scheduled job that can be behind.
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 60 * 30);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    expect(res.body.data.abandonedAtCode.map((r: { phone: string }) => r.phone))
+      .not.toContain(PHONE_GAVE_UP);
+  });
+
+  it('**separates workspaces that verified but never finished the profile**', async () => {
+    const token = await login();
+
+    // TENANT_A is onboarded by the fixture; make a half-finished one beside it.
+    const stuck = await prisma.tenant.create({
+      data: {
+        businessName: '',
+        category: 'RESTAURANT',
+        users: { create: [{ phone: '15550007003', fullName: '', role: 'OWNER' }] },
+      },
+    });
+    await seedMemberships();
+
+    try {
+      const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+      const row = res.body.data.abandonedAtProfile
+        .find((r: { tenantId: string }) => r.tenantId === stuck.id);
+      expect(row).toBeDefined();
+      // The number is the point: it is the only way to follow one of these up.
+      expect(row.owner.phone).toBe('15550007003');
+      // And it is not counted as a completed signup.
+      expect(res.body.data.completed.map((r: { tenantId: string }) => r.tenantId))
+        .not.toContain(stuck.id);
+    } finally {
+      await prisma.tenant.delete({ where: { id: stuck.id } });
+    }
+  });
+
+  it('needs an operator token', async () => {
+    await request(app).get('/sa/signups').expect(401);
+    await request(app).get('/sa/signups')
+      .set(asAdmin(signToken({ userId: ownerId, tenantId: TENANT_A }))).expect(401);
+  });
+});
+
 describe('which model answers a workspace', () => {
   /*
    * An operator's choice, and the reason it is one: it decides who we pay per message and how long a

@@ -102,7 +102,16 @@ export interface Enquiry {
 export interface TenantRow {
   id: string;
   businessName: string;
-  category: string;
+  /**
+   * The category the workspace picked, or null when it has not picked one.
+   *
+   * Was the legacy enum, which reads `RESTAURANT` for every workspace on the platform — so this
+   * column made eleven workspaces look like eleven restaurants. Null renders as "not set", which is
+   * both true and a useful signal: a workspace with no category never finished signing up.
+   */
+  category: string | null;
+  /** Null means they verified a code and never completed the profile form. */
+  onboardingCompletedAt: string | null;
   isActive: boolean;
   createdAt: string;
   gstin: string | null;
@@ -141,9 +150,48 @@ export interface LlmChoices {
   authoringVendor: LlmVendor;
 }
 
+/**
+ * The signup funnel.
+ *
+ * `abandonedAtCode` is a **24-hour window**, because one-time codes are deleted a day after they
+ * expire — `abandonedWindowHours` carries the real number so the page's wording follows the server
+ * rather than a constant somebody has to remember to update. The other two lists are permanent.
+ */
+export interface Signups {
+  abandonedAtCode: Array<{
+    phone: string;
+    lastRequestedAt: string;
+    requests: number;
+    /** Codes typed in wrongly — a different person from one who never opened the SMS. */
+    wrongCodeAttempts: number;
+    ip: string | null;
+  }>;
+  abandonedWindowHours: number;
+  abandonedAtProfile: Array<{
+    tenantId: string;
+    businessName: string;
+    isActive: boolean;
+    verifiedAt: string;
+    owner: {
+      phone: string | null; email: string | null; fullName: string;
+      country: string | null; createdAt: string;
+    } | null;
+  }>;
+  completed: Array<{
+    tenantId: string;
+    businessName: string;
+    category: string | null;
+    verifiedAt: string;
+    completedAt: string | null;
+  }>;
+  counts: { abandonedAtCode: number; abandonedAtProfile: number; completed: number };
+}
+
 export interface TenantDetail {
   tenant: {
-    id: string; businessName: string; category: string; contactNumber: string | null;
+    id: string; businessName: string; category: string | null; contactNumber: string | null;
+    businessCategory: { id: string; key: string; label: string } | null;
+    onboardingCompletedAt: string | null;
     address: string | null; website: string | null; isActive: boolean;
     createdAt: string; gstin: string | null; gstStateCode: string | null;
     /** Which vendor answers this workspace's customers. Null = the platform default. */
@@ -329,6 +377,7 @@ export const sa = {
 
   overview: () => unwrap<Overview>(api.get('/overview')),
 
+  signups: () => unwrap<Signups>(api.get('/signups')),
   tenants: (params: Record<string, string | number | undefined>) =>
     api.get<{ data: TenantRow[]; meta: { total: number } }>('/tenants', { params })
       .then((r) => ({ rows: r.data.data, total: r.data.meta.total })),

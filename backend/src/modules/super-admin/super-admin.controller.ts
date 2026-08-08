@@ -207,7 +207,17 @@ export const listTenants = asyncHandler(async (req: Request, res: Response) => {
       select: {
         id: true,
         businessName: true,
+        /*
+         * Both, because neither alone is the answer.
+         *
+         * `category` is the pre-rows `BusinessCategoryLegacy` enum and reads `RESTAURANT` for every
+         * workspace on the platform — it was the column that existed before categories became rows,
+         * and nothing has written it since. The console was showing it, so every workspace appeared
+         * to be a restaurant, including the IT consultancies.
+         */
         category: true,
+        businessCategory: { select: { label: true } },
+        onboardingCompletedAt: true,
         isActive: true,
         createdAt: true,
         gstin: true,
@@ -226,7 +236,19 @@ export const listTenants = asyncHandler(async (req: Request, res: Response) => {
     data: rows.map((row) => ({
       id: row.id,
       businessName: row.businessName,
-      category: row.category,
+      /*
+       * The label the workspace actually picked, and null when it has not picked one.
+       *
+       * Null rather than falling back to the enum: a workspace with no category row has not chosen,
+       * and "restaurant" is a worse answer than "not set" — it is how eleven workspaces came to look
+       * like eleven restaurants. The legacy enum stays in the payload under its own name for anything
+       * that still reads it.
+       */
+      category: row.businessCategory?.label ?? null,
+      /** @deprecated The pre-rows enum. `RESTAURANT` for everybody; do not display it. */
+      legacyCategory: row.category,
+      /** Null means they verified a code and never finished the profile form. */
+      onboardingCompletedAt: row.onboardingCompletedAt,
       isActive: row.isActive,
       createdAt: row.createdAt,
       gstin: row.gstin,
@@ -257,9 +279,19 @@ export const getTenant = asyncHandler(async (req: Request, res: Response) => {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: {
-      id: true, businessName: true, category: true, contactNumber: true, address: true,
+      id: true, businessName: true, contactNumber: true, address: true,
       website: true, isActive: true, createdAt: true, updatedAt: true,
       gstin: true, gstStateCode: true,
+      /*
+       * The category the workspace chose, and the enum that predates the table.
+       *
+       * `category` alone reads `RESTAURANT` for every workspace on the platform — nothing has written
+       * it since categories became rows — so a detail page showing it told every operator that every
+       * customer runs a restaurant. The label is the answer; the enum stays under its own name.
+       */
+      category: true,
+      businessCategory: { select: { id: true, key: true, label: true } },
+      onboardingCompletedAt: true,
       // Which model answers this workspace's customers. Null is the platform default.
       llmVendor: true,
       users: {

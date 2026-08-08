@@ -89,12 +89,17 @@ export default function Tenants() {
                   <tr key={row.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                     <Td>
                       <Link to={`/tenants/${row.id}`} className="font-medium text-slate-800 hover:text-violet-700 hover:underline">
-                        {row.businessName}
+                        {/*
+                          A workspace with no name never finished signing up — the row exists because
+                          somebody verified a code. Saying so beats an empty cell.
+                        */}
+                        {row.businessName || <span className="italic text-slate-400">unnamed</span>}
                       </Link>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-slate-400">
-                          {row.category.replace(/_/g, ' ').toLowerCase()}
+                          {row.category ?? 'category not set'}
                         </span>
+                        {!row.onboardingCompletedAt && <Badge tone="amber">setup unfinished</Badge>}
                         {!row.isActive && <Badge tone="red">suspended</Badge>}
                         {row.gstin && <Badge tone="blue">GST</Badge>}
                       </div>

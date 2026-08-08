@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireSuperAdmin } from './auth.js';
 import * as sa from './super-admin.controller.js';
+import { listSignups } from './signups.js';
 
 // Super admin routes.
 //
@@ -34,6 +35,14 @@ superAdminRoutes.use(requireSuperAdmin);
 
 superAdminRoutes.get('/auth/me', sa.me);
 superAdminRoutes.get('/overview', sa.overview);
+
+/*
+ * The signup funnel: who asked for a code, who verified, who finished.
+ *
+ * Its own module because it is a read across three tables that belong to different features — the OTP
+ * service, tenants and users — and none of them is the natural owner.
+ */
+superAdminRoutes.get('/signups', listSignups);
 
 superAdminRoutes.get('/tenants', sa.listTenants);
 superAdminRoutes.get('/tenants/:tenantId', sa.getTenant);
