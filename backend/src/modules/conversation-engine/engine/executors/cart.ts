@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
+import { customerFacingName } from '../../../../utils/customer-name.js';
 import { NODE_CONFIG_SCHEMAS } from '../../domain/node-types.js';
 import { NodeConfigError, type WorkflowNodeExecutor } from '../types.js';
 
@@ -173,7 +174,10 @@ export const createOrderExecutor: WorkflowNodeExecutor<
       data: {
         tenantId,
         customerId: contact.id,
-        customerName: customerName || contact.name || 'Customer',
+        // Reaches the customer, on the confirmation and on the invoice — so WhatsApp's name
+        // rather than an agent's internal label. A workflow variable still wins: it is what
+        // the customer typed when the flow asked them.
+        customerName: customerName || customerFacingName(contact) || 'Customer',
         contactPhone: contact.phone || contact.waId,
         deliveryAddress: address || 'Not provided',
         subtotal: new Prisma.Decimal(subtotal),

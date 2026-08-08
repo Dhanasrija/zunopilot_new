@@ -153,6 +153,41 @@ export const markAllRead = async (tenantId: string, userId: string): Promise<num
   return count;
 };
 
+/**
+ * Mark everything about one conversation as read.
+ *
+ * **This is what keeps the bell honest.** The badge on a conversation row and the count on
+ * the bell are two different columns describing the same fact — "nobody has looked at this
+ * yet" — and before this they were cleared by different actions. Reading a thread zeroed
+ * `Conversation.unreadCount`; the notification about it stayed unread until someone
+ * separately clicked it in the bell. So the bell said 8 while the Inbox said nothing was
+ * waiting, and neither number was wrong on its own terms.
+ *
+ * Takes a `client` so the caller can run it inside the same transaction as the conversation
+ * reset. Two `updateMany`s that can half-succeed are exactly how the two counters drifted in
+ * the first place.
+ *
+ * Scoped by `visibleTo`, which does real work here beyond authorisation: a `HANDOFF_REQUESTED`
+ * addressed to a *named* colleague is not cleared by someone else opening the thread. Their
+ * notification is about their own queue, not about whether the messages have been seen.
+ *
+ * Not limited to `MESSAGE_RECEIVED`. An order or a handoff raised on a thread you have just
+ * read and dealt with is also no longer news, and filtering by kind would leave the bell
+ * holding rows whose only link is a conversation the agent has already worked.
+ */
+export const markReadForConversation = async (
+  tenantId: string,
+  userId: string,
+  conversationId: string,
+  client: Prisma.TransactionClient = prisma,
+): Promise<number> => {
+  const { count } = await client.notification.updateMany({
+    where: { ...visibleTo(tenantId, userId), conversationId, readAt: null },
+    data: { readAt: new Date() },
+  });
+  return count;
+};
+
 // ── Preferences ───────────────────────────────────────────────────────────────
 
 /**

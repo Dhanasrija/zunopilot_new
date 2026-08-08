@@ -1,6 +1,7 @@
 import type { Conversation, Customer, Tenant } from '@prisma/client';
 import type { TemplateScope } from './types.js';
 import { localNumberOf } from './local-number.js';
+import { customerFacingName } from '../../../utils/customer-name.js';
 
 // Template interpolation for the conversation engine.
 //
@@ -37,7 +38,10 @@ export const buildScope = ({
       category: tenant.category,
     },
     customer: {
-      name: contact.name ?? '',
+      // The customer's own name, not an agent's label for them. Every string a workflow builds
+      // from this scope is on its way to the customer, so `{{customer.name}}` must never carry
+      // an internal note — see `customerFacingName`.
+      name: customerFacingName(contact) ?? '',
       waId: contact.waId,
       phone: contact.phone ?? '',
       // Derived, not stored: `phone` is set to the same full international number on the

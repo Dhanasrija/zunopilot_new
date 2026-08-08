@@ -12,6 +12,7 @@ import {
   useAddToList, useCustomerLists, useRemoveFromList,
 } from '@/lib/customer-lists';
 import { splitNumber } from '@/lib/countries';
+import { displayName, primaryName } from '@/lib/customer-name';
 import { usePermissions } from '@/lib/permissions';
 import { useHasModule } from '@/stores/auth.store';
 import { Input } from '@/components/ui/input';
@@ -44,7 +45,9 @@ import { toast } from 'sonner';
 // still one click away, with lists added around it rather than in front of it.
 
 interface Customer {
-  id: string; name?: string; waId: string; phone?: string; lifetimeSpend: number | string;
+  id: string; name?: string | null; waId: string; phone?: string; lifetimeSpend: number | string;
+  /** WhatsApp's own name, refreshed on every inbound message. Read-only; `name` is yours. */
+  waProfileName?: string | null;
   lastSeenAt?: string; _count?: { orders: number; messages: number };
   /** Free-form labels. Lowercased by the server. */
   tags?: string[];
@@ -192,13 +195,38 @@ function CustomerFormDialog({
             </p>
           </div>
 
+          {/*
+            **This used to warn that the field was about to be destroyed**, and it was telling the
+            truth: the inbound upsert wrote the WhatsApp profile name over `name` on every single
+            message, so a label survived until the customer next said anything. A field whose own
+            help text says not to rely on it is not a feature.
+
+            Now there are two: WhatsApp's name, read-only above, and this one, which is yours.
+          */}
+          {mode === 'edit' && customer?.waProfileName && (
+            <div className="space-y-1">
+              <Label htmlFor="cust-wa-name">WhatsApp profile name</Label>
+              <Input id="cust-wa-name" value={customer.waProfileName} disabled readOnly />
+              <p className="text-caption text-muted-foreground">
+                What they call themselves on WhatsApp — the business name, for a business account.
+                Updated automatically each time they message; not editable here.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1">
-            <Label htmlFor="cust-name">Name</Label>
-            <Input id="cust-name" value={name} autoComplete="off" placeholder="Optional"
-              onChange={(e) => setName(e.target.value)} />
+            <Label htmlFor="cust-name">{mode === 'edit' ? 'Your label' : 'Name'}</Label>
+            <Input
+              id="cust-name"
+              value={name}
+              autoComplete="off"
+              placeholder={mode === 'edit' ? 'Optional — e.g. Ravi, accounts' : 'Optional'}
+              onChange={(e) => setName(e.target.value)}
+            />
             {mode === 'edit' && (
               <p className="text-caption text-muted-foreground">
-                Note: this is overwritten by their WhatsApp profile name on their next message.
+                Shown in brackets after their WhatsApp name, for your team only. Never sent to the
+                customer, and no longer overwritten when they message.
               </p>
             )}
           </div>
@@ -572,7 +600,7 @@ export default function Customers() {
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        aria-label={`Select ${c.name || c.waId}`}
+                        aria-label={`Select ${displayName(c)}`}
                         className="h-4 w-4 rounded border-ink-400 text-accent-600"
                         checked={selectedIds.has(c.id)}
                         onChange={() => toggleRow(c.id)}
@@ -590,15 +618,18 @@ export default function Customers() {
                           aria-hidden
                           className={cn(
                             'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-caption font-semibold',
-                            tintFor(c.name || c.waId),
+                            tintFor(primaryName(c) || c.waId),
                           )}
                         >
-                          {initialsOf(c.name, c.waId)}
+                          {initialsOf(primaryName(c), c.waId)}
                         </span>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <p className="truncate text-sm font-medium text-ink-900">
-                              {c.name || '—'}
+                              {/* WhatsApp's name, with the operator's label after it when there
+                                  is one — "The Jora Group (Ravi — accounts)". Never an em dash
+                                  now: a customer who has messaged always has a profile name. */}
+                              {displayName(c)}
                             </p>
                             {/* Straight to the lead. `stopPropagation` because the row itself
                                 opens the customer dialog, and a link inside a clickable row
@@ -658,7 +689,7 @@ export default function Customers() {
                     <TableCell onClick={(e) => e.stopPropagation()} className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="outline" size="icon" aria-label={`Actions for ${c.name || c.waId}`}>
+                          <Button variant="outline" size="icon" aria-label={`Actions for ${displayName(c)}`}>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -714,7 +745,7 @@ export default function Customers() {
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{detail.data?.name || detail.data?.waId || 'Customer'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{detail.data ? displayName(detail.data) : 'Customer'}</DialogTitle></DialogHeader>
           {detail.data && (
             <div className="space-y-3">
               <div className="grid grid-cols-3 gap-2 text-sm">

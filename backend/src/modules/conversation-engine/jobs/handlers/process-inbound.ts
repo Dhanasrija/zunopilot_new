@@ -12,6 +12,7 @@ import { enqueue, QUEUES, type ProcessInboundMessageJob } from '../queue.js';
 import { linkLeadToCustomer } from '../../../leads/lead.service.js';
 import { handleConsentKeyword } from '../../../marketing/consent.service.js';
 import { notifyInboundMessage } from '../../../notifications/notification.producers.js';
+import { operatorDisplayName } from '../../../../utils/customer-name.js';
 import {
   captureInboundMedia, describeMedia, isMediaType, messageTypeOf,
 } from '../../../media/inbound-media.js';
@@ -79,12 +80,22 @@ const resolveContext = async (
     // sent any message at all — including the "STOP" that removed them. It
     // belongs only in `create`, where it records the one thing that actually
     // happened: this person wrote to the business first.
-    update: { lastSeenAt: new Date(), ...(message.profileName ? { name: message.profileName } : {}) },
+    //
+    // **`name` is now absent for the same class of reason.** It used to be set from
+    // `contacts[].profile.name` on every message, which meant an agent who labelled
+    // someone "Ravi — accounts, chases invoices" lost it the next time Ravi wrote.
+    // `name` is the agent's; `waProfileName` is Meta's and is refreshed here.
+    update: {
+      lastSeenAt: new Date(),
+      ...(message.profileName ? { waProfileName: message.profileName } : {}),
+    },
     create: {
       tenantId: channel.tenantId,
       waId: message.from,
       phone: message.from,
-      name: message.profileName,
+      // Only the profile name on create. An agent's label starts empty and stays empty until
+      // somebody types one — that emptiness is what makes it possible to tell the two apart.
+      waProfileName: message.profileName,
       lastSeenAt: new Date(),
       // Same rule the migration backfilled existing customers with. Without it
       // the backfill would be a one-off and every customer acquired afterwards
@@ -312,7 +323,9 @@ const persistMessage = async (context: ResolvedContext, message: NormalisedInbou
   await notifyInboundMessage({
     tenantId: context.tenant.id,
     conversationId: context.conversation.id,
-    customerName: context.contact.name,
+    // The label an agent typed, after WhatsApp's own name — "The Jora Group (Ravi)". Null
+    // when neither exists, which is what lets the producer fall back to a *masked* number.
+    customerName: operatorDisplayName(context.contact),
     waId: context.contact.waId,
     body: message.text,
     waMessageId: message.externalMessageId,

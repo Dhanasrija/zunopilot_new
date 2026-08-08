@@ -398,9 +398,23 @@ export const openapi = {
     },
     '/inbox/conversations/{id}/read': {
       post: {
-        tags: ['Inbox'], security: auth, summary: 'Clear the unread count',
+        tags: ['Inbox'], security: auth, summary: 'Mark the thread read',
+        description:
+          'Clears both counters that say nobody has looked at this thread: the conversation’s'
+          + ' `unreadCount`, and any unread notification about it that the caller can see. One'
+          + ' transaction, so the bell and the badge cannot disagree. Idempotent — call it on'
+          + ' every thread open.',
         parameters: [pathParam('id', 'Conversation id')],
-        responses: { 200: ok('Marked read', ref('Conversation')), ...errors },
+        responses: {
+          200: ok('Marked read', {
+            type: 'object',
+            properties: {
+              cleared: { type: 'boolean', description: 'False when the id matched no conversation.' },
+              notificationsRead: { type: 'integer' },
+            },
+          }),
+          ...errors,
+        },
       },
     },
     '/inbox/conversations/{id}/assign': {
@@ -1110,7 +1124,23 @@ export const openapi = {
         type: 'object',
         properties: {
           id: { type: 'string', format: 'uuid' },
-          name: { type: 'string', nullable: true },
+          name: {
+            type: 'string',
+            nullable: true,
+            description:
+              'The **operator’s own label** for this person, e.g. `Ravi — accounts`. Null unless'
+              + ' somebody typed one. Never written by the webhook, and never sent to the'
+              + ' customer — use `waProfileName` for anything they will read.',
+          },
+          waProfileName: {
+            type: 'string',
+            nullable: true,
+            description:
+              'What WhatsApp reports this person calls themselves, refreshed on every inbound'
+              + ' message. For a WhatsApp Business account this is the business’s display name.'
+              + ' Read-only: it is the only profile field Meta exposes — there is no contact'
+              + ' photo and nothing marks the sender as a business.',
+          },
           waId: {
             type: 'string',
             description:

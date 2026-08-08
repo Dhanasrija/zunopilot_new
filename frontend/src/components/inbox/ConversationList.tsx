@@ -1,6 +1,6 @@
 import { cn, initialsOf, timeAgo } from '@/lib/utils';
 import { tintFor } from '@/lib/categorical-tint';
-import { displayName, type Conversation, type Scope } from './types';
+import { displayName, primaryName, type Conversation, type Scope } from './types';
 
 // The left pane: three scope pills over a list of conversations.
 //
@@ -54,7 +54,9 @@ const Row = ({ conversation, selected, myId, onSelect }: {
             tintFor(customer.id),
           )}
         >
-          {initialsOf(customer.name, customer.waId)}
+          {/* From WhatsApp's name, not the combined label: "The Jora Group (Ravi)" would
+              initialise to nonsense. */}
+          {initialsOf(primaryName(customer), customer.waId)}
         </span>
 
         <div className="min-w-0 flex-1">

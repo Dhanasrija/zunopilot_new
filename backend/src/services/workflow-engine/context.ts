@@ -6,6 +6,7 @@
 // engine that can reach globals.
 
 import type { Conversation, Customer, Message, Tenant } from '@prisma/client';
+import { customerFacingName } from '../../utils/customer-name.js';
 
 export interface WorkflowVariables { [key: string]: unknown }
 
@@ -38,7 +39,9 @@ export const buildContext = (
     category: tenant?.category ?? '',
   },
   customer: {
-    name: customer?.name ?? '',
+    // The customer's own name, never an agent's internal label — this context feeds templates
+    // whose output is sent to them. See `customerFacingName`.
+    name: (customer ? customerFacingName(customer) : null) ?? '',
     waId: customer?.waId ?? '',
     phone: customer?.phone ?? '',
     lifetimeSpend: customer?.lifetimeSpend != null ? String(customer.lifetimeSpend) : '0',

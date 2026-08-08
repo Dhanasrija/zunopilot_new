@@ -112,6 +112,12 @@ export const updateCustomer = asyncHandler(async (req, res) => {
   //    orphan this record from its conversation and could collide with another.
   //  - lifetimeSpend: derived by incrementing on DELIVERED orders. Hand-editing
   //    it would silently corrupt revenue analytics.
+  //  - waProfileName: it is what WhatsApp reports, refreshed on every inbound message.
+  //    Editing it would be overwritten by the next thing the customer said. `name` is the
+  //    field for what *you* want to call them, and it is right here.
+  //
+  // Not enforced by omission alone — `customer.validator.ts` whitelists the body fields and
+  // this destructures three of them, so an extra key in the request reaches nothing.
   const data: Prisma.CustomerUpdateInput = {};
   if (name !== undefined) data.name = name?.trim() || null;
   if (phone !== undefined) data.phone = phone?.trim() || null;

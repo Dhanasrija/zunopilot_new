@@ -49,15 +49,24 @@ describe('the four states', () => {
     expect(tick()).toHaveAccessibleName('Delivered');
   });
 
-  it('**gives the reason a message failed**', () => {
-    // The difference between an agent retrying pointlessly and an agent knowing the number is
-    // not on the sandbox allow-list.
+  it('**leaves the reason to the bubble, and does not repeat it**', () => {
+    /*
+     * This assertion used to be the opposite: the reason was on the tick's accessible name,
+     * because it is the difference between an agent retrying pointlessly and an agent knowing
+     * the number is not on the allow-list.
+     *
+     * That was right about the reason mattering and wrong about where to put it. On the tick it
+     * lived in `title`, which needs a hover held for about a second and **does not exist on a
+     * touch screen** — so in practice nobody ever saw it. It is now text inside the bubble
+     * (see `MessageBubble.test.tsx`), and leaving it here as well would make a screen reader
+     * announce the whole reason twice for one message.
+     */
     render(<DeliveryTick message={message({
       status: 'FAILED',
       statusError: '131030: Add recipient phone number to recipient list',
     })} />);
 
-    expect(tick()).toHaveAccessibleName(/Add recipient phone number/);
+    expect(tick()).toHaveAccessibleName('Not delivered');
   });
 });
 

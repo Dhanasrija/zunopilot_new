@@ -100,6 +100,26 @@ function RaiseFromConversation({ conversationId, customerName, open, onOpenChang
   );
 }
 
+/**
+ * Is this tab in front?
+ *
+ * State rather than a bare read of `document.visibilityState`, because the answer changes while
+ * the page is mounted and the thing that depends on it — marking a thread read — has to run
+ * again when the agent comes back. A one-shot check would leave a badge sitting on the thread
+ * they are looking at until the next message arrived.
+ */
+const useTabVisible = (): boolean => {
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+
+  useEffect(() => {
+    const onChange = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+
+  return visible;
+};
+
 export default function Inbox() {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
@@ -117,6 +137,7 @@ export default function Inbox() {
   const [scope, setScope] = useState<Scope>('all');
   const [raisingTicket, setRaisingTicket] = useState(false);
   const { can } = usePermissions();
+  const tabVisible = useTabVisible();
   const hasSupport = useHasModule('SUPPORT');
   const myId = useAuthStore((state) => state.user?.id);
 
@@ -209,6 +230,71 @@ export default function Inbox() {
     }
     if (switched || following.current) el.scrollTop = el.scrollHeight;
   }, [selectedId, lastMessageId, list?.length]);
+
+  // ── Telling the server the thread has been read ─────────────────────────────
+  //
+  // **This is the half that never existed.** `POST /conversations/:id/read` has been there all
+  // along and nothing called it, so `Conversation.unreadCount` only ever incremented — which
+  // turned the badge on every row into a lifetime count of inbound messages, and left the bell
+  // holding notifications for threads an agent had read hours ago.
+  //
+  // Fires when the thread is opened and again whenever a new message lands in the open thread,
+  // which is what WhatsApp Web does.
+
+  const markRead = useMutation({
+    mutationFn: async (conversationId: string) => api.post(`/inbox/conversations/${conversationId}/read`),
+    onSuccess: () => {
+      // Both, because one action clears both counters. The conversation list polls every second
+      // and the bell every thirty, so without this the badge would clear and the bell would
+      // keep claiming eight things were waiting for up to half a minute.
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+    },
+    // No onError toast. Failing to *record* a read is not something an agent can act on, and a
+    // toast every second from a poll-driven page would be worse than the stale badge.
+  });
+
+  /**
+   * The (thread, newest message) pair already reported.
+   *
+   * **Not what stops a POST per poll today** — that is the narrow dependency list below, plus
+   * react-query returning the identical array when a refetch is structurally equal, so nothing
+   * the effect watches changes while a thread sits idle. Verified by removing this ref and
+   * finding the "once per thread" test still passed.
+   *
+   * It earns its place one step further out: swap a dependency for anything that ticks on every
+   * refetch — `messages.dataUpdatedAt` is the obvious slip — and this is the only thing standing
+   * between an open Inbox and one request per second, per tab, all day. With the ref that edit is
+   * harmless; without it the test fails immediately. Cheap insurance against a change nobody
+   * would look at twice.
+   *
+   * The pair is the right key: the same thread with a new message at the end is genuinely
+   * something new to mark read, and nothing else is.
+   */
+  const readReported = useRef<string | null>(null);
+
+  useEffect(() => {
+    // `isSuccess` rather than firing on selection: the id changes before the fetch resolves, so
+    // without it every open would report twice — once with no messages, once with them.
+    if (!selectedId || !messages.isSuccess) return;
+    /*
+     * **Only while the tab is in front.**
+     *
+     * The Inbox polls in the background, so a tab left open on a thread would silently swallow
+     * every message that arrived overnight — marked read, notification cleared, nobody told.
+     * Being open is not the same as being looked at.
+     */
+    if (!tabVisible) return;
+
+    // `?? 'empty'` rather than requiring a message: a thread whose messages have all been
+    // removed can still carry an unread count, and it should clear on open like any other.
+    const key = `${selectedId}:${lastMessageId ?? 'empty'}`;
+    if (readReported.current === key) return;
+    readReported.current = key;
+    markRead.mutate(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the mutation is stable; keying on
+    // it would re-run this on every render of the page.
+  }, [selectedId, lastMessageId, messages.isSuccess, tabVisible]);
 
   const send = useMutation({
     mutationFn: async () => {

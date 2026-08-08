@@ -16,13 +16,46 @@ import {
  * as SENT.
  */
 
-const customer = { name: 'Naveen', phone: null, waId: '917702000350' };
+/*
+ * A customer who has messaged the business.
+ *
+ * `waProfileName` set and `name` null is the ordinary shape: WhatsApp reports what they call
+ * themselves on every inbound message, and the operator's label stays empty until somebody types
+ * one. This fixture used to carry only `name`, which is why the leak test below was invisible —
+ * with one field, "prefer the profile name" and "use the label" are the same code.
+ */
+const customer = { name: null as string | null, waProfileName: 'Naveen', phone: null, waId: '917702000350' };
 
 describe('resolveVariables', () => {
   it('**fills a placeholder from the customer, per recipient**', () => {
     const values = { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } };
     expect(resolveVariables(['1'], values, customer)).toEqual(['Naveen']);
-    expect(resolveVariables(['1'], values, { ...customer, name: 'Priya' })).toEqual(['Priya']);
+    // Overriding `waProfileName`, not `name` — the greeting follows what WhatsApp says they are
+    // called, which is the field that changes when they rename their profile.
+    expect(resolveVariables(['1'], values, { ...customer, waProfileName: 'Priya' })).toEqual(['Priya']);
+  });
+
+  it('**never sends the operator’s private label to the customer**', () => {
+    /*
+     * The property this whole two-column split exists for. `Customer.name` is an internal note —
+     * "Ravi — accounts, chases invoices" — and it is right there next to the profile name in
+     * every recipient row. Resolving it here would put it in `Hi {{1}},` on a message Ravi reads.
+     *
+     * Not a hypothetical: `name` was the *only* name field until this change, so `customer.name`
+     * is exactly what a reasonable person would reach for.
+     */
+    const values = { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } };
+    const labelled = { ...customer, waProfileName: 'Ravi Kumar', name: 'Ravi — accounts, chases invoices' };
+
+    expect(resolveVariables(['1'], values, labelled)).toEqual(['Ravi Kumar']);
+  });
+
+  it('uses the label when WhatsApp has given no name — an imported contact', () => {
+    // Nobody has ever messaged, so there is no profile name and the operator's entry is the only
+    // name anyone has. An empty parameter is rejected by Meta outright.
+    const values = { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } };
+    expect(resolveVariables(['1'], values, { ...customer, waProfileName: null, name: 'Asha' }))
+      .toEqual(['Asha']);
   });
 
   it('**falls back when the customer has no name**', () => {
@@ -30,8 +63,11 @@ describe('resolveVariables', () => {
     // parameter is rejected by Meta, so this one recipient would fail and no other — the
     // hardest kind of failure to notice.
     const values = { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } };
-    expect(resolveVariables(['1'], values, { ...customer, name: null })).toEqual(['there']);
-    expect(resolveVariables(['1'], values, { ...customer, name: '   ' })).toEqual(['there']);
+    const nameless = { ...customer, waProfileName: null, name: null };
+    expect(resolveVariables(['1'], values, nameless)).toEqual(['there']);
+    // Whitespace in either field counts as absent, or the greeting becomes "Hi    ,".
+    expect(resolveVariables(['1'], values, { ...nameless, waProfileName: '   ' })).toEqual(['there']);
+    expect(resolveVariables(['1'], values, { ...nameless, name: '   ' })).toEqual(['there']);
   });
 
   it('uses the fallback when there is no customer at all — a test send', () => {
@@ -86,7 +122,7 @@ describe('sanitiseParam', () => {
 
   it('applies to a resolved customer name too', () => {
     expect(resolveVariables(['1'], { 1: { kind: 'CUSTOMER', field: 'name', fallback: 'there' } }, {
-      ...customer, name: 'Naveen\nKumar',
+      ...customer, waProfileName: 'Naveen\nKumar',
     })).toEqual(['Naveen Kumar']);
   });
 });

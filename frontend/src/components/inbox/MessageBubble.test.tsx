@@ -132,6 +132,68 @@ describe('the delivery tick', () => {
   });
 });
 
+describe('why a message did not arrive', () => {
+  /*
+   * **The reason has to be readable without a hover.** It was already present as the tick's
+   * `title`, and that made it effectively invisible: a native tooltip needs a hover held for
+   * about a second, and there is no hover on a touch screen — this Inbox goes down to 375px.
+   * An agent staring at a red icon cannot tell "the 24-hour window closed" from "this number is
+   * not on the allow-list", and those want opposite responses.
+   */
+
+  it('**shows Meta’s reason as text in the bubble**', () => {
+    render(<MessageBubble message={message({
+      status: 'FAILED',
+      statusError: '131047: Message failed to send because more than 24 hours have passed',
+    })} myId={MY_ID} />);
+
+    // `getByText`, not an accessible name — the point is that it is on screen, not merely
+    // reachable by a screen reader that knows to look at the icon.
+    expect(screen.getByText(/more than 24 hours have passed/)).toBeInTheDocument();
+  });
+
+  it('**says a reason is missing rather than showing a bare icon**', () => {
+    /*
+     * Meta only attaches `errors[]` to some failures, and any message that failed before
+     * delivery statuses were captured has nothing stored — Meta never replays a status webhook,
+     * so those are unrecoverable. "no reason recorded" is true of both; "WhatsApp gave no
+     * reason" would be inventing a fact about the past.
+     */
+    render(<MessageBubble message={message({ status: 'FAILED', statusError: null })} myId={MY_ID} />);
+    expect(screen.getByText('Not delivered — no reason recorded')).toBeInTheDocument();
+  });
+
+  it('does not announce the reason twice', () => {
+    // The tick carries *that* it failed; the text carries *why*. Both saying why would make a
+    // screen reader read the whole sentence twice for one message.
+    render(<MessageBubble message={message({
+      status: 'FAILED', statusError: '131030: Add recipient phone number to recipient list',
+    })} myId={MY_ID} />);
+
+    expect(screen.getByRole('img')).toHaveAccessibleName('Not delivered');
+    expect(screen.getByText(/Add recipient phone number/)).toBeInTheDocument();
+  });
+
+  it('stays quiet on a message that did arrive', () => {
+    for (const status of ['SENT', 'DELIVERED', 'READ'] as const) {
+      const { unmount } = render(<MessageBubble message={message({ status })} myId={MY_ID} />);
+      expect(screen.queryByText(/Not delivered/), status).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('**stays quiet on an inbound row that claims FAILED**', () => {
+    // We have no delivery claim to make about a message the customer sent. A row that
+    // contradicts itself gets silence, not a red banner on the customer's own message.
+    render(<MessageBubble message={message({
+      direction: 'INBOUND', status: 'FAILED', statusError: 'should never be shown',
+    })} myId={MY_ID} />);
+
+    expect(screen.queryByText(/Not delivered/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/should never be shown/)).not.toBeInTheDocument();
+  });
+});
+
 describe('the actions menu', () => {
   const open = async () => {
     await userEvent.click(screen.getByRole('button', { name: /Message actions/i }));
