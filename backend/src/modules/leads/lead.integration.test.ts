@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../../test-support/members.js';
 import request from 'supertest';
 import { prisma } from '../../config/prisma.js';
 import { buildApp } from '../../app.js';
@@ -453,6 +454,8 @@ describe('the link between a lead and a customer, seen from Customers', () => {
     const user = await prisma.user.create({
       data: { tenantId: TENANT_A, phone: '15551110099', fullName: 'Desk', role: 'AGENT', roleId: role.id },
     });
+    // This person is created inside the test body, so no hook can cover them.
+    await seedMemberships();
 
     const response = await listCustomers(signToken({ userId: user.id }));
     const row = response.body.data.find((c: { id: string }) => c.id === customer.id);
@@ -511,3 +514,16 @@ describe('the link between a lead and a customer, seen from Customers', () => {
     expect(detail.body.data.lead.customer.conversations).toEqual([{ id: conversation.id }]);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

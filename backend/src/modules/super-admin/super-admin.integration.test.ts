@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../../test-support/members.js';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -553,3 +554,16 @@ describe('the connector type catalog', () => {
     await request(app).get('/sa/connector-types').expect(401);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

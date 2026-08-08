@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../../test-support/members.js';
 import { prisma } from '../../config/prisma.js';
 import { activePrice, syncPriceCatalogue } from './billing.service.js';
 import { issueInvoiceForPayment } from './invoice.service.js';
@@ -198,3 +199,16 @@ describe('an invoice issued before a GSTIN is configured', () => {
     expect(invoice.notes).toContain(DISCLOSURES.tax);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

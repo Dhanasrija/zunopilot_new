@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../test-support/members.js';
 import request from 'supertest';
 import { buildApp } from '../app.js';
 import { prisma } from '../config/prisma.js';
@@ -97,6 +98,16 @@ const makeWorkspace = async () => {
     },
   });
 
+  /*
+   * The memberships the product would have written.
+   *
+   * Inside the fixture rather than in a file-level `beforeEach`, because this fixture is built
+   * by a `beforeEach` inside the `describe` — and an outer hook always runs *before* an inner
+   * one, whatever order they appear in the file. A file-level hook would seed an empty database
+   * and every test here would 401 once `requireAuth` reads memberships.
+   */
+  await seedMemberships();
+
   return {
     conversation,
     lead,
@@ -194,3 +205,4 @@ describe('taking a conversation off a colleague', () => {
     expect(await assigneeOf()).toBe(ctx.holder.id);
   });
 });
+
