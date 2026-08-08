@@ -200,7 +200,21 @@ const seed = async (tenantId: string, phoneStem: string): Promise<Seeded> => {
 
   return {
     tenantId,
-    token: signToken({ userId: owner.id }),
+    /*
+     * **With the workspace claim, deliberately.**
+     *
+     * This was `signToken({ userId })` — no claim — which sent every request in this file through
+     * `membershipFor`'s legacy branch: `active.length === 1 ? active[0] : null`. That made a
+     * tenant-isolation suite depend on the owner having *exactly one* membership at the instant of
+     * each request, seeded by a whole-database scan in a `beforeEach`. It flaked, rarely, as a 401
+     * where a 200 was expected — and it would have broken outright when the legacy branch is deleted
+     * (dated 2026-08-16 in `middleware/auth.ts`).
+     *
+     * A file about which workspace a request acts in should say which workspace it means. The
+     * no-claim path still has its own coverage in `membership-auth.integration.test.ts`, where it is
+     * the subject rather than an implementation detail.
+     */
+    token: signToken({ userId: owner.id, tenantId }),
     colleagueId: colleague.id,
     customerId: customer.id,
     conversationId: conversation.id,

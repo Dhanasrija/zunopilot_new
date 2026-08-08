@@ -742,20 +742,63 @@ describe('which model answers a workspace', () => {
    * The property worth protecting is the refusal. Pinning a workspace to a vendor with no key on this
    * server produces a workspace whose every message quietly falls back — working, on the wrong model,
    * with the console displaying the one it is not using.
+   *
+   * ── Every case below sets the keys it needs ──────────────────────────────────
+   *
+   * The first version of these tests said "OPENAI is configured in the test environment", which was
+   * true on the laptop they were written on and false in CI, where no vendor key exists at all — so
+   * the console correctly refused the pin and three tests failed for the right reason. Reading the
+   * ambient environment is the same mistake that let a hardcoded `available: true` survive a mutation
+   * check earlier in this work.
+   *
+   * So each case builds a fresh app against an environment it states. `env.ts` snapshots
+   * `process.env` at import, which is why this is `resetModules` rather than assignment.
    */
+
+  /**
+   * Run something against an app whose vendor keys are exactly these.
+   *
+   * A blank string rather than `delete`: `.env` is loaded on import, and dotenv fills in any key that
+   * is *absent* — so deleting one hands the developer's real key back and the test stops testing what
+   * it says.
+   */
+  const withVendors = async (
+    keys: { OPENAI_API_KEY?: string; GROQ_LLM_API_KEY?: string },
+    body: (app: ReturnType<typeof buildSuperAdminApp>) => Promise<void>,
+  ) => {
+    const saved: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries({ OPENAI_API_KEY: '', GROQ_LLM_API_KEY: '', ...keys })) {
+      saved[key] = process.env[key];
+      process.env[key] = value;
+    }
+    vi.resetModules();
+    try {
+      const { buildSuperAdminApp: build } = await import('../../superadmin-server.js');
+      await body(build());
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      vi.resetModules();
+    }
+  };
+
   it('**pins a workspace to a vendor, and un-pins it**', async () => {
     const token = await login();
 
-    // OPENAI is configured in the test environment; GROQ's availability depends on the box, so this
-    // asserts on the one that is always there.
-    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
-      .send({ vendor: 'OPENAI', note: 'cost test' }).expect(200);
+    await withVendors({ OPENAI_API_KEY: 'sk-test-openai' }, async (fresh) => {
+      await request(fresh).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+        .send({ vendor: 'OPENAI', note: 'cost test' }).expect(200);
+    });
 
     expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
       .toBe('OPENAI');
 
     // Null is a real choice — it is how an operator hands a workspace back to the platform default,
-    // so that changing `LLM_VENDOR` later reaches it again.
+    // so that changing `LLM_VENDOR` later reaches it again. It needs no key: un-pinning is always
+    // possible, which matters because the alternative would trap a workspace on a vendor whose key
+    // has since been removed.
     const back = await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
       .send({ vendor: null }).expect(200);
 
@@ -764,35 +807,28 @@ describe('which model answers a workspace', () => {
   });
 
   it('**refuses a vendor with no API key on this server**', async () => {
+    // A stored choice nothing can serve would make every message fall back to the platform default
+    // while the console showed the pinned vendor — worse than refusing.
     const token = await login();
 
-    // Blanked for this request only. A stored choice nothing can serve would make every message fall
-    // back to the platform default while the console showed the pinned vendor — worse than refusing.
-    const saved = process.env.GROQ_LLM_API_KEY;
-    process.env.GROQ_LLM_API_KEY = '';
-    vi.resetModules();
-    try {
-      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
-      const fresh = buildSuperAdminApp();
+    await withVendors({ OPENAI_API_KEY: 'sk-test-openai' }, async (fresh) => {
       const res = await request(fresh).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
         .set(asAdmin(token)).send({ vendor: 'GROQ' }).expect(400);
 
       expect(res.body.message).toContain('GROQ_LLM_API_KEY');
       expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
         .toBeNull();
-    } finally {
-      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
-      else process.env.GROQ_LLM_API_KEY = saved;
-      vi.resetModules();
-    }
+    });
   });
 
   it('records who changed it, and to what', async () => {
     // This changes which vendor is billed for a workspace's traffic. Six months later the question is
     // "who moved this workspace and why", and only the audit trail can answer it.
     const token = await login();
-    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
-      .send({ vendor: 'OPENAI', note: 'latency complaint' }).expect(200);
+    await withVendors({ OPENAI_API_KEY: 'sk-test-openai' }, async (fresh) => {
+      await request(fresh).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+        .send({ vendor: 'OPENAI', note: 'latency complaint' }).expect(200);
+    });
 
     const event = await prisma.auditEvent.findFirstOrThrow({
       where: { tenantId: TENANT_A, action: 'tenant.llm_vendor_changed' },
@@ -804,44 +840,27 @@ describe('which model answers a workspace', () => {
 
   it('**tells the console what each option resolves to, and which are unavailable**', async () => {
     const token = await login();
-    const res = await request(app).get(`/sa/tenants/${TENANT_A}`).set(asAdmin(token)).expect(200);
 
-    const { llm } = res.body.data;
-    expect(llm.vendors.map((v: { vendor: string }) => v.vendor)).toEqual(['OPENAI', 'GROQ']);
-    // A model name per option, so the selector offers a model rather than a brand.
-    const openai = llm.vendors.find((v: { vendor: string }) => v.vendor === 'OPENAI');
-    expect(openai.available).toBe(true);
-    expect(openai.model).toBeTruthy();
-    // And that generation is pinned, so nobody wonders why a Groq workspace's drafts name a GPT model.
-    expect(llm.authoringVendor).toBe('OPENAI');
-  });
+    // One vendor configured and one not, stated rather than inherited — so the payload has to report
+    // both states in the same response and cannot be right by accident.
+    await withVendors({ OPENAI_API_KEY: 'sk-test-openai' }, async (fresh) => {
+      const res = await request(fresh).get(`/sa/tenants/${TENANT_A}`).set(asAdmin(token)).expect(200);
 
-  it('**reports a vendor with no key here as unavailable**', async () => {
-    /*
-     * Asserted against a *blanked* key rather than against whatever this box happens to have.
-     *
-     * The first version checked `available === true` for OpenAI, which is true on any developer
-     * machine whether the field is computed or hardcoded — so hardcoding it would have gone
-     * unnoticed, and the console would have offered a model the server cannot reach.
-     */
-    const token = await login();
-    const saved = process.env.GROQ_LLM_API_KEY;
-    process.env.GROQ_LLM_API_KEY = '';
-    vi.resetModules();
-    try {
-      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
-      const res = await request(buildSuperAdminApp()).get(`/sa/tenants/${TENANT_A}`)
-        .set(asAdmin(token)).expect(200);
+      const { llm } = res.body.data;
+      expect(llm.vendors.map((v: { vendor: string }) => v.vendor)).toEqual(['OPENAI', 'GROQ']);
 
-      const groq = res.body.data.llm.vendors.find((v: { vendor: string }) => v.vendor === 'GROQ');
+      const openai = llm.vendors.find((v: { vendor: string }) => v.vendor === 'OPENAI');
+      // A model name per option, so the selector offers a model rather than a brand.
+      expect(openai.available).toBe(true);
+      expect(openai.model).toBeTruthy();
+
+      const groq = llm.vendors.find((v: { vendor: string }) => v.vendor === 'GROQ');
       expect(groq.available).toBe(false);
-      // And no model claimed for it, so the option cannot read "GROQ — llama-…" while unusable.
       expect(groq.model).toBeNull();
-    } finally {
-      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
-      else process.env.GROQ_LLM_API_KEY = saved;
-      vi.resetModules();
-    }
+
+      // And that generation is pinned, so nobody wonders why a Groq workspace's drafts name a GPT model.
+      expect(llm.authoringVendor).toBe('OPENAI');
+    });
   });
 
   it('needs an operator token — a customer token is not enough', async () => {
