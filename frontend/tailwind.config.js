@@ -173,26 +173,6 @@ export default {
       // allowlist for it.
       'wa-green': 'oklch(0.72 0.19 150 / <alpha-value>)',
 
-      /*
-       * The read tick, and it is **not** WhatsApp's own blue.
-       *
-       * WhatsApp uses #53BDEB, which works because its outbound bubble is pale green. Ours is a
-       * saturated violet (`accent-600`), and #53BDEB measures **2.51:1** on it — present if you
-       * already know to look for it, invisible otherwise, which is useless for the one pixel
-       * that tells an agent the customer read the message.
-       *
-       * This is the same hue family, lightened until it clears the bar: 3.60:1 on `accent-600`.
-       * That bar is 3:1, not 4.5:1, and the reason is recorded in `check-contrast.mjs` — a tick
-       * is a non-text graphic. 4.5:1 is unreachable for any blue here: it needs a relative
-       * luminance of 0.83, and blue contributes only 0.0722 of luminance, so solving for it
-       * produces a pale cyan that no longer reads as a state at all.
-       *
-       * Deliberately a token of its own rather than `wa-ui.tick`: that block reproduces
-       * WhatsApp's chrome inside template previews and says it must never be used as a brand
-       * colour. Reaching for it here would pass `check-brand.mjs`, whose rule is keyed on
-       * `wa-green`, while breaking the rule the config actually states.
-       */
-      'wa-tick-read': 'oklch(0.86 0.15 230 / <alpha-value>)',
       // Darkened from the guidelines' original 0.62, which measured **3.27:1** on
       // `surface-0` and failed the 4.5:1 that §2.4 demands — the document
       // contradicted itself. 0.52 clears AA on both surfaces and on its own tint.
@@ -273,10 +253,46 @@ export default {
       //
       // Hex rather than OKLCH on purpose: these are WhatsApp's published values and
       // should be recognisably those, not our re-interpretation of them.
+      /*
+       * ── Extended to the Inbox thread, deliberately ──────────────────────
+       *
+       * These now colour the shared Inbox as well as a template preview, and that is a
+       * widening of scope worth stating rather than sliding in. The reason is the same one
+       * the block above gives: this shows a WhatsApp conversation as the customer sees it.
+       * An operator who lives in WhatsApp all day should not have to learn a second visual
+       * language to read the same messages. §2.2's hard rule is that WhatsApp green is
+       * never a *brand* colour — never a button, nav, logo or heading — and nothing here
+       * breaks that. `accent-600` still owns every action in the product.
+       *
+       * **Two of WhatsApp's own values do not survive contact with §2.4, and they are
+       * corrected rather than copied.** Same precedent as `success` and `wa-green` above,
+       * both darkened from the guidelines' own numbers for exactly this reason:
+       *
+       *   • `tick` was #53BDEB. On WhatsApp's own bubble that measures **1.92:1** — the
+       *     famous blue tick fails the 3:1 non-text bar inside WhatsApp itself. Darkened
+       *     to 3.21:1 on the bubble and 3.56:1 on white, hue and chroma unchanged, so it
+       *     still reads as the blue tick.
+       *   • `meta` (timestamps, the grey ticks) would be #667781, which is **4.19:1** on
+       *     the green bubble — under §2.4's 4.5:1. Darkened to 4.74:1.
+       *
+       * Not adopted: WhatsApp's doodle wallpaper. `chat` is the flat tone only. The
+       * pattern is Meta's own artwork and reproducing it is a different question from
+       * using a colour, which is a question nobody needs to ask.
+       */
       'wa-ui': {
-        chat: '#E5DDD5',
+        // The thread background behind the bubbles.
+        chat: '#EFEAE2',
         header: '#075E54',
-        tick: '#53BDEB',
+        // Outbound — the pale green everyone recognises. Message text on it is 15.75:1.
+        'bubble-out': '#D9FDD3',
+        // Inbound. Its own token rather than `bg-white`, which §2.1 bans outright.
+        'bubble-in': '#FFFFFF',
+        // Message text. WhatsApp's own, and it needs no correction: 15.75:1 and 17.46:1.
+        ink: '#111B21',
+        // Timestamps and the sent/delivered ticks. Corrected — see above.
+        meta: 'oklch(0.53 0.02 240 / <alpha-value>)',
+        // The read tick. Corrected — see above.
+        tick: 'oklch(0.62 0.13 235 / <alpha-value>)',
       },
 
       // Semantic aliases the shadcn primitives are built on, re-pointed at brand

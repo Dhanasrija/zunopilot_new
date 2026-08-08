@@ -54,6 +54,20 @@ export interface Message {
    * `delivered` that arrives after a `read` — so a set `readAt` beside a null `deliveredAt` is
    * the guard working, not missing data. Coalescing one from the other invents a fact.
    */
+  /**
+   * The message this one quotes, as a snippet. Null when nothing was quoted, and also when the
+   * quoted message has since been removed from the inbox — the server drops it in that case, so
+   * a removal cannot leak back through a reply to it.
+   *
+   * One level deep: a reply to a reply shows its own quote, not a chain. WhatsApp does the same.
+   */
+  replyTo?: {
+    id: string;
+    direction: 'INBOUND' | 'OUTBOUND';
+    type: string;
+    body?: string | null;
+  } | null;
+
   status?: 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'RECEIVED';
   deliveredAt?: string | null;
   readAt?: string | null;

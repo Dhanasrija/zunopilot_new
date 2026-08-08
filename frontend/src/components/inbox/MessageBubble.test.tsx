@@ -132,57 +132,116 @@ describe('the delivery tick', () => {
   });
 });
 
-describe('removing a message', () => {
-  const remove = () => screen.queryByRole('button', { name: /Remove from inbox/i });
+describe('the actions menu', () => {
+  const open = async () => {
+    await userEvent.click(screen.getByRole('button', { name: /Message actions/i }));
+  };
+  const item = (name: RegExp) => screen.queryByRole('menuitem', { name });
 
-  it('**is offered only to someone who may do it**', () => {
-    const { unmount } = render(<MessageBubble message={message()} myId={MY_ID} />);
-    expect(remove()).not.toBeInTheDocument();
-    unmount();
+  it('**offers Reply and Remove, in that order**', async () => {
+    // A menu rather than two icons, because the list is going to grow — React, Star, Pin,
+    // Forward and Copy are all obvious next candidates, and five buttons beside every bubble
+    // in a thread of five hundred is not a design.
+    render(<MessageBubble
+      message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} onReply={vi.fn()}
+    />);
+    await open();
 
-    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
-    expect(remove()).toBeInTheDocument();
+    const labels = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(labels).toEqual(['Reply', 'Remove from inbox']);
   });
 
-  it('reports the click, without confirming first', async () => {
-    // One row, visibly identified. A dialog on every tidy-up trains people to click through
-    // dialogs, which is what makes the one on "clear the whole thread" worth having.
-    const onDelete = vi.fn();
-    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={onDelete} />);
+  it('**says "Remove from inbox", not "Delete"**', async () => {
+    /*
+     * WhatsApp has no unsend, so the customer keeps their copy — and this is a soft delete
+     * besides. WhatsApp's own menu says "Delete"; a menu has room for the accurate word, and
+     * promising an unsend the platform cannot do is the one thing this label must not do.
+     */
+    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
+    await open();
 
-    await userEvent.click(remove()!);
+    expect(item(/Remove from inbox/i)).toBeInTheDocument();
+    expect(item(/^Delete$/)).not.toBeInTheDocument();
+  });
+
+  it('shows no menu at all when neither action is available', () => {
+    // An empty menu is worse than an absent one.
+    render(<MessageBubble message={message()} myId={MY_ID} />);
+    expect(screen.queryByRole('button', { name: /Message actions/i })).not.toBeInTheDocument();
+  });
+
+  it('drops Remove for someone without the permission, keeping Reply', async () => {
+    render(<MessageBubble message={message()} myId={MY_ID} onReply={vi.fn()} />);
+    await open();
+
+    expect(item(/Reply/i)).toBeInTheDocument();
+    expect(item(/Remove from inbox/i)).not.toBeInTheDocument();
+  });
+
+  it('reports each action to the page', async () => {
+    const onReply = vi.fn();
+    const onDelete = vi.fn();
+    render(<MessageBubble
+      message={message()} myId={MY_ID} canDelete onDelete={onDelete} onReply={onReply}
+    />);
+
+    await open();
+    await userEvent.click(item(/Reply/i)!);
+    expect(onReply).toHaveBeenCalledOnce();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    await open();
+    await userEvent.click(item(/Remove from inbox/i)!);
     expect(onDelete).toHaveBeenCalledOnce();
   });
 
   it('is reachable by keyboard', async () => {
-    /*
-     * A real focus target, which is what a `<div onClick>` would quietly lose.
-     *
-     * There is no hover-reveal to test any more: the control is always rendered, quietly. An
-     * earlier version hid it behind `group-hover`, which meant it never appeared at all on a
-     * touch screen — and this Inbox goes down to 375px.
-     */
+    // A real focus target, which is what a `<div onClick>` would quietly lose. There is no
+    // hover-reveal to test: the trigger is always rendered, quietly — an earlier version hid it
+    // behind `group-hover`, which meant it never appeared at all on a touch screen.
     render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
 
     await userEvent.tab();
-    expect(remove()).toHaveFocus();
+    expect(screen.getByRole('button', { name: /Message actions/i })).toHaveFocus();
+  });
+});
+
+describe('a message that quotes another', () => {
+  const quoting = (over: Partial<NonNullable<Message['replyTo']>> = {}) => message({
+    replyTo: {
+      id: 'q1', direction: 'INBOUND', type: 'TEXT', body: 'Can you share the swagger link?', ...over,
+    },
   });
 
-  it('**says the customer keeps their copy**', () => {
+  it('**shows what it is replying to**', () => {
+    // The whole point: a customer who sends five things and then answers the third one is
+    // unreadable in a flat transcript.
+    render(<MessageBubble message={quoting()} myId={MY_ID} />);
+    expect(screen.getByText(/Can you share the swagger link/)).toBeInTheDocument();
+  });
+
+  it('names who is being quoted, not just the words', () => {
+    const { unmount } = render(<MessageBubble message={quoting()} myId={MY_ID} />);
+    expect(screen.getByText('Customer')).toBeInTheDocument();
+    unmount();
+
+    render(<MessageBubble message={quoting({ direction: 'OUTBOUND' })} myId={MY_ID} />);
+    expect(screen.getByText('You')).toBeInTheDocument();
+  });
+
+  it('describes a quoted file rather than showing an empty block', () => {
+    render(<MessageBubble message={quoting({ type: 'IMAGE', body: null })} myId={MY_ID} />);
+    expect(screen.getByText('[image]')).toBeInTheDocument();
+  });
+
+  it('**renders no quote when the server withheld it**', () => {
     /*
-     * The label is the only place a person learns this. WhatsApp has no unsend, so "Delete" would
-     * promise something the platform cannot do — an agent would believe they had recalled a
-     * message that is still sitting on somebody's phone.
+     * The server nulls `replyTo` when the quoted message has been removed from the inbox, so a
+     * removal cannot leak back through a reply to it. The component's job is simply to believe
+     * that — no placeholder, no "message deleted" row that puts the fact back on screen.
      */
-    render(<MessageBubble message={message()} myId={MY_ID} canDelete onDelete={vi.fn()} />);
-    expect(remove()).toHaveAccessibleName(/customer keeps their copy/i);
-  });
-
-  it('is offered on an inbound message too', () => {
-    // A customer can send something an agent needs out of a shared screen just as easily.
-    render(<MessageBubble
-      message={message({ direction: 'INBOUND' })} myId={MY_ID} canDelete onDelete={vi.fn()}
-    />);
-    expect(remove()).toBeInTheDocument();
+    render(<MessageBubble message={message({ replyTo: null })} myId={MY_ID} />);
+    expect(screen.queryByText('Customer')).not.toBeInTheDocument();
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
   });
 });

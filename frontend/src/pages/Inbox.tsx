@@ -106,6 +106,14 @@ export default function Inbox() {
   const initial = params.get('conversationId');
   const [selectedId, setSelectedId] = useState<string | null>(initial);
   const [draft, setDraft] = useState('');
+  /*
+   * The message the next send will quote, held as an id rather than the row.
+   *
+   * The row would go stale — the thread refetches every second, and a quote rendered from a
+   * four-second-old copy would keep showing a message somebody had just removed. Resolved out of
+   * the live list below instead.
+   */
+  const [replyToId, setReplyToId] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [raisingTicket, setRaisingTicket] = useState(false);
   const { can } = usePermissions();
@@ -195,16 +203,23 @@ export default function Inbox() {
     if (switched) {
       shown.current = selectedId;
       following.current = true;
+      // A pending quote belongs to the thread it was picked in. The server refuses a cross-thread
+      // quote anyway; clearing it here means the agent never sees the refusal.
+      setReplyToId(null);
     }
     if (switched || following.current) el.scrollTop = el.scrollHeight;
   }, [selectedId, lastMessageId, list?.length]);
 
   const send = useMutation({
     mutationFn: async () => {
-      await api.post(`/inbox/conversations/${selectedId}/messages`, { body: draft });
+      await api.post(`/inbox/conversations/${selectedId}/messages`, {
+        body: draft,
+        replyToId,
+      });
     },
     onSuccess: () => {
       setDraft('');
+      setReplyToId(null);
       // Sending is an explicit request to be at the bottom: if the agent had
       // scrolled up to check something before replying, their own message must not
       // land somewhere they cannot see.
@@ -269,6 +284,16 @@ export default function Inbox() {
   });
 
   const mediaRules = useMediaRules();
+
+  /*
+   * The quoted message, resolved fresh on every render from the live thread.
+   *
+   * Falls to null the moment it stops being visible — removed by a colleague, or the thread
+   * cleared — which is what stops the composer quoting something that is no longer there.
+   */
+  const replyingTo = replyToId
+    ? messages.data?.find((m) => m.id === replyToId) ?? null
+    : null;
 
   /*
    * Whether WhatsApp still allows a plain reply.
@@ -383,7 +408,7 @@ export default function Inbox() {
               <div
                 ref={scrollRef}
                 onScroll={onScroll}
-                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4"
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-wa-ui-chat p-4"
               >
                 {/*
                   `mt-auto` bottom-aligns a thread shorter than the pane, so two messages sit
@@ -400,6 +425,7 @@ export default function Inbox() {
                         myId={myId}
                         canDelete={can('inbox:delete')}
                         onDelete={() => removeMessage.mutate(m.id)}
+                        onReply={can('inbox:reply') ? () => setReplyToId(m.id) : undefined}
                       />
                     ))
                     : <p className="text-sm text-ink-500">Loading…</p>}
@@ -418,6 +444,8 @@ export default function Inbox() {
                   : undefined}
                 checkFile={(file) => rejectReason(file, mediaRules.data)}
                 windowClosed={windowClosed}
+                replyingTo={replyingTo}
+                onCancelReply={() => setReplyToId(null)}
               />
             </>
           )}

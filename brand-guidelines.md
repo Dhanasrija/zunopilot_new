@@ -82,6 +82,7 @@ Use CSS custom properties / Tailwind tokens only — never hardcode hex in compo
 | Token | OKLCH | Hex | Usage |
 |---|---|---|---|
 | `--wa-green` | `oklch(0.72 0.19 150)` | `#25D366` | ONLY: WhatsApp connection status, "delivered/read" states, inside product screenshots |
+| `--wa-ui-*` | see tailwind.config.js | — | WhatsApp's own interface colours. Template previews **and the Inbox thread** — see §2.4 rule 2. Never brand colours. |
 | `--success` | `oklch(0.5250 0.1504 152.3)` | `#00823B` | Success toasts, passing checks, "Active" status text |
 | `--success-bg` | `oklch(0.9731 0.0214 163.1)` | `#EAFBF2` | The tint behind an "Active" status badge |
 | `--warning` | `oklch(0.75 0.15 75)` | `#E0A82E` | Template pending approval, quota warnings |
@@ -109,6 +110,21 @@ Use CSS custom properties / Tailwind tokens only — never hardcode hex in compo
 
 1. **60-30-10:** ~60% surfaces, ~30% ink/text, ~10% accent. Accent is scarce on purpose.
 2. WhatsApp green never on buttons, nav, logos, headings, or backgrounds.
+
+   **One sanctioned exception, added 2026-08-08: the Inbox thread renders in WhatsApp's own
+   colours** — pale green outbound bubbles, white inbound, on the warm chat tone. This is the
+   same category as the template preview §9 already permits ("real UI"): it shows a WhatsApp
+   conversation as the customer sees it, to people who read WhatsApp all day. It is not
+   branding — every action in the product is still `--accent-600`, and no button, nav item,
+   heading or logo is green.
+
+   The tokens are `--wa-ui-*`, and **two of WhatsApp's published values are corrected rather
+   than copied**, on the same principle as `--success` and `--wa-green` above: their timestamp
+   grey is 4.19:1 on their own bubble and their read-tick blue is 1.92:1 on it. Matching
+   WhatsApp cannot mean matching WhatsApp's hex values when those fail §2.4 rule 4.
+
+   Their doodle wallpaper is **not** adopted. The chat tone is flat. A colour is one thing;
+   reproducing Meta's artwork is a different question, and one nobody needs to raise.
 3. No gradients as decoration. One permitted use: a very subtle radial `--accent-600` at 4–6% opacity behind the hero.
 4. All text/background pairs must pass WCAG 2.2 AA: 4.5:1 body, 3:1 large text and UI components. Verify with OKLCH-aware tooling, not eyeballing.
 

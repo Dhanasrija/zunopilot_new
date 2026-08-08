@@ -5,6 +5,7 @@ import { prisma } from '../config/prisma.js';
 import { signToken } from '../utils/jwt.js';
 import { seedDefaultRoles } from '../services/role.service.js';
 import { windowStateFor } from '../modules/support/ticket.service.js';
+import { MOCK_CHANNEL_TOKEN_PREFIX, mockProviderFor } from '../modules/conversation-engine/providers/whatsapp.js';
 
 /*
  * Removing a message from the Inbox.
@@ -66,6 +67,18 @@ const makeThread = async (tenantId: string, phone: string) => {
     },
   });
 
+  // A simulated channel, so the reply path has something to send through and nothing can reach
+  // Meta. `mockProviderFor` then records what was asked of it, which is how the `context` a quote
+  // sends is asserted below.
+  const channel = await prisma.whatsappAccount.create({
+    data: {
+      tenantId,
+      wabaId: `waba-${tenantId.slice(-4)}`,
+      phoneNumberId: `chan-${tenantId.slice(-4)}`,
+      accessToken: `${MOCK_CHANNEL_TOKEN_PREFIX}${tenantId.slice(-4)}`,
+    },
+  });
+
   const customer = await prisma.customer.create({
     data: { tenantId, waId: `1555800${tenantId.slice(-4)}`, name: 'Asha' },
   });
@@ -97,7 +110,10 @@ const makeThread = async (tenantId: string, phone: string) => {
   const anHourAgo = Date.now() - 60 * 60 * 1000;
   const at = (offsetMs: number) => new Date(anHourAgo + offsetMs);
 
-  const first = await make({ body: 'Do you deliver to Banjara Hills?', createdAt: at(0) });
+  const first = await make({
+    body: 'Do you deliver to Banjara Hills?', createdAt: at(0),
+    waMessageId: `wamid.${tenantId.slice(-4)}.first`,
+  });
   const reply = await make({
     direction: 'OUTBOUND', status: 'SENT', body: 'We do — 45 minutes.', sentByUserId: ownerUser.id,
     createdAt: at(1_000),
@@ -105,7 +121,7 @@ const makeThread = async (tenantId: string, phone: string) => {
   const newest = await make({ body: 'Great, order placed.', createdAt: at(2_000) });
 
   return {
-    customer, conversation, first, reply, newest, ownerUser, agentUser,
+    channel, customer, conversation, first, reply, newest, ownerUser, agentUser,
     ownerToken: signToken({ userId: ownerUser.id, tenantId }),
     agentToken: signToken({ userId: agentUser.id, tenantId }),
   };
@@ -319,5 +335,106 @@ describe('across workspaces', () => {
     expect(await prisma.message.count({
       where: { conversationId: ctx.conversation.id, deletedAt: null },
     })).toBe(3);
+  });
+});
+
+// ── Quoting a message when you reply to it ───────────────────────────────────
+
+describe('replying to a specific message', () => {
+  const reply = (body: Record<string, unknown>) => request(app)
+    .post(`/api/inbox/conversations/${ctx.conversation.id}/messages`)
+    .set(auth(owner)).send(body);
+
+  beforeEach(() => {
+    // The mock provider is a per-channel singleton that outlives a test, so each case clears what
+    // the last one recorded rather than counting on a fresh one.
+    mockProviderFor(ctx.channel.id).sent.length = 0;
+  });
+
+  const sentText = () => mockProviderFor(ctx.channel.id).sent.filter((m) => m.kind === 'text');
+
+  it('**quotes it at Meta and records it on our own row**', async () => {
+    const response = await reply({ body: 'Yes, here it is.', replyToId: ctx.first.id }).expect(201);
+
+    // What went to Meta as `context.message_id` — the thing that makes WhatsApp draw the quote
+    // on the customer's phone.
+    const sent = sentText();
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.meta as { quotedWaMessageId: string | null }).quotedWaMessageId)
+      .toBe(ctx.first.waMessageId);
+
+    expect(response.body.data.replyToId).toBe(ctx.first.id);
+  });
+
+  it('sends an ordinary message when nothing is quoted', async () => {
+    await reply({ body: 'Just checking in.' }).expect(201);
+
+    const sent = sentText();
+    expect((sent[0]!.meta as { quotedWaMessageId: string | null }).quotedWaMessageId).toBeNull();
+  });
+
+  it('**refuses to quote a message from a different conversation**', async () => {
+    /*
+     * The one that matters. Quoting across threads would put another customer's words in front of
+     * this one — so the lookup is scoped to the conversation, not merely to the tenant.
+     */
+    const other = await prisma.conversation.create({
+      data: { tenantId: TENANT, customerId: ctx.customer.id, status: 'OPEN' },
+    });
+    const theirs = await prisma.message.create({
+      data: {
+        tenantId: TENANT,
+        conversationId: other.id,
+        customerId: ctx.customer.id,
+        direction: 'INBOUND',
+        type: 'TEXT',
+        status: 'RECEIVED',
+        body: 'Something from another thread',
+      },
+    });
+
+    await reply({ body: 'Yes.', replyToId: theirs.id }).expect(400);
+    expect(sentText()).toHaveLength(0);
+  });
+
+  it('**refuses to quote a message that was removed from the inbox**', async () => {
+    // Somebody took it out of the thread. Quoting it back in would undo that, and the quote text
+    // would be the very thing they removed.
+    await request(app).delete(`/api/inbox/messages/${ctx.first.id}`).set(auth(owner)).expect(200);
+
+    await reply({ body: 'About that…', replyToId: ctx.first.id }).expect(400);
+    expect(sentText()).toHaveLength(0);
+  });
+
+  it("cannot quote another workspace's message", async () => {
+    const theirs = await prisma.message.findFirstOrThrow({ where: { tenantId: OTHER } });
+    await reply({ body: 'Hello.', replyToId: theirs.id }).expect(400);
+  });
+
+  it('refuses rather than silently sending an unquoted message', async () => {
+    // The agent picked Reply on a specific bubble. Sending something else and saying nothing is
+    // how a reply ends up attached to the wrong question.
+    await reply({ body: 'Yes.', replyToId: '11111111-1111-4111-8111-111111111111' }).expect(400);
+    expect(sentText()).toHaveLength(0);
+  });
+
+  it('**withholds the quote once the quoted message is removed**', async () => {
+    /*
+     * `replyTo` is a relation, so the thread's `deletedAt: null` filter does not reach it — a
+     * removed message would otherwise still come back through the quote of a reply to it, which
+     * is exactly the leak the soft delete exists to prevent. The reply itself stays.
+     */
+    const sent = await reply({ body: 'Yes, here it is.', replyToId: ctx.first.id }).expect(201);
+
+    const before = await thread(owner).expect(200);
+    const quotedBefore = before.body.data.find((m: { id: string }) => m.id === sent.body.data.id);
+    expect(quotedBefore.replyTo?.id).toBe(ctx.first.id);
+
+    await request(app).delete(`/api/inbox/messages/${ctx.first.id}`).set(auth(owner)).expect(200);
+
+    const after = await thread(owner).expect(200);
+    const row = after.body.data.find((m: { id: string }) => m.id === sent.body.data.id);
+    expect(row).toBeDefined();
+    expect(row.replyTo).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Paperclip, SendHorizonal, X } from 'lucide-react';
+import { CornerUpLeft, Paperclip, SendHorizonal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatBytes } from '@/lib/media';
@@ -21,6 +21,7 @@ import { formatBytes } from '@/lib/media';
 export function Composer({
   value, onChange, onSend, sending,
   onSendFile, attaching = false, fileAccept, checkFile, windowClosed = false,
+  replyingTo, onCancelReply,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -47,6 +48,9 @@ export function Composer({
    * this is only so the agent finds out before they pick a file rather than after.
    */
   windowClosed?: boolean;
+  /** The message this reply will quote, shown above the field so it cannot be forgotten. */
+  replyingTo?: { body?: string | null; type: string; direction: 'INBOUND' | 'OUTBOUND' } | null;
+  onCancelReply?: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -72,6 +76,39 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-ink-300 bg-surface-1 p-3">
+      {/*
+        What this reply will quote.
+
+        Above the field and impossible to miss, because the quote is invisible in the text you are
+        typing — an agent who picked Reply four minutes ago and then wrote something unrelated
+        should see what it is about to be attached to. Cancelling is one click.
+      */}
+      {replyingTo && (
+        <div className="mb-2 flex items-start gap-2 rounded-md border-l-2 border-wa-ui-tick bg-surface-2 px-3 py-2">
+          <CornerUpLeft aria-hidden className="mt-px h-3.5 w-3.5 shrink-0 text-ink-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-caption font-medium text-ink-700">
+              Replying to {replyingTo.direction === 'OUTBOUND' ? 'your message' : 'the customer'}
+            </p>
+            <p className="line-clamp-2 text-caption text-ink-500">
+              {replyingTo.body || `[${replyingTo.type.toLowerCase()}]`}
+            </p>
+          </div>
+          {onCancelReply && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Cancel reply"
+              disabled={busy}
+              onClick={onCancelReply}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      )}
+
       {/*
         The staged file, named before it is sent. An agent who picked the wrong one from a
         folder of near-identical filenames finds out here rather than from the customer.

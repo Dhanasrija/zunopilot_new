@@ -239,6 +239,19 @@ const persistMessage = async (context: ResolvedContext, message: NormalisedInbou
   const body = message.text
     || (captured ? describeMedia(captured.kind, captured.originalName) : message.text);
 
+  /*
+   * The message this one quotes, if the customer used WhatsApp's Reply.
+   *
+   * Looked up before the write rather than after, so the row is complete in one insert and there
+   * is no window where a reply exists without its quote.
+   */
+  const quotedMessage = message.quotedWaMessageId
+    ? await prisma.message.findFirst({
+      where: { tenantId: context.tenant.id, waMessageId: message.quotedWaMessageId },
+      select: { id: true },
+    })
+    : null;
+
   const created = await prisma.message.create({
     data: {
       tenantId: context.tenant.id,
@@ -255,6 +268,18 @@ const persistMessage = async (context: ResolvedContext, message: NormalisedInbou
       // Our own id, not Meta's URL. Meta's expires; this one is served by
       // `GET /api/media/:id/file`, authenticated and scoped to this workspace.
       mediaUrl: captured ? `/api/media/${captured.mediaAssetId}/file` : null,
+      /*
+       * What the customer replied to, resolved from Meta's wamid to our own row.
+       *
+       * Scoped by tenant, because `waMessageId` alone is half of
+       * `@@unique([tenantId, waMessageId])` — the same lookup that let one workspace's delivery
+       * status rewrite another's message before it was fixed.
+       *
+       * Null when we cannot find it, which is ordinary: the quote may be older than this
+       * workspace's history, or a message we sent before the mirror existed. A missing quote
+       * costs a small block of context; refusing the message over it would cost the message.
+       */
+      replyToId: quotedMessage?.id ?? null,
       // `payload.interactive` must keep META's shape, not our normalised one.
       //
       // The ordering state machine reads `interactive.list_reply.id` directly,

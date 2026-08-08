@@ -27,7 +27,15 @@ export interface NodeServices {
 }
 
 export interface WhatsAppSender {
-  sendText(args: { to: string; body: string }): Promise<{ messageId: string | null }>;
+  /**
+   * `quotedWaMessageId` is optional and every existing caller omits it — the engine, the
+   * workflows and the campaign sender have nothing to quote. Only the Inbox reply does.
+   */
+  sendText(args: {
+    to: string;
+    body: string;
+    quotedWaMessageId?: string | null;
+  }): Promise<{ messageId: string | null }>;
   /**
    * Send a file by link. Only within the 24-hour window — outside it WhatsApp permits
    * templates only, and a template's media is fixed at approval rather than per send.

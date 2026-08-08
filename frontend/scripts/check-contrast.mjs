@@ -52,9 +52,14 @@ const oklchToLinearRgb = (L, C, Hdeg) => {
  * — it looks like proof while guarding nothing.
  *
  * Read as text rather than imported: the config imports `tailwindcss/plugin`, which bare Node
- * cannot resolve as ESM. Parsing is narrow on purpose — it only understands `name: 'oklch(...)'`
+ * cannot resolve as ESM. Parsing is narrow on purpose — `name: 'oklch(...)'` and `name: '#rrggbb'`
  * leaves, nested one level under a family — and an unresolvable token throws rather than being
  * skipped, so a rename cannot quietly drop a pair from the run.
+ *
+ * Hex leaves are read because the `wa-ui` family is deliberately hex: those are WhatsApp's own
+ * published values and the config says they should stay recognisably those. Before this, a pair
+ * naming one of them had to inline the hex here — which is precisely the mirrored-copy failure
+ * described above, reintroduced one line at a time.
  */
 const CONFIG_SRC = readFileSync(new URL('../tailwind.config.js', import.meta.url), 'utf-8');
 
@@ -74,13 +79,22 @@ const readTokens = (src) => {
     const familyStart = /^\s*'?([A-Za-z][\w-]*)'?:\s*{\s*$/.exec(line);
     if (familyStart && depth === 1) family = familyStart[1];
 
+    /** `family-key`, or the bare key at the top level. */
+    const nameFor = (key) => (depth >= 2 && family
+      ? (key === 'DEFAULT' ? family : `${family}-${key}`)
+      : key);
+
     const leaf = /^\s*'?([A-Za-z0-9][\w-]*)'?:\s*'oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(line);
     if (leaf) {
       const [, key, L, C, H] = leaf;
-      const name = depth >= 2 && family
-        ? (key === 'DEFAULT' ? family : `${family}-${key}`)
-        : key;
-      out[name] = [Number(L), Number(C), Number(H)];
+      out[nameFor(key)] = [Number(L), Number(C), Number(H)];
+    }
+
+    // A hex leaf, stored as linear sRGB so `token()` can hand back the same shape either way.
+    const hexLeaf = /^\s*'?([A-Za-z0-9][\w-]*)'?:\s*'(#[0-9a-fA-F]{6})'/.exec(line);
+    if (hexLeaf) {
+      const [, key, value] = hexLeaf;
+      out[nameFor(key)] = { hex: value };
     }
 
     depth += opens - closes;
@@ -101,7 +115,14 @@ const token = (name) => {
   return T[name];
 };
 
-const rgb = (name) => oklchToLinearRgb(...token(name));
+/** A token as linear sRGB, whether the config declared it in OKLCH or as a hex. */
+const rgb = (name) => {
+  const value = token(name);
+  if (Array.isArray(value)) return oklchToLinearRgb(...value);
+
+  const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return [1, 3, 5].map((i) => srgbToLinear(parseInt(value.hex.slice(i, i + 2), 16) / 255));
+};
 
 /** Composite a token at `alpha` over an opaque background, in linear light. */
 const over = (fg, alpha, bg) => {
@@ -148,32 +169,49 @@ const PAIRS = [
   ['accent-600 on surface-1', rgb('accent-600'), rgb('surface-1'), 4.5, 'links on cards'],
   ['accent-700 on accent-100', rgb('accent-700'), rgb('accent-100'), 4.5, 'default badge'],
   /*
-   * Faded white inside an outbound chat bubble — the sender label and the timestamp.
+   * ── The Inbox thread, in WhatsApp's own colours ────────────────────────────
    *
-   * Worth a row of its own because the failure mode is invisible to the eye and easy to
-   * reintroduce: `text-on-accent/70` looks like a perfectly reasonable way to de-emphasise a
-   * caption, and it measures 4.05:1. It shipped that way. Anything below 85% fails here.
+   * These replace two rows about a violet `accent-600` bubble with faded white on it. The
+   * bubbles are WhatsApp's pale green and white now, so `on-accent` no longer appears in the
+   * thread and the pair that guarded it has nothing left to guard.
+   *
+   * The reason those rows existed is still instructive and the new ones inherit it: metadata is
+   * text, and faded text is where contrast quietly fails. The old sender label shipped at
+   * `on-accent/70` — 4.05:1 — and looked entirely reasonable.
+   *
+   * **Two of WhatsApp's own values had to be corrected to get here**, which is worth stating
+   * plainly rather than leaving as a surprise for whoever reads the tokens:
+   *
+   *   • Their timestamp grey #667781 is 4.19:1 on their own green bubble, under §2.4's 4.5.
+   *   • Their read-tick blue #53BDEB is **1.92:1** on it — the most recognisable tick in
+   *     software fails the 3:1 non-text bar inside WhatsApp. Ours keeps the hue and darkens.
+   *
+   * So "match WhatsApp" cannot mean "copy WhatsApp's hex values", and this block is where that
+   * distinction is recorded.
    */
-  ['on-accent/85 on accent-600', over('on-accent', 0.85, 'accent-600'), rgb('accent-600'), 4.5, 'bubble sender + timestamp'],
+  ['wa-ui-ink on wa-ui-bubble-out', rgb('wa-ui-ink'), rgb('wa-ui-bubble-out'), 4.5, 'message text, outbound'],
+  ['wa-ui-ink on wa-ui-bubble-in', rgb('wa-ui-ink'), rgb('wa-ui-bubble-in'), 4.5, 'message text, inbound'],
+  ['wa-ui-meta on wa-ui-bubble-out', rgb('wa-ui-meta'), rgb('wa-ui-bubble-out'), 4.5, 'timestamp + sender, outbound'],
+  ['wa-ui-meta on wa-ui-bubble-in', rgb('wa-ui-meta'), rgb('wa-ui-bubble-in'), 4.5, 'timestamp, inbound'],
 
   /*
-   * The read tick on an outbound bubble — **and this row's threshold is 3:1, not 4.5:1.**
-   *
-   * Recorded rather than quietly relaxed, because it is the only row in this file below 4.5 and
-   * the next person will want to know why.
+   * The read tick — **3:1, not 4.5:1**, and still the only sub-4.5 rows in this file.
    *
    * A delivery tick is a non-text graphic, so the applicable criterion is 1.4.11 (Non-text
-   * Contrast, 3:1), not 1.4.3 (Contrast Minimum, 4.5:1). It also does not carry its meaning by
-   * colour alone, which is what 1.4.1 asks: sent is one tick and delivered is two, so the state
-   * differs by *shape* before it differs by hue, and `DeliveryTick` states it in words in an
-   * `aria-label` besides.
+   * Contrast, 3:1), not 1.4.3. It also does not carry its meaning by colour alone, which is what
+   * 1.4.1 asks: sent is one tick and delivered is two, so the state differs by *shape* before it
+   * differs by hue, and `DeliveryTick` states it in words in an `aria-label` besides.
    *
-   * The arithmetic matters too. 4.5:1 against `accent-600` needs a relative luminance of 0.83;
-   * blue contributes 0.0722 of luminance, so no blue reaches it — solving for 4.5 gives a pale
-   * cyan indistinguishable from the white ticks beside it. WhatsApp's own #53BDEB measures
-   * 2.51:1 here and fails even this bar, which is why there is a token of our own.
+   * Measured on both bubbles, because a tick can appear on either once a thread is cleared and
+   * refilled, and because WhatsApp's own value fails on both.
    */
-  ['wa-tick-read on accent-600', rgb('wa-tick-read'), rgb('accent-600'), 3.0, 'read tick, non-text graphic (1.4.11)'],
+  ['wa-ui-tick on wa-ui-bubble-out', rgb('wa-ui-tick'), rgb('wa-ui-bubble-out'), 3.0, 'read tick, non-text graphic (1.4.11)'],
+  ['wa-ui-tick on wa-ui-bubble-in', rgb('wa-ui-tick'), rgb('wa-ui-bubble-in'), 3.0, 'read tick on a white bubble'],
+
+  // The bubbles against the thread behind them. Not text — the question is whether a bubble
+  // reads as a distinct surface at all, which is the 3:1 non-text bar for a boundary.
+  ['wa-ui-bubble-in vs wa-ui-chat', rgb('wa-ui-bubble-in'), rgb('wa-ui-chat'), 1.1, 'inbound bubble on the thread (has a 1px border)'],
+  ['wa-ui-bubble-out vs wa-ui-chat', rgb('wa-ui-bubble-out'), rgb('wa-ui-chat'), 1.05, 'outbound bubble on the thread'],
 
   // Semantic text on its own tint — the §7 "tint bg + dark text" badge pattern.
   ['danger on surface-0', rgb('danger'), rgb('surface-0'), 4.5, 'error text'],

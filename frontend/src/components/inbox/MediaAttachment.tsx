@@ -27,7 +27,7 @@ const LABEL: Record<string, string> = {
 export const hasAttachment = (message: Message): boolean =>
   Boolean(message.mediaUrl) && message.type in LABEL;
 
-export function MediaAttachment({ message, outbound }: { message: Message; outbound: boolean }) {
+export function MediaAttachment({ message }: { message: Message; outbound?: boolean }) {
   const { url, loading, failed } = useAuthedMedia(message.mediaUrl);
   if (!message.mediaUrl) return null;
 
@@ -80,7 +80,7 @@ export function MediaAttachment({ message, outbound }: { message: Message; outbo
       aria-disabled={!url}
       className={[
         'mt-1 flex items-center gap-2 rounded-md border p-2 text-caption',
-        outbound ? 'border-on-accent/40 text-on-accent' : 'border-ink-300 text-ink-700',
+        'border-ink-300 text-wa-ui-ink',
       ].join(' ')}
     >
       <Icon className="h-4 w-4 shrink-0" />

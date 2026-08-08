@@ -25,8 +25,10 @@ export class MetaWhatsAppProvider implements WhatsAppSender {
     };
   }
 
-  async sendText({ to, body }: { to: string; body: string }) {
-    const sent = await sendTextMessage({ ...this.credentials, to, body });
+  async sendText({ to, body, quotedWaMessageId }: {
+    to: string; body: string; quotedWaMessageId?: string | null;
+  }) {
+    const sent = await sendTextMessage({ ...this.credentials, to, body, quotedWaMessageId });
     return { messageId: sent?.messages?.[0]?.id ?? null };
   }
 
@@ -109,8 +111,10 @@ export class ConsoleWhatsAppProvider implements WhatsAppSender {
     return { messageId: `console.${this.counter}` };
   }
 
-  async sendText({ to, body }: { to: string; body: string }) {
-    return this.log('text', to, body);
+  async sendText({ to, body, quotedWaMessageId }: {
+    to: string; body: string; quotedWaMessageId?: string | null;
+  }) {
+    return this.log('text', to, body, { quotedWaMessageId });
   }
 
   async sendMedia({ to, kind, link, caption, filename }: {

@@ -2,6 +2,9 @@ import { body } from 'express-validator';
 
 export const sendMessageValidator = [
   body('body').isString().trim().isLength({ min: 1, max: 4000 }),
+  // The message being quoted. Its membership of this conversation is checked in the controller,
+  // which is the only place that knows which conversation this is.
+  body('replyToId').optional({ nullable: true }).isUUID(),
 ];
 
 export const sendMediaValidator = [

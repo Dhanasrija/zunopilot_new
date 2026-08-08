@@ -596,6 +596,23 @@ model Message {
   sentByUserId String?
   sentByUser   User?   @relation("SentMessages", fields: [sentByUserId], references: [id], onDelete: SetNull)
 
+  /// The message this one quotes, when it is a reply to a specific message.
+  ///
+  /// Set in both directions. Outbound: an agent picked Reply on a bubble, and we sent Meta a
+  /// `context.message_id` so WhatsApp shows the quote on the customer's phone too. Inbound: the
+  /// customer replied to one of ours, and Meta told us which in `context.id`.
+  ///
+  /// **SetNull, not Cascade.** Removing the quoted message must not delete the reply — the reply
+  /// is its own thing somebody said, and losing it because the message above it was tidied away
+  /// would be a data loss nobody asked for. The quote block simply stops rendering.
+  ///
+  /// Self-relation, so `replies` is the other side. Nothing reads `replies` yet; it exists
+  /// because Prisma requires both halves and because "what did people reply to" is the obvious
+  /// next question.
+  replyToId String?
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[] @relation("MessageReplies")
+
   /// Removed from the Inbox by somebody, and **not removed from the customer's phone.**
   ///
   /// The WhatsApp Cloud API has no unsend, so this is only ever about our own record. A soft
@@ -624,6 +641,7 @@ model Message {
   @@unique([tenantId, waMessageId])
   @@index([conversationId, createdAt])
   @@index([sentByUserId])
+  @@index([replyToId])
 }
 
 model InternalNote {
