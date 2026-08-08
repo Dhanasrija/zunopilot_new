@@ -14,6 +14,13 @@ import type { Message } from './types';
  * is two, so the states differ without relying on hue — which is what makes the read blue a
  * refinement rather than the only signal, and why `check-contrast.mjs` measures it against the
  * 3:1 non-text-graphic bar instead of 4.5:1.
+ *
+ * The colours are WhatsApp's, with one correction. **#53BDEB, the famous blue tick, measures
+ * 1.92:1 on WhatsApp's own green bubble** — it fails the non-text bar inside WhatsApp itself,
+ * which is worth knowing before treating their palette as a reference for legibility.
+ * `wa-ui-tick` is the same hue and chroma, darkened until it clears 3:1 on both bubbles.
+ *
+ * A failure is `danger`, not a tinted white: it is the one state an agent must not skim past.
  */
 
 type Rendered = { icon: typeof Check; label: string; className: string };
@@ -26,20 +33,20 @@ const time = (at: string | null | undefined): string => (at
 const render = (message: Message): Rendered | null => {
   switch (message.status) {
     case 'SENT':
-      return { icon: Check, label: 'Sent', className: 'text-on-accent/85' };
+      return { icon: Check, label: 'Sent', className: 'text-wa-ui-meta' };
 
     case 'DELIVERED':
       return {
         icon: CheckCheck,
         label: [`Delivered`, time(message.deliveredAt)].filter(Boolean).join(' '),
-        className: 'text-on-accent/85',
+        className: 'text-wa-ui-meta',
       };
 
     case 'READ':
       return {
         icon: CheckCheck,
         label: [`Read`, time(message.readAt)].filter(Boolean).join(' '),
-        className: 'text-wa-tick-read',
+        className: 'text-wa-ui-tick',
       };
 
     case 'FAILED':
@@ -48,7 +55,7 @@ const render = (message: Message): Rendered | null => {
         // Meta's own reason when it gave one — it is the difference between an agent retrying
         // pointlessly and an agent knowing the number is not on the sandbox allow-list.
         label: message.statusError ? `Not delivered — ${message.statusError}` : 'Not delivered',
-        className: 'text-on-accent',
+        className: 'text-danger',
       };
 
     // RECEIVED is the inbound default, and an absent status is an older row. Neither has a

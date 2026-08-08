@@ -6,9 +6,23 @@ import { DeliveryTick } from './DeliveryTick';
 
 // One message.
 //
-// Outbound is an `accent-600` fill; inbound is a white card on a 1px `ink-300` border. The
-// asymmetry is deliberate — the two sides of a conversation should not be two tints of the
-// same thing, or a transcript skimmed at speed reads as one voice.
+// **WhatsApp's own colours, and that is a reversal of what this file used to say.** Outbound was
+// an `accent-600` violet fill, on the argument that "the two sides of a conversation should not
+// be two tints of the same thing, or a transcript skimmed at speed reads as one voice."
+//
+// That argument is coherent and the evidence is against it. WhatsApp's answer is pale green
+// against white — two tints of very nearly the same thing — and two billion people read it
+// without difficulty, because *position and the tail* carry the distinction and colour only
+// confirms it. Meanwhile the violet cost something real: white on `accent-600` is 5.36:1 at
+// best, and the faded timestamp on it had already been caught once at 4.05:1. WhatsApp's
+// near-black on pale green is **15.75:1**. The familiar choice is also the legible one.
+//
+// The people using this screen live in WhatsApp all day. Making them learn a second visual
+// language for the same conversation was a cost with nothing on the other side of it.
+//
+// §2.2's hard rule still holds: WhatsApp green is never a *brand* colour. It is not a button, a
+// nav item, a heading or a logo here — `accent-600` still owns every action in the product. This
+// is the same sanctioned use as a template preview, which is what `wa-ui` exists for.
 //
 // The tail (one square corner on the side the message came from) is the only decoration:
 // it survives at a glance in a way that alignment alone does not once bubbles are short.
@@ -34,10 +48,13 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
 
       <div
         className={cn(
-          'max-w-[70%] px-3 py-2 text-sm',
+          'max-w-[70%] px-3 py-2 text-sm text-wa-ui-ink',
           outbound
-            ? 'rounded-lg rounded-br-sm bg-accent-600 text-on-accent'
-            : 'rounded-lg rounded-bl-sm border border-ink-300 bg-surface-1 text-ink-900',
+            ? 'rounded-lg rounded-br-sm bg-wa-ui-bubble-out'
+            // The 1px border stays on the inbound bubble: white on the warm `wa-ui-chat`
+            // background is a faint edge, and without it a short message reads as floating text
+            // rather than a bubble.
+            : 'rounded-lg rounded-bl-sm border border-ink-300 bg-wa-ui-bubble-in',
         )}
       >
         {/*
@@ -45,13 +62,14 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
           your own and the bot's all look the same, and nobody can tell whether a customer
           has already been answered.
 
-          `/85`, not the `/70` this used to be. White at 70% on `accent-600` measures 4.05:1
-          and at 80% 4.49:1 — both under §2.4's 4.5 for text this size, on the sender label
-          and on the timestamp below, in every outbound bubble in the product. 85% is 4.70:1,
-          and `check-contrast.mjs` now holds the pair so it cannot drift back.
+          `wa-ui-meta` rather than a faded white. The old note here recorded a real fix — white
+          at 70% on `accent-600` was 4.05:1 and needed lifting to 85% — and the violet bubble it
+          describes is gone, so the fix is moot. `wa-ui-meta` is 4.74:1 on the green bubble and
+          5.26:1 on the white one, both held by `check-contrast.mjs`. The lesson survives the
+          bubble: metadata is text, and faded text is where contrast quietly fails.
         */}
         {outbound && (
-          <p className="mb-1 text-caption font-medium text-on-accent/85">
+          <p className="mb-1 text-caption font-medium text-wa-ui-meta">
             {message.sentByUser
               ? (message.sentByUser.id === myId ? 'You' : message.sentByUser.fullName)
               : 'Bot'}
@@ -85,10 +103,8 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
                 key={o.id}
                 title={o.id}
                 className={cn(
-                  'rounded-full border px-2 py-px text-caption',
-                  outbound
-                    ? 'border-on-accent/35 text-on-accent/90'
-                    : 'border-ink-300 bg-surface-0 text-ink-700',
+                  'rounded-full border border-ink-300 bg-surface-1 px-2 py-px text-caption',
+                  'text-ink-700',
                 )}
               >
                 {o.title}
@@ -101,11 +117,8 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
           Time and tick on one line, the way every chat app puts them — and the tick is outbound
           only, because an inbound message's delivery state belongs to the customer's own client.
         */}
-        <div className={cn(
-          'mt-1 flex items-center justify-end gap-1 text-caption',
-          outbound ? 'text-on-accent/85' : 'text-ink-500',
-        )}
-        >
+        {/* One colour for both sides now: the bubbles differ, the metadata need not. */}
+        <div className="mt-1 flex items-center justify-end gap-1 text-caption text-wa-ui-meta">
           <span className="tabular-nums">{formatDateTime(message.createdAt)}</span>
           <DeliveryTick message={message} />
         </div>

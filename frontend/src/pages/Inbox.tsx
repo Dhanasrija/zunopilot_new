@@ -383,7 +383,7 @@ export default function Inbox() {
               <div
                 ref={scrollRef}
                 onScroll={onScroll}
-                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4"
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-wa-ui-chat p-4"
               >
                 {/*
                   `mt-auto` bottom-aligns a thread shorter than the pane, so two messages sit
