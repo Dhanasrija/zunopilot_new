@@ -7,6 +7,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Login from '@/pages/Login';
 import SupportSession from './pages/SupportSession';
+import NotFound from './pages/NotFound';
 import Onboarding from '@/pages/Onboarding';
 import Dashboard from '@/pages/Dashboard';
 import Inbox from '@/pages/Inbox';
@@ -175,7 +176,12 @@ export default function App() {
             <Route path="/invoices/:invoiceId" element={<InvoiceView />} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/*
+            A real page, not `<Navigate to="/" replace />`. That silently turned every unknown
+            URL into the home page — no explanation for the visitor, no way back to the address
+            they typed, and a soft 404 for Google. See the header of NotFound.tsx.
+          */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
       <Toaster richColors position="top-right" />

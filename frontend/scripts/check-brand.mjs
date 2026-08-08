@@ -73,6 +73,11 @@ const ALLOW = {
     'src/pages/Terms.tsx',
     'src/pages/Contact.tsx',
     'src/components/layout/LegalLayout.tsx',
+    // The 404 page and the header it shares with LegalLayout. Added to this list, but the
+    // header was *extracted* from LegalLayout rather than copied — so there is less
+    // untokenised marketing markup in the tree than before, not more.
+    'src/components/layout/PublicHeader.tsx',
+    'src/pages/NotFound.tsx',
   ],
 };
 

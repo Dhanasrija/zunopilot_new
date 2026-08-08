@@ -1,14 +1,4 @@
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { useAuthStore } from '@/stores/auth.store';
-
-const NAV = [
-  { label: 'Home', href: '/#home' },
-  { label: 'Features', href: '/#features' },
-  { label: 'Pricing', href: '/#pricing' },
-  { label: 'Testimonial', href: '/#testimonial' },
-  { label: 'Contact Us', href: '/contact' },
-];
+import PublicHeader from '@/components/layout/PublicHeader';
 
 type LegalLayoutProps = {
   title: string;
@@ -27,55 +17,13 @@ export default function LegalLayout({
 }: LegalLayoutProps) {
   // Split the title around the highlight word(s) to recolour them.
   const [pre, post] = title.split(highlight);
-  const token = useAuthStore((s) => s.token);
 
   return (
     <div
       className="min-h-screen bg-no-repeat bg-cover bg-center flex flex-col"
       style={{ backgroundImage: "url('/login-bg.png')" }}
     >
-      {/* Header */}
-      <header className="bg-transparent">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 lg:h-20 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/app-logo.png" alt="ZunoPilot" className="h-9 w-auto" />
-            <span className="text-xl font-bold tracking-tight text-slate-900">ZunoPilot</span>
-          </Link>
-
-          <nav className="hidden lg:flex items-center gap-8">
-            {NAV.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="text-[15px] font-medium text-slate-700 hover:text-slate-900 transition-colors"
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-3">
-            {token ? (
-              <Link to="/dashboard">
-                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">
-                  Go to Dashboard
-                </Button>
-              </Link>
-            ) : (
-              <>
-                <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
-                  Sign in
-                </Link>
-                <Link to="/signup">
-                  <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">
-                    Start Free Trial
-                  </Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
+      <PublicHeader />
 
       {/* Hero copy */}
       <section className="px-4 sm:px-6 lg:px-8 pt-6 pb-4">
