@@ -57,13 +57,15 @@ export default function Team() {
 
   const [inviting, setInviting] = useState(false);
   /**
-   * `draft.phone` is the **national part only** now. The dial code lives in
-   * `inviteCountry` and is joined on submit.
+   * `draft.phone` is the **national part only**. The dial code lives in `inviteCountry` and is joined
+   * on submit.
    *
-   * It used to be seeded with the string `'+91 '` in a free-text field, which an
-   * inviter could half-overwrite — and `User.phone` is globally unique across the
-   * whole platform, so a mangled number does not just invite the wrong person, it can
-   * collide with a stranger's existing row and fail for reasons nobody can read.
+   * It used to be seeded with the string `'+91 '` in a free-text field, which an inviter could
+   * half-overwrite. **The consequence of a mistyped number has changed, and got worse.** It used to
+   * fail: `User.phone` is unique platform-wide, so a number belonging to somebody else was refused.
+   * Now that a person can be in several workspaces, a number belonging to a stranger **succeeds** —
+   * it silently attaches their account to this workspace, and they are told so by a notification
+   * naming whoever did it. That is why the dial code is not typed and the number is not free text.
    */
   const [draft, setDraft] = useState({
     fullName: '', phone: '', email: '', roleId: '',
@@ -86,7 +88,9 @@ export default function Team() {
     mutationFn: () => api
       // The dial code is joined here rather than held in the field, so an invite
       // cannot be sent to a number missing its country code.
-      .post<{ data: Member }>('/team', { ...draft, phone: fullNumber(inviteCountry, draft.phone) })
+      .post<{ data: Member; meta?: { attached?: boolean } }>(
+        '/team', { ...draft, phone: fullNumber(inviteCountry, draft.phone) },
+      )
       .then((r) => r.data),
     onSuccess: (response) => {
       setInviting(false);
@@ -94,9 +98,17 @@ export default function Team() {
       // Reset the country too, so inviting a second person does not silently inherit
       // the first one's country.
       setInviteCountry(detectCountry());
-      // Nothing to hand over any more — they sign in with a code sent to their own
-      // number, so there is no temporary password to read out and no dialog for it.
-      toast.success(`${response.data.fullName} can sign in with their mobile number now.`);
+      /*
+       * Two different things happened, so there are two sentences.
+       *
+       * `attached` means that number already had a ZunoPilot account and has been added to this
+       * workspace — they keep their own name and their own password-less sign-in, and "they can sign
+       * in now" would be telling somebody about an account they have had for a year. Their real name
+       * is what comes back, not the one typed on this form.
+       */
+      toast.success(response.meta?.attached
+        ? `${response.data.fullName} already had a ZunoPilot account and now has access to this workspace.`
+        : `${response.data.fullName} can sign in with their mobile number now.`);
       refresh();
     },
     onError: (err: Error) => toast.error(err.message),
@@ -110,9 +122,16 @@ export default function Team() {
   });
 
   const members = data?.members ?? [];
-  // How many active people can still manage the team. Asked of their role's
-  // permissions rather than a fixed "owner", because roles are the workspace's own
-  // now — an owner role counts implicitly.
+  /*
+   * How many active people can still manage the team. Asked of their role's permissions rather than a
+   * fixed "owner", because roles are the workspace's own now — an owner role counts implicitly.
+   *
+   * **Already correct under memberships, and needs no filter.** `GET /team` returns this workspace's
+   * memberships and nothing else, so `members`, this count, `administers`, `lockedRole` and `isYou`
+   * are all per-workspace by construction. Somebody who is an owner elsewhere appears here with the
+   * role they hold *here*. Adding a tenant filter on the client would only be able to make that
+   * wrong.
+   */
   const activeAdmins = members.filter((m) => m.isActive && (
     m.assignedRole?.isOwner || m.assignedRole?.permissions.includes('team:manage')
   )).length;
@@ -253,11 +272,12 @@ export default function Team() {
                                 // Deactivating takes someone off a live inbox, so it
                                 // says what happens rather than just doing it.
                                 if (member.isActive && !window.confirm(
-                                  `Deactivate ${member.fullName}?\n\n`
-                                  + `They lose access immediately, and any conversations `
-                                  + `assigned to them go back to the shared pool.\n\n`
-                                  + `Their notes and history are kept, and you can `
-                                  + `reactivate them later.`,
+                                  `Remove ${member.fullName} from this workspace?\n\n`
+                                  + `They lose access to this workspace immediately, and any `
+                                  + `conversations assigned to them go back to the shared pool.\n\n`
+                                  + `Their account and any other workspaces they belong to are `
+                                  + `unaffected. Their notes and history here are kept, and you `
+                                  + `can add them back later.`,
                                 )) return;
                                 update.mutate({
                                   id: member.id,
@@ -310,6 +330,15 @@ export default function Team() {
                 value={draft.fullName}
                 onChange={(e) => setDraft((d) => ({ ...d, fullName: e.target.value }))}
               />
+              {/*
+                Says where the name goes, because it does not always go anywhere. There is one profile
+                per person: somebody who already has an account keeps their own name, and an admin
+                here typing a different one must not rename them in the business they run.
+              */}
+              <p className="text-caption text-muted-foreground">
+                Used only if this number is new to ZunoPilot. Someone who already has an account keeps
+                their own name.
+              </p>
             </div>
             <div className="space-y-1">
               <Label>Mobile number</Label>

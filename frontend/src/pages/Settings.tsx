@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import NotificationSettings from '@/components/settings/NotificationSettings';
 import AiAgent from '@/components/settings/AiAgent';
 import NumberMasking from '@/components/settings/NumberMasking';
+import LeaveWorkspace from '@/components/settings/LeaveWorkspace';
 import { toast } from 'sonner';
 import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
 
@@ -163,6 +164,9 @@ export default function Settings() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Renders nothing for anybody with a single workspace, which is almost everybody. */}
+              <LeaveWorkspace />
 
               <div className="flex items-center gap-3">
                 <Button className="gap-2 bg-accent-600 hover:bg-accent-700" onClick={() => save.mutate()} disabled={save.isPending}>

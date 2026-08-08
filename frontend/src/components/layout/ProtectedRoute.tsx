@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { hardNavigate } from '@/lib/navigation';
+import { switchWorkspace } from '@/lib/workspace';
 import {
-  useAuthStore, type AuthTenant, type AuthUser, type ModuleKey, type Permission,
+  useAuthStore, type AuthTenant, type AuthUser, type AuthWorkspace, type ModuleKey,
+  type Permission,
 } from '@/stores/auth.store';
 
 // Two gates, in order: signed in, and set up.
@@ -22,6 +26,7 @@ interface SessionResponse {
     profileComplete: boolean;
     permissions: Permission[];
     modules: ModuleKey[];
+    workspaces?: AuthWorkspace[];
   };
 }
 
@@ -52,9 +57,26 @@ export default function ProtectedRoute() {
     if (!token) { setChecked(true); return; }
 
     let cancelled = false;
-    api.get<SessionResponse>('/auth/me')
-      .then((response) => { if (!cancelled) setSession({ token, ...response.data.data }); })
-      .catch(() => { /* keep the persisted session; the next call surfaces a real problem */ })
+    api.get<SessionResponse>('/auth/me', { handles401: true })
+      .then((response) => {
+        if (cancelled) return;
+        /*
+         * **The token comes from `localStorage`, not from this closure.**
+         *
+         * `setSession({ token, ... })` used to pin the token this effect started with. That was
+         * harmless while a session could only ever name one workspace; now a switch in another tab —
+         * or a re-home below — writes a new token, and pinning the old one would store a credential
+         * for one workspace beside the name and permissions of another. Everything after that
+         * disagrees with itself.
+         */
+        const current = localStorage.getItem('token') ?? token;
+        setSession({ ...response.data.data, token: current });
+      })
+      .catch(async (err) => {
+        if (cancelled) return;
+        // A 401 here is recoverable; anything else keeps the persisted session, as it always has.
+        if ((err as { response?: { status?: number } }).response?.status === 401) await rehome();
+      })
       .finally(() => { if (!cancelled) setChecked(true); });
 
     return () => { cancelled = true; };
@@ -70,3 +92,40 @@ export default function ProtectedRoute() {
 
   return <Outlet />;
 }
+
+/**
+ * The session named a workspace this person is no longer in. Move them to one they are.
+ *
+ * **Why this is worth code.** A membership can be revoked while somebody is signed in, and it is now
+ * an ordinary event rather than an edge case: being taken off a side project says nothing about the
+ * business they actually run. Without this the global 401 handler signs them out, and they land on
+ * the OTP screen — a support ticket wearing a login form.
+ *
+ * The recovery is safe because the *identity* half of the token is still good; only its workspace
+ * claim is stale. `GET /auth/workspaces` is mounted on `requireSession` for exactly that reason and
+ * answers from the database, so this is not the client choosing from a list it invented.
+ *
+ * If there is nothing to recover to — no memberships left, or the identity itself is finished — this
+ * does what the global handler would have done. That path is why `/auth/me` may opt out of it: the
+ * sign-out is not skipped, only deferred until it is known to be the right answer.
+ */
+const rehome = async (): Promise<void> => {
+  try {
+    const response = await api.get<{ data: { workspaces: AuthWorkspace[] } }>(
+      '/auth/workspaces', { handles401: true },
+    );
+    const workspaces = response.data.data.workspaces;
+    // A suspended workspace cannot be entered, so landing in one would be an immediate dead end.
+    const next = workspaces.find((workspace) => !workspace.isSuspended) ?? workspaces[0];
+    if (next) {
+      toast.info(`You are no longer in that workspace. Opening ${next.businessName}.`);
+      await switchWorkspace(next.id);
+      return;
+    }
+  } catch {
+    // Fall through: the session is finished, not merely misdirected.
+  }
+
+  useAuthStore.getState().clear();
+  hardNavigate('/login');
+};

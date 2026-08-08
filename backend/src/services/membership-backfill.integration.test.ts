@@ -12,8 +12,8 @@ import { prisma } from '../config/prisma.js';
  * test invented afterwards — and the rows that would break it are the awkward historical ones a
  * fixture would never think to create.
  *
- * Locally that means 12 users across 10 tenants, **three of them with a null `roleId`** (accounts
- * that predate custom roles and fall back to the legacy enum). Those three are exactly why
+ * Locally that means a dozen users across ten tenants, **several with a null `roleId`** (accounts
+ * that predate custom roles and fall back to the legacy enum). Those are exactly why
  * `Membership.roleId` is nullable: a required column would have forced the migration to invent a
  * role for them.
  *
@@ -61,37 +61,69 @@ describe('every membership matches the user the backfill copied it from', () => 
     })).rejects.toMatchObject({ code: 'P2003' });
   });
 
-  it('**each membership carries the same workspace, role and state as its user**', async () => {
+  it('**every login still has the membership the backfill gave it**', async () => {
     /*
-     * The straight copy, and the one that matters most. Cardinality was 1:1 when the migration
-     * ran — `User.tenantId` is `NOT NULL` — so anything other than an exact match means the
-     * backfill's `SELECT` list was mis-ordered. That mistake produces plausible-looking rows
-     * rather than an error, and a membership naming the wrong workspace hands somebody a
-     * workspace that is not theirs the moment `requireAuth` starts reading this table.
+     * ── What this used to assert, and why it had to change ─────────────────────
      *
-     * Iterating in TypeScript rather than as one clever query, because Prisma cannot compare a
-     * column on one model against a column on a related one — the obvious
-     * `where: { NOT: { user: { tenantId: { equals: membership.fields.tenantId } } } }` does not
-     * typecheck, and there is no point contorting around it for a table this size.
+     * It compared every membership field against the user row: same tenant, same `roleId`, same
+     * `legacyRole`, same `isActive`. That was right when the backfill ran, because cardinality was
+     * **1:1** — `User.tenantId` was `NOT NULL` and nothing else wrote memberships.
+     *
+     * It is wrong now, and the first thing to falsify it was the feature working. A second
+     * membership has a different tenant by definition. And since roles moved onto the membership,
+     * `User.role` and `User.roleId` are **provenance** — what this login was created as — which a
+     * role change in the team screen deliberately no longer touches.
+     *
+     * So the surviving claim is narrower and still worth having: the row the backfill created is
+     * still there. Its tenant is the user's home tenant, and it is the one a person keeps even
+     * after being revoked from it, because leaving is a flag rather than a delete.
      */
-    const memberships = await prisma.membership.findMany({
+    const users = await prisma.user.findMany({
       select: {
-        id: true, tenantId: true, roleId: true, legacyRole: true, isActive: true, joinedAt: true,
-        user: { select: { id: true, tenantId: true, roleId: true, role: true, isActive: true, createdAt: true } },
+        id: true, tenantId: true, createdAt: true,
+        memberships: { select: { tenantId: true, joinedAt: true } },
       },
     });
 
-    for (const membership of memberships) {
-      const user = membership.user;
-      expect(membership.tenantId, `tenant for ${user.id}`).toBe(user.tenantId);
-      expect(membership.roleId, `roleId for ${user.id}`).toBe(user.roleId);
-      expect(membership.legacyRole, `legacyRole for ${user.id}`).toBe(user.role);
-      expect(membership.isActive, `isActive for ${user.id}`).toBe(user.isActive);
-      // `joinedAt` is the user's own `createdAt`, not the migration's clock — the team screen
-      // orders by it, and "joined today" for everybody would be wrong on every row.
-      expect(membership.joinedAt.getTime(), `joinedAt for ${user.id}`)
-        .toBe(user.createdAt.getTime());
+    for (const user of users) {
+      const home = user.memberships.find((membership) => membership.tenantId === user.tenantId);
+      expect(home, `home membership for ${user.id}`).toBeDefined();
+      // `joinedAt` is the user's own `createdAt`, not the migration's clock — the team screen orders
+      // by it, and "joined today" for everybody would be wrong on every row.
+      expect(home!.joinedAt.getTime(), `joinedAt for ${user.id}`).toBe(user.createdAt.getTime());
     }
+  });
+
+  it('**no membership carries another workspace\'s role**', async () => {
+    /*
+     * The check that replaces the field-by-field copy, and a better one: it is about *privilege*
+     * rather than about a migration.
+     *
+     * `Membership.roleId` and `Membership.tenantId` are separate columns with separate foreign keys,
+     * and nothing in the schema stops them disagreeing. A membership pointing at a `Role` belonging
+     * to a different workspace would hand somebody that workspace's permissions here —
+     * `resolvePermissions` reads the role it is given and asks no questions about where it came from.
+     *
+     * The team screen and the invite path both look the role up with `{ id, tenantId }` before
+     * writing it, so this should be impossible. That is what makes it worth asserting against the
+     * whole table rather than a fixture.
+     */
+    const withRole = await prisma.membership.findMany({
+      where: { roleId: { not: null } },
+      select: {
+        id: true, tenantId: true, roleId: true,
+        assignedRole: { select: { tenantId: true, name: true } },
+      },
+    });
+
+    // Compared in TypeScript, because Prisma cannot compare a column on one model against a column
+    // on a related one — and the filter that looks like it can, `{ equals: undefined }`, is the
+    // no-filter footgun documented above.
+    const wrong = withRole.filter((m) => m.assignedRole!.tenantId !== m.tenantId);
+    expect(wrong, `memberships holding a role from another workspace: ${JSON.stringify(wrong)}`)
+      .toEqual([]);
+    // Not vacuous: there really are memberships with a role to have got wrong.
+    expect(withRole.length).toBeGreaterThan(0);
   });
 
   it('**a deactivated person has a revocation time, and an active one does not**', async () => {
@@ -156,6 +188,15 @@ describe('every membership matches the user the backfill copied it from', () => 
       prisma.membership.count(),
     ]);
 
-    expect(memberships).toBe(users);
+    expect(users).toBeGreaterThan(0);
+    /*
+     * **At least** one per login, not exactly one.
+     *
+     * `toBe(users)` was the original, and it was a true statement about the backfill that became a
+     * false statement about the product: somebody in two workspaces has two memberships. The
+     * inequality is what survives — every login has its home membership, and any surplus is somebody
+     * who joined a second workspace, which is the entire point.
+     */
+    expect(memberships).toBeGreaterThanOrEqual(users);
   });
 });

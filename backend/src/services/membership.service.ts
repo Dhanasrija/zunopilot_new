@@ -267,7 +267,20 @@ export const revokeMembership = (
   const run = async (tx: Client) => {
     await tx.membership.update({
       where: { userId_tenantId: { userId, tenantId } },
-      data: { isActive: false, revokedAt: new Date() },
+      data: {
+        isActive: false,
+        revokedAt: new Date(),
+        /*
+         * Forget that they were last here.
+         *
+         * `lastSelectedAt` decides where a fresh login lands, and the row survives being revoked so
+         * that rejoining is a reactivation rather than a new membership. Left set, somebody who left a
+         * workspace and was later added back would **land in the one they walked out of** — and so
+         * would anybody removed and reinstated. The workspace they actually work in is the one they
+         * chose most recently and still belong to.
+         */
+        lastSelectedAt: null,
+      },
     });
 
     // Their open conversations go back to the shared pool rather than sitting with a name that can

@@ -342,6 +342,29 @@ describe('changing the team', () => {
     expect(membership.roleId).toBe(roleIds[TENANT]!.MANAGER);
   });
 
+  it('**refuses a role that belongs to another workspace**', async () => {
+    /*
+     * `Membership.roleId` and `Membership.tenantId` are separate columns with separate foreign keys,
+     * and nothing in the schema stops them disagreeing. Writing another workspace's role here would
+     * hand this person that workspace's permissions — `resolvePermissions` reads whatever role it is
+     * given and asks no questions about where it came from.
+     *
+     * The lookup scopes by `tenantId`, which is what makes this a 400 rather than a privilege
+     * escalation. `membership-backfill.integration.test.ts` asserts the same property over the whole
+     * database; this asserts the door it would come through.
+     */
+    const res = await request(app).patch(`/api/team/${agent.id}`).set(as(owner))
+      .send({ roleId: roleIds[OTHER_TENANT]!.OWNER });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/does not exist in this workspace/i);
+
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: agent.id, tenantId: TENANT } },
+    });
+    expect(membership.roleId).toBe(roleIds[TENANT]!.AGENT);
+  });
+
   it('cannot touch a member of another workspace', async () => {
     const response = await request(app).patch(`/api/team/${outsider.id}`).set(as(owner))
       .send({ roleId: roleIds[TENANT]!.AGENT });

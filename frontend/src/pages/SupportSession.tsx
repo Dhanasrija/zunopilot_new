@@ -49,7 +49,15 @@ export default function SupportSession() {
       };
     }>('/auth/me')
       .then((response) => {
-        setSession({ token, ...response.data.data });
+        /*
+         * `workspaces: []` explicitly, not by omission.
+         *
+         * `setSession` keeps whatever list was already there when a payload has none, and this
+         * browser belongs to an operator who may have their own session persisted. A support token
+         * cannot list or change workspaces — the server refuses all three routes — so an inherited
+         * switcher would offer moves that 403. An empty list renders no switcher, which is the truth.
+         */
+        setSession({ token, ...response.data.data, workspaces: [] });
         navigate('/dashboard', { replace: true });
       })
       .catch((err: Error) => {

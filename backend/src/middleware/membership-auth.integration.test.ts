@@ -434,6 +434,11 @@ describe('DELETE /api/auth/workspaces/:tenantId', () => {
     .delete(`/api/auth/workspaces/${tenantId}`).set(auth(token));
 
   it('**leaves the workspace and returns the ones that remain**', async () => {
+    // As if they had switched into Bravo at some point, which is how anybody gets there.
+    await prisma.membership.update({
+      where: { id: ctx.bravoMembershipId }, data: { lastSelectedAt: new Date() },
+    });
+
     // Bravo, where they are only a reader. Alpha is where they are the sole owner.
     const res = await leave(BRAVO, ctx.bravoToken).expect(200);
 
@@ -444,6 +449,12 @@ describe('DELETE /api/auth/workspaces/:tenantId', () => {
     });
     expect(membership.isActive).toBe(false);
     expect(membership.revokedAt).not.toBeNull();
+    /*
+     * And it forgets that they were last here. The row survives so a rejoin reactivates rather than
+     * duplicates — which means a stale `lastSelectedAt` would land them back in the workspace they
+     * just walked out of the next time they signed in.
+     */
+    expect(membership.lastSelectedAt).toBeNull();
   });
 
   it('**invalidates the token for the workspace just left, and only that one**', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import SupportAccessBanner from './SupportAccessBanner';
 import { NotificationBell } from './NotificationBell';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { useNotifications } from '@/hooks/useNotifications';
 import {
   useAuthStore, useCatalogueNouns, type ModuleKey, type Permission,
@@ -289,7 +290,16 @@ export default function AppLayout({ fullBleed = false }: { fullBleed?: boolean }
                 )} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-52">
+            {/*
+              `w-64` rather than `w-52`: a business name plus a role name does not fit in 13rem, and
+              both are untouched by the brand gate's spacing scale — `w-*` is not spacing.
+
+              **No `collapsed && 'lg:hidden'` here**, tempting as the symmetry is with every other
+              child of the rail. This content is portalled to the body, so hiding it by the rail's
+              state would strand the switcher in the collapsed rail with no way to open it.
+            */}
+            <DropdownMenuContent side="top" align="start" className="w-64">
+              <WorkspaceSwitcher />
               <DropdownMenuItem onClick={() => nav2('/settings?tab=profile')}>
                 <UserCircle2 className="h-4 w-4 mr-2" />Profile
               </DropdownMenuItem>
