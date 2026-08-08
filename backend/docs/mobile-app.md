@@ -158,10 +158,27 @@ snapshot, so rotating a key takes effect without a mystery.
 | `FCM_SERVICE_ACCOUNT_FILE` | Path to the service-account JSON from Firebase → Project settings → Service accounts. **Prefer this.** |
 | `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` | The same three fields as loose variables, for hosts that offer nothing else. Escape newlines in the key as `\n`. Ignored when the file is set. |
 
-Put the JSON outside the repo — `/etc/zunopilot/fcm.json`, owned by the service user, mode 600 — and
-point at it. A PEM private key pasted into `.env` has embedded newlines that every shell, process
-manager and CI secret store mangles differently, and the failure looks like an authentication error
-rather than a formatting one.
+**Put the JSON in `/srv/zunopilot/shared/`, beside the `.env`.** That is where the box already keeps
+the secrets a deploy must not carry: `shared/` is placed by hand, owned by the deploy user, and left
+alone by every release, so the file survives deploys and rollbacks without being in Bitbucket. It
+needs no sudo and no symlink — `FCM_SERVICE_ACCOUNT_FILE` is an absolute path.
+
+```bash
+scp -i <key>.pem fcm.json ubuntu@13.200.97.75:/srv/zunopilot/shared/fcm.json
+ssh -i <key>.pem ubuntu@13.200.97.75 'chmod 600 /srv/zunopilot/shared/fcm.json'
+```
+
+Then in `/srv/zunopilot/shared/.env`:
+
+```
+FCM_SERVICE_ACCOUNT_FILE=/srv/zunopilot/shared/fcm.json
+```
+
+and restart the backend — `.env` is read at boot, so a running process will not pick it up.
+
+A PEM private key pasted into `.env` instead has embedded newlines that every shell, process manager
+and CI secret store mangles differently, and the failure surfaces as an authentication error rather
+than a formatting one. Hence the file.
 
 The file is re-read when its modification time changes, so replacing the key in place does not need a
 restart.
