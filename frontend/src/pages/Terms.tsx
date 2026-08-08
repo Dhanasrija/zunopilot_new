@@ -1,6 +1,9 @@
 import LegalLayout from '@/components/layout/LegalLayout';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 export default function Terms() {
+  useDocumentHead(PAGE_HEADS.terms);
   return (
     <LegalLayout
       title="ZunoPilot Terms and Conditions"

@@ -1,6 +1,9 @@
 import LegalLayout from '@/components/layout/LegalLayout';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 export default function Privacy() {
+  useDocumentHead(PAGE_HEADS.privacy);
   return (
     <LegalLayout
       title="Privacy Policy"
