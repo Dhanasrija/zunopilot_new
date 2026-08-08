@@ -34,6 +34,22 @@ export const signToken = (payload: { userId: string } & Record<string, unknown>)
     expiresIn: env.jwt.expiresIn as SignOptions['expiresIn'],
   });
 
+/**
+ * A token that expires when an existing one would, rather than starting a fresh lifetime.
+ *
+ * **Switching workspace must not extend a session.** Minted through `signToken` it would get a full
+ * `JWT_EXPIRES_IN` every time, so somebody with two workspaces could hold an indefinite session by
+ * moving between them — a renewal endpoint nobody designed. This mirrors `mintImpersonationToken`,
+ * which for the same reason never issues a token outliving its approved window.
+ *
+ * `seconds` is what remains, and the caller is expected to have refused already if that is not
+ * positive.
+ */
+export const signTokenFor = (
+  payload: { userId: string } & Record<string, unknown>,
+  seconds: number,
+): string => jwt.sign(payload, env.jwt.secret, { algorithm: ALGORITHM, expiresIn: seconds });
+
 export const verifyToken = (token: string): AccessTokenPayload => {
   const decoded = jwt.verify(token, env.jwt.secret, { algorithms: [ALGORITHM] });
   if (typeof decoded === 'string' || typeof decoded.userId !== 'string') {

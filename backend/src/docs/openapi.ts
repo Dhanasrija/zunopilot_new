@@ -208,6 +208,50 @@ export const openapi = {
         responses: { 200: ok('The session', ref('Session')), 401: errors[401] },
       },
     },
+    '/auth/workspaces': {
+      get: {
+        tags: ['Auth'], security: auth, summary: 'Workspaces this login can reach',
+        description:
+          'Answers **even when the current workspace is suspended**, and even when the token'
+          + ' predates workspace scoping — it needs only a valid session, not a resolved'
+          + ' workspace. That is deliberate: behind the ordinary guard, somebody whose workspace'
+          + ' was suspended would have no way to reach the one that is fine.',
+        responses: {
+          200: ok('The list', {
+            type: 'object',
+            properties: { workspaces: { type: 'array', items: ref('Workspace') } },
+          }),
+          401: errors[401],
+        },
+      },
+    },
+    '/auth/workspaces/switch': {
+      post: {
+        tags: ['Auth'], security: auth, summary: 'Change which workspace this session acts in',
+        description:
+          'Returns a **new token** plus the full session for that workspace — swap the stored token'
+          + ' for it. The new token inherits the old one’s expiry rather than starting a fresh'
+          + ' lifetime, so switching cannot be used to renew a session indefinitely.\n\n'
+          + 'A workspace you are not a member of answers **404, not 403**, so this cannot be used'
+          + ' to discover which workspace ids exist. A support-access session is refused outright.',
+        requestBody: jsonBody({
+          type: 'object',
+          required: ['tenantId'],
+          properties: { tenantId: { type: 'string', format: 'uuid' } },
+        }),
+        responses: {
+          200: ok('A session for that workspace', {
+            allOf: [
+              { type: 'object', properties: { token: { type: 'string' } } },
+              ref('Session'),
+            ],
+          }),
+          401: errors[401],
+          403: errors[403],
+          404: errors[404],
+        },
+      },
+    },
     '/auth/profile': {
       put: {
         tags: ['Auth'], security: auth, summary: 'Finish onboarding',
@@ -1016,6 +1060,42 @@ export const openapi = {
             items: { type: 'string', enum: ['MARKETING', 'LEADS', 'SUPPORT', 'AI_AGENT', 'ECOMMERCE', 'KEYWORD_RULES'] },
             description: 'Which optional modules this workspace has. A missing one 404s its routes.',
           },
+          activeWorkspaceId: {
+            type: 'string', format: 'uuid',
+            description:
+              'The workspace this session is acting in. Same value as `tenant.id`, carried'
+              + ' separately so a switcher can mark one row without comparing shapes.',
+          },
+          workspaces: {
+            type: 'array', items: ref('Workspace'),
+            description:
+              'Every workspace this login can reach. One entry for a normal account. Absent from a'
+              + ' session minted before this field existed — treat that as "cannot switch".',
+          },
+        },
+      },
+      Workspace: {
+        type: 'object',
+        description: 'One workspace this login belongs to, as a switcher needs it.',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          businessName: { type: 'string' },
+          logoUrl: { type: 'string', nullable: true },
+          roleName: {
+            type: 'string', nullable: true,
+            description:
+              'The workspace’s own name for the role — "Owner", "Shift lead". Not the legacy enum,'
+              + ' which would contradict what the Team screen shows.',
+          },
+          isOwner: { type: 'boolean' },
+          joinedAt: { type: 'string', format: 'date-time' },
+          isSuspended: {
+            type: 'boolean',
+            description:
+              'Listed even though it cannot be entered. Hiding it would make a business vanish from'
+              + ' the switcher with no explanation.',
+          },
+          isCurrent: { type: 'boolean' },
         },
       },
       Tenant: {

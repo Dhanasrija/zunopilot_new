@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '../app.js';
 import { prisma } from '../config/prisma.js';
-import { signToken } from '../utils/jwt.js';
+import { signToken, signTokenFor } from '../utils/jwt.js';
 import { ROLE_PERMISSIONS } from '../config/permissions.js';
 
 /*
@@ -290,5 +290,135 @@ describe('the switcher must stay reachable', () => {
     // And the state it has to survive really is reachable: suspended workspace, valid token.
     await prisma.tenant.update({ where: { id: BRAVO }, data: { isActive: false } });
     await get('/api/tenant/me', ctx.bravoToken).expect(403);
+  });
+});
+
+describe('GET /api/auth/workspaces', () => {
+  it('**lists both, marking the one this token is acting in**', async () => {
+    const res = await get('/api/auth/workspaces', ctx.alphaToken).expect(200);
+    const workspaces = res.body.data.workspaces as Array<Record<string, unknown>>;
+
+    expect(workspaces).toHaveLength(2);
+    expect(workspaces.filter((w) => w.isCurrent)).toHaveLength(1);
+    expect(workspaces.find((w) => w.isCurrent)?.id).toBe(ALPHA);
+    // The workspace's own role name, not the legacy enum — a switcher showing `AGENT` beside a role
+    // somebody renamed would contradict the Team screen.
+    expect(workspaces.find((w) => w.id === BRAVO)?.roleName).toBe('Reader');
+  });
+
+  it('**answers even when the current workspace is suspended**', async () => {
+    /*
+     * The not-stuck property, and the entire reason `requireSession` exists. Behind `requireAuth`
+     * this would 403 — so somebody whose workspace was suspended could neither see the workspace
+     * that is fine nor move to it, and the only exit would be a support ticket.
+     */
+    await prisma.tenant.update({ where: { id: BRAVO }, data: { isActive: false } });
+
+    const res = await get('/api/auth/workspaces', ctx.bravoToken).expect(200);
+    const workspaces = res.body.data.workspaces as Array<Record<string, unknown>>;
+
+    expect(workspaces).toHaveLength(2);
+    // Listed, and honest about why it cannot be entered. Hiding it would make a business vanish.
+    expect(workspaces.find((w) => w.id === BRAVO)?.isSuspended).toBe(true);
+    expect(workspaces.find((w) => w.id === ALPHA)?.isSuspended).toBe(false);
+  });
+
+  it('**answers a token that predates workspace scoping**', async () => {
+    // The ambiguous legacy token: `requireAuth` refuses it with WORKSPACE_REQUIRED, and this is the
+    // endpoint the client is told to call next. If it needed a resolved workspace, that instruction
+    // would be a dead end.
+    const legacy = signToken({ userId: ctx.userId });
+
+    await get('/api/tenant/me', legacy).expect(401);
+    const res = await get('/api/auth/workspaces', legacy).expect(200);
+    expect(res.body.data.workspaces).toHaveLength(2);
+  });
+
+  it('does not list a workspace the person has been removed from', async () => {
+    await prisma.membership.update({
+      where: { id: ctx.bravoMembershipId }, data: { isActive: false },
+    });
+    const res = await get('/api/auth/workspaces', ctx.alphaToken).expect(200);
+    expect(res.body.data.workspaces).toHaveLength(1);
+  });
+});
+
+describe('POST /api/auth/workspaces/switch', () => {
+  const switchTo = (tenantId: string, token: string) => request(app)
+    .post('/api/auth/workspaces/switch').set(auth(token)).send({ tenantId });
+
+  it('**returns a token that works in the new workspace and a session describing it**', async () => {
+    const res = await switchTo(BRAVO, ctx.alphaToken).expect(200);
+
+    const { token, tenant, activeWorkspaceId, permissions } = res.body.data;
+    expect(tenant.businessName).toBe('Bravo Trading');
+    expect(activeWorkspaceId).toBe(BRAVO);
+    /*
+     * **Exactly Bravo's role, not merely "not Alpha's".**
+     *
+     * The first version asserted `not.toContain('team:manage')`, which passed even when the session
+     * view fell back to the legacy `AGENT` template — that template does not include it either. An
+     * exact set is what distinguishes "read the membership's role" from "read something that
+     * happens to be similarly restricted".
+     */
+    expect([...permissions].sort()).toEqual(['inbox:read', 'settings:read']);
+
+    // And the token really is scoped there.
+    const after = await get('/api/tenant/me', token).expect(200);
+    expect(JSON.stringify(after.body)).toContain('Bravo Trading');
+  });
+
+  it('**does not extend the session**', async () => {
+    /*
+     * Otherwise two workspaces buy an indefinite session by ping-ponging — a renewal endpoint
+     * nobody designed and nobody would think to audit.
+     *
+     * The **short-lived** starting token is what makes this decisive. The first version of this
+     * test minted the original with `signToken`, so both tokens got the same `JWT_EXPIRES_IN` and,
+     * being issued in the same second, identical `exp` — `<=` held whether the endpoint inherited
+     * the expiry or started a fresh day. Two minutes of remaining life makes the difference
+     * unmissable.
+     */
+    const nearlyExpired = signTokenFor({ userId: ctx.userId, tenantId: ALPHA }, 120);
+    const res = await switchTo(BRAVO, nearlyExpired).expect(200);
+
+    const decode = (raw: string) =>
+      JSON.parse(Buffer.from(raw.split('.')[1]!, 'base64url').toString()) as { exp: number };
+
+    const issued = decode(res.body.data.token).exp;
+    expect(issued).toBeLessThanOrEqual(decode(nearlyExpired).exp);
+    // And concretely: minutes away, not a day.
+    expect(issued - Math.floor(Date.now() / 1000)).toBeLessThan(300);
+  });
+
+  it('**answers 404, not 403, for a workspace you are not in**', async () => {
+    // 403 would make this an oracle: feed it uuids and the status code tells you which are real.
+    await prisma.membership.delete({ where: { id: ctx.bravoMembershipId } });
+
+    await switchTo(BRAVO, ctx.alphaToken).expect(404);
+    await switchTo('00000000-0000-4000-8000-000000000000', ctx.alphaToken).expect(404);
+  });
+
+  it('refuses a workspace that is suspended, and says so', async () => {
+    await prisma.tenant.update({ where: { id: BRAVO }, data: { isActive: false } });
+
+    const res = await switchTo(BRAVO, ctx.alphaToken).expect(403);
+    expect(res.body.message).toMatch(/suspended/i);
+  });
+
+  it('**remembers where you were, so the next login lands there**', async () => {
+    await switchTo(BRAVO, ctx.alphaToken).expect(200);
+
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { id: ctx.bravoMembershipId },
+    });
+    expect(membership.lastSelectedAt).not.toBeNull();
+  });
+
+  it('works from a token that predates workspace scoping', async () => {
+    // The client's escape from WORKSPACE_REQUIRED: list, then switch, with the token it already has.
+    const legacy = signToken({ userId: ctx.userId });
+    const res = await switchTo(ALPHA, legacy).expect(200);
+    expect(res.body.data.activeWorkspaceId).toBe(ALPHA);
   });
 });

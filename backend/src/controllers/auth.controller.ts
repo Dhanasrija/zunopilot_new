@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import type { UserRole } from '@prisma/client';
-import { resolvePermissions, userOf } from '../middleware/auth.js';
+import { membershipOf, resolvePermissions, userOf } from '../middleware/auth.js';
 import { enabledModulesFor } from '../modules/modules/module.service.js';
 import { prisma } from '../config/prisma.js';
 import { logger } from '../config/logger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
-import { signToken } from '../utils/jwt.js';
+import { signToken, signTokenFor } from '../utils/jwt.js';
 import {
   countryFromPhone, normalisePhone, requestOtp, verifyOtp,
 } from '../services/otp.service.js';
@@ -50,10 +50,23 @@ const verifySchema = phoneSchema.extend({
  * turning a module off takes effect on the next request rather than at token
  * expiry.
  */
-const sessionView = async (user: {
-  id: string; phone: string | null; email: string | null; fullName: string;
-  role: UserRole; emailVerified: boolean; country: string | null;
+/*
+ * **Takes the membership, not the user.**
+ *
+ * It used to take a user with `tenant` and `assignedRole` inlined, which was coherent while a login
+ * had exactly one of each. It is not any more: `requireAuth` resolves *which* workspace a request is
+ * acting in, and a session view built from the user row would report the workspace the login happens
+ * to be rooted in — so somebody signed into their second business would be told the name, category,
+ * modules and permissions of their first. The screen would be wrong about which business it was
+ * showing, which is the worst version of this bug available.
+ */
+const sessionView = async (membership: {
+  legacyRole: UserRole;
   assignedRole: { isOwner: boolean; permissions: string[] } | null;
+  user: {
+    id: string; phone: string | null; email: string | null; fullName: string;
+    emailVerified: boolean; country: string | null;
+  };
   tenant: {
     id: string; businessName: string; onboardingCompletedAt: Date | null;
     maskCustomerNumbers: boolean;
@@ -63,13 +76,21 @@ const sessionView = async (user: {
       catalogueNoun: string | null; catalogueItemNoun: string | null;
     } | null;
   };
-}) => ({
+}) => {
+  const user = { ...membership.user, tenant: membership.tenant };
+  return ({
   user: {
     id: user.id,
     phone: user.phone,
     email: user.email,
     fullName: user.fullName,
-    role: user.role,
+    /*
+     * The legacy enum from **this membership**, not from the user row.
+     *
+     * Still a label rather than policy — the client shows a role name from `permissions` and
+     * `workspaces[].roleName` — but it has to be the label for the workspace they are actually in.
+     */
+    role: membership.legacyRole,
     emailVerified: user.emailVerified,
     country: user.country,
   },
@@ -113,12 +134,73 @@ const sessionView = async (user: {
      */
     aiAgentEnabled: user.tenant.aiAgentEnabled,
   },
-  permissions: resolvePermissions(user.assignedRole, user.role),
+  permissions: resolvePermissions(membership.assignedRole, membership.legacyRole),
   modules: await enabledModulesFor(user.tenant.id),
   profileComplete: user.tenant.onboardingCompletedAt !== null,
-});
+  /**
+   * Which workspace this session is acting in, and every workspace this login can reach.
+   *
+   * `tenant` above stays exactly as it was — the active one, in the shape the web store and the
+   * mobile spec already read. This is additive beside it, following the convention every optional
+   * field here already follows: a session minted before it existed simply will not carry it.
+   *
+   * `activeWorkspaceId` is redundant with `tenant.id` on purpose. The client needs to mark one row
+   * in a list, and asking it to derive that by comparing against a differently-shaped object is how
+   * "acting in A while the UI says B" gets written.
+   */
+  activeWorkspaceId: user.tenant.id,
+  workspaces: await workspacesFor(user.id, user.tenant.id),
+  });
+};
 
-const sessionInclude = {
+/**
+ * Every workspace this login can reach, newest-used first.
+ *
+ * Deliberately thin: what a switcher needs to draw a row and nothing more. No counts, no member
+ * lists — those are per-workspace reads behind their own permissions, and putting them here would
+ * mean one screen's needs dictating the shape of every session payload.
+ */
+const workspacesFor = async (userId: string, activeTenantId: string) => {
+  const memberships = await prisma.membership.findMany({
+    where: { userId, isActive: true },
+    include: {
+      tenant: { select: { id: true, businessName: true, logoUrl: true, isActive: true } },
+      assignedRole: { select: { name: true, isOwner: true } },
+    },
+    orderBy: [{ lastSelectedAt: 'desc' }, { joinedAt: 'asc' }],
+  });
+
+  return memberships.map((membership) => ({
+    id: membership.tenant.id,
+    businessName: membership.tenant.businessName,
+    logoUrl: membership.tenant.logoUrl,
+    /*
+     * The workspace's own name for the role — "Owner", "Shift lead" — not the legacy enum. A
+     * switcher showing `AGENT` next to a role somebody renamed would be telling them their role is
+     * something the Team screen says it is not.
+     */
+    roleName: membership.assignedRole?.name ?? null,
+    isOwner: membership.assignedRole?.isOwner ?? false,
+    joinedAt: membership.joinedAt,
+    /*
+     * Included even though a suspended workspace cannot be entered. Hiding it would make it vanish
+     * from the switcher with no explanation, and "why did my other business disappear" is a worse
+     * question than a row that says it is suspended.
+     */
+    isSuspended: !membership.tenant.isActive,
+    isCurrent: membership.tenant.id === activeTenantId,
+  }));
+};
+
+/*
+ * Everything a session payload needs, hung off the **membership**.
+ *
+ * Replaces `sessionInclude`, which was user-shaped. That shape was the bug: a session built from
+ * the user row reports whichever workspace the login is rooted in, so somebody signed into their
+ * second business would be told the first one's name, category, modules and permissions.
+ */
+const membershipSessionInclude = {
+  user: true,
   assignedRole: true,
   tenant: {
     include: {
@@ -130,6 +212,13 @@ const sessionInclude = {
     },
   },
 } as const;
+
+/** The session payload for one membership. One read, one shape, five call sites. */
+const sessionFor = (membershipId: string) => prisma.membership.findUniqueOrThrow({
+  where: { id: membershipId },
+  include: membershipSessionInclude,
+});
+
 
 /**
  * Send a login code.
@@ -179,10 +268,7 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
   const body = verifySchema.parse(req.body);
   const phone = await verifyOtp(body.phone, body.code);
 
-  const existing = await prisma.user.findUnique({
-    where: { phone },
-    include: sessionInclude,
-  });
+  const existing = await prisma.user.findUnique({ where: { phone } });
 
   if (existing) {
     if (!existing.isActive) throw ApiError.forbidden('This account has been deactivated.');
@@ -223,7 +309,7 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
         // **The claim is what scopes the session.** Without it the request falls into
         // `requireAuth`'s legacy branch, which refuses anybody with more than one workspace.
         token: signToken({ userId: existing.id, tenantId: landing.tenantId }),
-        ...await sessionView(existing),
+        ...await sessionView(await sessionFor(landing.id)),
         isNew: false,
       },
     });
@@ -273,10 +359,11 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
   // The founder's membership. After the role attach, so it copies the role rather than a null.
   await syncMembership(created.users[0].id);
 
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: created.users[0].id },
-    include: sessionInclude,
+  const founder = await prisma.membership.findFirstOrThrow({
+    where: { userId: created.users[0].id, tenantId: created.id },
+    select: { id: true },
   });
+  const user = created.users[0]!;
 
   logger.info('New workspace created from a login code', {
     userId: user.id, tenantId: created.id, country,
@@ -286,7 +373,7 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
     success: true,
     data: {
       token: signToken({ userId: user.id, tenantId: created.id }),
-      ...await sessionView(user),
+      ...await sessionView(await sessionFor(founder.id)),
       isNew: true,
     },
   });
@@ -348,12 +435,9 @@ export const completeProfile = asyncHandler(async (req, res) => {
     }),
   ]);
 
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: actor.id },
-    include: sessionInclude,
-  });
-
-  res.json({ success: true, data: await sessionView(user) });
+  // Re-read the membership `requireAuth` resolved, so the response describes the workspace this
+  // request was acting in rather than whichever one the login is rooted in.
+  res.json({ success: true, data: await sessionView(await sessionFor(membershipOf(req).id)) });
 });
 
 /** The categories a workspace may choose from. Public: the signup form needs it. */
@@ -367,11 +451,7 @@ export const listBusinessCategories = asyncHandler(async (_req, res) => {
 });
 
 export const me = asyncHandler(async (req, res) => {
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: userOf(req).id },
-    include: sessionInclude,
-  });
-  res.json({ success: true, data: await sessionView(user) });
+  res.json({ success: true, data: await sessionView(await sessionFor(membershipOf(req).id)) });
 });
 
 /** Kept so an existing verification link still works. Email is optional now. */
@@ -387,3 +467,82 @@ export const verifyEmail = asyncHandler(async (req, res) => {
 });
 
 export { normalisePhone };
+
+// ── The workspace switcher ────────────────────────────────────────────────────
+//
+// **Both routes mount on `requireSession`, not `requireAuth`.** That is not an optimisation, it is
+// the whole reason `requireSession` exists: `requireAuth` refuses a session whose workspace has been
+// suspended, and refuses a legacy token belonging to somebody with several workspaces. If these two
+// endpoints sat behind it, either state would be a dead end whose only exit is a support ticket —
+// the person could see nothing and change nothing, including the thing that would fix it.
+//
+// The shape is `startImpersonation`'s, with the grant machinery removed: mint a short-lived token
+// carrying the chosen workspace and let the client swap it. So there is **no mutable server-side
+// "current workspace"** — nothing to drift between two tabs, and nothing to reconcile after a crash.
+
+/** Every workspace this login can reach. Answers even when the active one is suspended. */
+export const listWorkspaces = asyncHandler(async (req, res) => {
+  const actor = userOf(req);
+  // The workspace the token names, so the client can mark one row. Unvalidated and cosmetic — see
+  // `req.claimedTenantId`. A claim for a workspace they are not in simply matches nothing.
+  res.json({
+    success: true,
+    data: { workspaces: await workspacesFor(actor.id, req.claimedTenantId ?? '') },
+  });
+});
+
+const switchSchema = z.object({ tenantId: z.string().min(1) });
+
+export const switchWorkspace = asyncHandler(async (req, res) => {
+  const body = switchSchema.parse(req.body);
+  const actor = userOf(req);
+
+  /*
+   * A support session may never hop.
+   *
+   * The workspace consented to one operator viewing *one* workspace, for a bounded window. Letting
+   * that token reach a second one would make the consent model decoration. There is deliberately no
+   * flag to opt into this, the same way there is no writable variant of a support session.
+   */
+  if (req.impersonation) {
+    throw ApiError.forbidden('A support session cannot change workspace.');
+  }
+
+  const membership = await prisma.membership.findUnique({
+    where: { userId_tenantId: { userId: actor.id, tenantId: body.tenantId } },
+    include: { tenant: true },
+  });
+
+  /*
+   * **404, never 403.** "You are not a member of it" and "it does not exist" must be indistinguishable
+   * or this endpoint enumerates workspaces by id: feed it uuids and the status code tells you which
+   * ones are real.
+   */
+  if (!membership || !membership.isActive) throw ApiError.notFound('Workspace not found');
+  if (!membership.tenant.isActive) {
+    throw ApiError.forbidden('This workspace has been suspended. Please contact support.');
+  }
+
+  /*
+   * The new token inherits the old one's expiry rather than starting a fresh lifetime — otherwise
+   * two workspaces buy an indefinite session by ping-ponging between them. See `signTokenFor`.
+   */
+  const remaining = Math.floor(((req.tokenExp ?? 0) * 1000 - Date.now()) / 1000);
+  if (remaining <= 0) throw ApiError.unauthorized('Invalid or expired token');
+
+  await prisma.membership.update({
+    where: { id: membership.id }, data: { lastSelectedAt: new Date() },
+  });
+
+  logger.info('Workspace switched', { userId: actor.id, tenantId: membership.tenantId });
+
+  res.json({
+    success: true,
+    data: {
+      token: signTokenFor({ userId: actor.id, tenantId: membership.tenantId }, remaining),
+      // Exactly what a fresh login into this workspace would return, so the client adopts it
+      // wholesale rather than merging two shapes.
+      ...await sessionView(await sessionFor(membership.id)),
+    },
+  });
+});

@@ -104,6 +104,18 @@ export const requireSession = async (req: Request, _res: Response, next: NextFun
     if (!user || !user.isActive) throw ApiError.unauthorized('User not active');
 
     req.user = user;
+    /*
+     * The workspace this token *names*, carried unvalidated.
+     *
+     * `requireSession` deliberately resolves no membership, so it cannot say which workspace the
+     * session is really in — that is `requireAuth`'s job. But the switcher still needs to mark a row
+     * as current, and the claim is the only thing that knows. Cosmetic by construction: a claim
+     * naming a workspace this person is not in matches no row and highlights nothing.
+     *
+     * Never use it to scope a query. `tenantIdOf` remains the only source for that, and it is
+     * deliberately unset here.
+     */
+    req.claimedTenantId = typeof decoded.tenantId === 'string' ? decoded.tenantId : null;
     req.tokenExp = typeof decoded.exp === 'number' ? decoded.exp : null;
     next();
   } catch (err) {
@@ -304,6 +316,18 @@ export const requireModule = (module: ModuleKey): RequestHandler => async (req, 
 export const tenantIdOf = (req: Request): string => {
   if (!req.tenantId) throw ApiError.unauthorized('Request is not authenticated');
   return req.tenantId;
+};
+
+/**
+ * The membership this request is acting under, for routes behind `requireAuth`.
+ *
+ * Throws rather than returning undefined, for the same reason `tenantIdOf` does: the alternative is
+ * a caller quietly building a session payload — or a query — with no workspace in it. Absent under
+ * `requireSession`, which resolves identity and deliberately no workspace.
+ */
+export const membershipOf = (req: Request): NonNullable<Request['membership']> => {
+  if (!req.membership) throw ApiError.unauthorized('Request is not scoped to a workspace');
+  return req.membership;
 };
 
 /** The authenticated user, for routes behind `requireAuth`. Throws otherwise. */

@@ -37,6 +37,14 @@ declare global {
       /** Always set together with `membership`; the tenant every query must scope to. */
       tenantId?: string;
       /**
+       * The workspace the token *names*, unvalidated.
+       *
+       * Set by `requireSession`, which resolves no membership and so cannot know the real answer.
+       * For marking the current row in the switcher and nothing else — **never** for scoping a
+       * query; `tenantIdOf` is the only source for that.
+       */
+      claimedTenantId?: string | null;
+      /**
        * The token's own expiry, in seconds.
        *
        * Carried so switching workspaces can mint a token that **inherits** it rather than starting
