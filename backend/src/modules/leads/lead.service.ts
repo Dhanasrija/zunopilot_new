@@ -5,6 +5,7 @@ import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { normalisePhone } from '../../services/otp.service.js';
+import { requireActiveMember } from '../../services/membership.service.js';
 
 // The lead pipeline.
 //
@@ -279,11 +280,7 @@ export const assignLead = async (
   if (ownerId) {
     // Scoped to the workspace: assigning to a user id from another tenant would
     // otherwise put a lead somewhere nobody in this workspace can see it.
-    const owner = await prisma.user.findFirst({
-      where: { id: ownerId, tenantId, isActive: true },
-      select: { fullName: true },
-    });
-    if (!owner) throw ApiError.badRequest('That person is not an active member of this workspace');
+    const owner = await requireActiveMember(tenantId, ownerId);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.lead.update({ where: { id: leadId }, data: { ownerId } });
@@ -372,11 +369,7 @@ export const createReminder = async (
   // Defaults to the lead's owner, then to whoever set it. A reminder with no
   // owner is one nobody sees.
   const assigneeId = input.assigneeId ?? lead.ownerId ?? actorId;
-  const assignee = await prisma.user.findFirst({
-    where: { id: assigneeId, tenantId, isActive: true },
-    select: { id: true, fullName: true },
-  });
-  if (!assignee) throw ApiError.badRequest('That person is not an active member of this workspace');
+  const assignee = await requireActiveMember(tenantId, assigneeId);
 
   return prisma.$transaction(async (tx) => {
     const reminder = await tx.reminder.create({

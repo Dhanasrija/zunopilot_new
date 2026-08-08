@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { entitlementsFor, type ResolvedEntitlements } from './billing.service.js';
 import type { Entitlements } from './catalogue.js';
+import { countSeats } from '../../services/membership.service.js';
 
 // Enforcing what a plan allows.
 //
@@ -75,7 +76,9 @@ export const assertFeature = (
 export const assertCanAddTeamMember = async (tenantId: string): Promise<void> => {
   const [entitlements, current] = await Promise.all([
     entitlementsFor(tenantId),
-    prisma.user.count({ where: { tenantId, isActive: true } }),
+    // The same call the billing page makes to *display* this number. Written twice, the meter
+    // and the gate eventually disagree — a workspace told it has room and then refused.
+    countSeats(tenantId),
   ]);
   assertWithinLimit(entitlements, 'teamMembers', current);
 };

@@ -17,6 +17,7 @@ import { markReadForConversation } from '../modules/notifications/notification.s
 import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
 import { maskContact } from '../utils/mask-number.js';
 import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
+import { requireActiveMember } from '../services/membership.service.js';
 
 /**
  * The filter every human-facing message read must carry.
@@ -237,12 +238,9 @@ export const assignAgent = asyncHandler(async (req, res) => {
   const existing = await prisma.conversation.findFirst({ where: { id, tenantId } });
   if (!existing) throw ApiError.notFound('Conversation not found');
 
-  if (agentId) {
-    const agent = await prisma.user.findFirst({
-      where: { id: agentId, tenantId, isActive: true },
-    });
-    if (!agent) throw ApiError.badRequest('Invalid agent');
-  }
+  // Was `'Invalid agent'`, which named a field rather than the problem. The shared helper's
+  // sentence says what is actually wrong, and the check is the same one leads and tickets make.
+  if (agentId) await requireActiveMember(tenantId, agentId);
 
   const takingFromSomeoneElse = existing.assignedAgentId
     && existing.assignedAgentId !== actor.id;
