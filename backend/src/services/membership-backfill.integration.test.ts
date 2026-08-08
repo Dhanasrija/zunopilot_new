@@ -1,5 +1,7 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../config/prisma.js';
+import { ROLE_PERMISSIONS } from '../config/permissions.js';
+import { syncMembershipsForTenant } from './membership.service.js';
 
 /*
  * The backfill, checked against whatever is actually in this database.
@@ -35,8 +37,50 @@ import { prisma } from '../config/prisma.js';
  * It is also the test that will catch the *next* write path somebody adds and forgets to sync.
  */
 
+/*
+ * ── One workspace of its own, on top of whatever is already here ─────────────
+ *
+ * The scans below deliberately read the **whole** database, which is the point of the file: they
+ * catch a bad backfill on real rows, and they catch the next suite that inserts a user without a
+ * membership. That value does not need a fixture.
+ *
+ * The *non-vacuity* assertions do. They exist so an empty table cannot make this file pass while
+ * meaning nothing — and on a fresh database, which is exactly what CI has, there is no data at all,
+ * so they failed rather than protected anything. A guard that only works on a developer's laptop is
+ * not a guard.
+ *
+ * So the file brings one workspace with a role, a user and a membership. Every scan still covers
+ * everything; the claims about there being rows to have got wrong are now true by construction.
+ */
+const FIXTURE_TENANT = 'dddddddd-0000-0000-0000-0000000000b1';
+
 describe('every membership matches the user the backfill copied it from', () => {
+  beforeAll(async () => {
+    await prisma.tenant.deleteMany({ where: { id: FIXTURE_TENANT } });
+    const tenant = await prisma.tenant.create({
+      data: {
+        id: FIXTURE_TENANT,
+        businessName: 'Backfill Invariants Co',
+        category: 'RESTAURANT',
+        roles: {
+          create: [{
+            name: 'Owner', permissions: [...ROLE_PERMISSIONS.OWNER], isOwner: true, isSystem: true,
+          }],
+        },
+        users: { create: [{ phone: '15558802001', fullName: 'Invariant Owner', role: 'OWNER' }] },
+      },
+      include: { roles: true, users: true },
+    });
+    await prisma.user.update({
+      where: { id: tenant.users[0]!.id }, data: { roleId: tenant.roles[0]!.id },
+    });
+    // Through the product's own path, so the fixture is a membership the application would have
+    // written rather than one this file invented.
+    await syncMembershipsForTenant(FIXTURE_TENANT);
+  });
+
   afterAll(async () => {
+    await prisma.tenant.deleteMany({ where: { id: FIXTURE_TENANT } });
     await prisma.$disconnect();
   });
 
@@ -53,11 +97,9 @@ describe('every membership matches the user the backfill copied it from', () => 
      * `tenantIdOf` throws instead of returning undefined — and it produced a green-looking
      * assertion that meant nothing.
      */
-    const tenant = await prisma.tenant.findFirst({ select: { id: true } });
-    if (!tenant) return; // Empty database; nothing to hang a membership off.
-
+    // The fixture's workspace, so this does not depend on the database holding anything else.
     await expect(prisma.membership.create({
-      data: { userId: '00000000-0000-4000-8000-000000000000', tenantId: tenant.id },
+      data: { userId: '00000000-0000-4000-8000-000000000000', tenantId: FIXTURE_TENANT },
     })).rejects.toMatchObject({ code: 'P2003' });
   });
 
