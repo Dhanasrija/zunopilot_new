@@ -1,8 +1,7 @@
 import { channelForTenant } from '../services/whatsapp-account.service.js';
 import { ConversationStatus } from '@prisma/client';
 import { queryBool, queryEnum } from '../utils/query.js';
-import { tenantIdOf, userOf } from '../middleware/auth.js';
-import { can } from '../config/permissions.js';
+import { holds, tenantIdOf, userOf } from '../middleware/auth.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { logger } from '../config/logger.js';
@@ -249,7 +248,20 @@ export const assignAgent = asyncHandler(async (req, res) => {
     && existing.assignedAgentId !== actor.id;
   const givingToSomeoneElse = agentId && agentId !== actor.id;
 
-  if ((takingFromSomeoneElse || givingToSomeoneElse) && !can(actor.role, 'inbox:assign_others')) {
+  /*
+   * `holds`, not `can`.
+   *
+   * **`can(actor.role, …)` asked the wrong question.** It reads
+   * `ROLE_PERMISSIONS[legacyEnum]` — the three built-in role templates — so a workspace that
+   * built a custom role granting `inbox:assign_others` was refused anyway, and the only
+   * explanation on screen was "Ask a manager to reassign it" to someone who *was* the manager.
+   * Custom roles have existed since `Role` arrived; this was the last site where the legacy enum
+   * still decided policy rather than acting as a label.
+   *
+   * `holds` reads `req.permissions`, which `requireAuth` resolved from the actual role — the
+   * same source every `requirePermission` gate uses.
+   */
+  if ((takingFromSomeoneElse || givingToSomeoneElse) && !holds(req, 'inbox:assign_others')) {
     throw ApiError.forbidden(
       takingFromSomeoneElse
         ? 'This conversation is assigned to someone else. Ask a manager to reassign it.'
