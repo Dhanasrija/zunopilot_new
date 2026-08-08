@@ -109,3 +109,24 @@ describe('the options an interactive message offered', () => {
     }
   });
 });
+
+describe('the delivery tick', () => {
+  it('**appears on an outbound message and not on an inbound one**', () => {
+    // The wiring, not the tick itself — DeliveryTick.test.tsx owns the four states. What can go
+    // wrong here is the component existing and never being rendered.
+    const { unmount } = render(<MessageBubble message={message({ status: 'READ', readAt: '2026-08-08T09:02:00.000Z' })} myId={MY_ID} />);
+    expect(screen.getByRole('img')).toHaveAccessibleName(/^Read/);
+    unmount();
+
+    render(<MessageBubble message={message({ direction: 'INBOUND', status: 'RECEIVED' })} myId={MY_ID} />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('sits beside the timestamp rather than replacing it', () => {
+    // Both belong on that line; an earlier layout would have been one or the other.
+    render(<MessageBubble message={message({ status: 'DELIVERED', deliveredAt: '2026-08-08T09:00:30.000Z' })} myId={MY_ID} />);
+    expect(screen.getByRole('img')).toHaveAccessibleName(/^Delivered/);
+    // The bubble's own timestamp is still rendered.
+    expect(screen.getByText(/2026|Aug/)).toBeInTheDocument();
+  });
+});

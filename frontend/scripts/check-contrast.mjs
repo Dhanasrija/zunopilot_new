@@ -156,6 +156,25 @@ const PAIRS = [
    */
   ['on-accent/85 on accent-600', over('on-accent', 0.85, 'accent-600'), rgb('accent-600'), 4.5, 'bubble sender + timestamp'],
 
+  /*
+   * The read tick on an outbound bubble — **and this row's threshold is 3:1, not 4.5:1.**
+   *
+   * Recorded rather than quietly relaxed, because it is the only row in this file below 4.5 and
+   * the next person will want to know why.
+   *
+   * A delivery tick is a non-text graphic, so the applicable criterion is 1.4.11 (Non-text
+   * Contrast, 3:1), not 1.4.3 (Contrast Minimum, 4.5:1). It also does not carry its meaning by
+   * colour alone, which is what 1.4.1 asks: sent is one tick and delivered is two, so the state
+   * differs by *shape* before it differs by hue, and `DeliveryTick` states it in words in an
+   * `aria-label` besides.
+   *
+   * The arithmetic matters too. 4.5:1 against `accent-600` needs a relative luminance of 0.83;
+   * blue contributes 0.0722 of luminance, so no blue reaches it — solving for 4.5 gives a pale
+   * cyan indistinguishable from the white ticks beside it. WhatsApp's own #53BDEB measures
+   * 2.51:1 here and fails even this bar, which is why there is a token of our own.
+   */
+  ['wa-tick-read on accent-600', rgb('wa-tick-read'), rgb('accent-600'), 3.0, 'read tick, non-text graphic (1.4.11)'],
+
   // Semantic text on its own tint — the §7 "tint bg + dark text" badge pattern.
   ['danger on surface-0', rgb('danger'), rgb('surface-0'), 4.5, 'error text'],
   ['danger on danger/10', rgb('danger'), over('danger', 0.10, 'surface-1'), 4.5, 'alert panel, error badge'],

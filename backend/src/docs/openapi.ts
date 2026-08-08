@@ -1015,7 +1015,26 @@ export const openapi = {
           id: { type: 'string', format: 'uuid' },
           direction: { type: 'string', enum: ['INBOUND', 'OUTBOUND'] },
           type: { type: 'string', example: 'TEXT' },
-          status: { type: 'string', example: 'SENT' },
+          status: {
+            type: 'string',
+            enum: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'RECEIVED'],
+            example: 'READ',
+            description:
+              'Delivery state, from Meta. `RECEIVED` is the inbound default. **Take the state'
+              + ' from here, not from the timestamps below** — Meta delivers status webhooks out'
+              + ' of order and the server refuses to move a message backwards, so a set `readAt`'
+              + ' beside a null `deliveredAt` is normal rather than missing data.',
+          },
+          deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+          readAt: { type: 'string', format: 'date-time', nullable: true },
+          failedAt: { type: 'string', format: 'date-time', nullable: true },
+          statusError: {
+            type: 'string', nullable: true,
+            description:
+              "Why Meta refused it, in Meta's own words, with phone numbers scrubbed. Set only"
+              + ' alongside `FAILED`.',
+            example: '131030: Add recipient phone number to recipient list',
+          },
           body: { type: 'string', nullable: true },
           mediaUrl: { type: 'string', nullable: true },
           waMessageId: { type: 'string', nullable: true },

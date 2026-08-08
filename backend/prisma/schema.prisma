@@ -559,6 +559,29 @@ model Message {
   payload        Json?
   mediaUrl       String?
 
+  /// When Meta said each thing happened — its clock, not ours.
+  ///
+  /// Separate columns rather than deriving times from `status`, because **Meta never replays a
+  /// status webhook**: a delivery time not captured when it arrives is gone for good, so these
+  /// cannot be added later and backfilled. `CampaignRecipient` already models it this way.
+  ///
+  /// **A null `deliveredAt` beside a set `readAt` is normal, not missing data.** Meta delivers
+  /// status webhooks out of order, and the monotonic guard in `webhook-intake.ts` rejects a
+  /// `delivered` that arrives after a `read` — correctly, since the message is already further
+  /// along. Anything reading these must take the state from `status` and use the timestamps
+  /// only for a label. Coalescing one from the other invents a fact.
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
+
+  /// Why Meta refused this message, in its own words, phone numbers scrubbed.
+  ///
+  /// Set only alongside `FAILED`. A flat column rather than a corner of `payload`: `payload`
+  /// carries Meta's original interactive shape that the ordering FSM reads back, and Prisma
+  /// cannot merge JSON in an `updateMany` — writing it would mean read-then-write, which is
+  /// exactly the non-atomic pattern the status guard exists to avoid.
+  statusError String?
+
   /// Who sent this, for OUTBOUND messages.
   ///
   /// **Null on an OUTBOUND message means the bot sent it** — the workflow
@@ -2886,6 +2909,10 @@ model CampaignRecipient {
 
   @@unique([campaignId, customerId])
   @@index([campaignId, status])
+  // Delivery-status webhooks look a recipient up by the wamid Meta gave us at send time.
+  // Without this it is a full scan of the table per status event, and a broadcast produces
+  // one event per recipient per state.
+  @@index([waMessageId])
 }
 
 // ---------------- Module 23: contact enquiries ----------------

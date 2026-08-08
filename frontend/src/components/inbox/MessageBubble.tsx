@@ -1,6 +1,7 @@
 import { cn, formatDateTime } from '@/lib/utils';
 import { outboundOptions, type Message } from './types';
 import { MediaAttachment, hasAttachment } from './MediaAttachment';
+import { DeliveryTick } from './DeliveryTick';
 
 // One message.
 //
@@ -82,13 +83,18 @@ export function MessageBubble({ message, myId }: { message: Message; myId?: stri
           </div>
         )}
 
-        <p className={cn(
-          'mt-1 text-caption tabular-nums',
+        {/*
+          Time and tick on one line, the way every chat app puts them — and the tick is outbound
+          only, because an inbound message's delivery state belongs to the customer's own client.
+        */}
+        <div className={cn(
+          'mt-1 flex items-center justify-end gap-1 text-caption',
           outbound ? 'text-on-accent/85' : 'text-ink-500',
         )}
         >
-          {formatDateTime(message.createdAt)}
-        </p>
+          <span className="tabular-nums">{formatDateTime(message.createdAt)}</span>
+          <DeliveryTick message={message} />
+        </div>
       </div>
     </div>
   );

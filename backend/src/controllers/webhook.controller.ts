@@ -126,13 +126,30 @@ export const receiveWebhook = asyncHandler(async (req, res) => {
         // on why that was worse than losing them.
         if (account) {
           const normalised = normaliseWebhook({ entry: [{ changes: [change] }] });
-          await applyStatusUpdates(normalised);
+
+          /*
+           * Inbound first, delivery statuses second — and the order is deliberate.
+           *
+           * `applyStatusUpdates` used to run first. It threw on a status word we did not model,
+           * and because this whole loop sits inside one try/catch the throw abandoned
+           * `recordInboundEvents` for this change and every change after it. Meta had already
+           * been sent a 200 up at the top of this handler, so it never retried: real customer
+           * messages disappeared, silently, because of a cosmetic tick.
+           *
+           * The allow-list in `applyStatusUpdates` is the actual fix and this reordering is the
+           * belt beside it. Statuses and messages never share a `change` in practice, so it
+           * costs nothing — and it means the half of this handler that only paints a tick can
+           * never sit upstream of the half that must not lose data.
+           */
           const { eventIds, duplicates } = await recordInboundEvents(normalised);
           await enqueueInboundEvents(eventIds);
+          const statuses = await applyStatusUpdates(account.tenantId, normalised);
+
           logger.info('Inbound handed to the conversation engine', {
             tenantId: account.tenantId,
             queued: eventIds.length,
             duplicates,
+            statuses,
           });
           continue;
         }
