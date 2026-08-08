@@ -555,6 +555,85 @@ describe('the connector type catalog', () => {
   });
 });
 
+describe('the starting copy for a kind of business', () => {
+  /*
+   * Two fields on a category that **change live behaviour for every workspace on it** which has not
+   * written its own — how its assistant sounds, and what it declines. That is the point of them
+   * living here rather than being copied into each workspace at signup, and it is why an operator
+   * editing them is audited like everything else on this console.
+   */
+  // SCREAMING_SNAKE — the schema refuses anything else, because templates match on it.
+  const KEY = `SA_TEST_CAT_${Date.now()}`;
+  let categoryId: string;
+
+  afterEach(async () => {
+    await prisma.auditEvent.deleteMany({ where: { targetType: 'BusinessCategory', targetId: categoryId } });
+    await prisma.businessCategory.deleteMany({ where: { key: KEY } });
+  });
+
+  it('**is set on the category and read back**', async () => {
+    const token = await login();
+
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token)).send({
+      key: KEY,
+      label: 'Test Trade',
+      defaultPersona: 'Plain and specific, no marketing language.',
+      defaultOutOfScopeTopics: 'recruitment enquiries\ninternships',
+    }).expect(201);
+    categoryId = created.body.data.id;
+
+    const list = await request(app).get('/sa/business-categories').set(asAdmin(token)).expect(200);
+    const row = list.body.data.find((c: { id: string }) => c.id === categoryId);
+    expect(row.defaultPersona).toBe('Plain and specific, no marketing language.');
+    expect(row.defaultOutOfScopeTopics).toContain('internships');
+  });
+
+  it('**can be cleared back to the house default**', async () => {
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token)).send({
+      key: KEY, label: 'Test Trade', defaultPersona: 'Mine.',
+    }).expect(201);
+    categoryId = created.body.data.id;
+
+    // What the console's blank field sends. Null, not an empty string: workspaces on this category
+    // go back to inheriting the house text rather than to having no persona at all.
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultPersona: null }).expect(200);
+
+    const after = await prisma.businessCategory.findUniqueOrThrow({ where: { id: categoryId } });
+    expect(after.defaultPersona).toBeNull();
+  });
+
+  it('refuses a persona long enough to be a second prompt', async () => {
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token))
+      .send({ key: KEY, label: 'Test Trade' }).expect(201);
+    categoryId = created.body.data.id;
+
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultPersona: 'x'.repeat(5000) }).expect(400);
+  });
+
+  it('records who changed it', async () => {
+    // These fields reach customers of every workspace on the category, so "who wrote this" has to be
+    // answerable months later.
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token))
+      .send({ key: KEY, label: 'Test Trade' }).expect(201);
+    categoryId = created.body.data.id;
+
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultOutOfScopeTopics: 'nutrition advice' }).expect(200);
+
+    const events = await prisma.auditEvent.findMany({
+      where: { targetType: 'BusinessCategory', targetId: categoryId },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(events.map((e) => e.action)).toEqual(['category.created', 'category.updated']);
+    expect(events[1]!.superAdminId).toBe(adminId);
+  });
+});
+
 /*
  * Memberships for the users this fixture inserts directly.
  *

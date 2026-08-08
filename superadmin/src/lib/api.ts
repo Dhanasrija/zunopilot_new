@@ -217,6 +217,15 @@ export interface CategoryRow {
   /** What this kind of business calls its catalogue, and one thing in it. Null = generic. */
   catalogueNoun: string | null;
   catalogueItemNoun: string | null;
+  /**
+   * Where a workspace on this category starts: how its assistant sounds, and what it declines.
+   *
+   * **Editing these changes live behaviour** for every workspace on the category that has not
+   * written its own — which is the point, and the reason it is audited. Null means those workspaces
+   * fall back to house text that is bland but never wrong.
+   */
+  defaultPersona: string | null;
+  defaultOutOfScopeTopics: string | null;
   sortOrder: number;
   isActive: boolean;
   workspaces: number;
@@ -354,6 +363,8 @@ export const sa = {
       key: string; label: string; description?: string; sortOrder?: number;
       /** Omit either to leave it generic — the app reads "Catalogue" / "Item". */
       catalogueNoun?: string; catalogueItemNoun?: string;
+      /** Omit to leave a category on the house persona and the house topic floor. */
+      defaultPersona?: string; defaultOutOfScopeTopics?: string;
     }) => unwrap<CategoryRow>(api.post('/business-categories', body)),
     update: (id: string, body: Record<string, unknown>) =>
       unwrap<CategoryRow>(api.patch(`/business-categories/${id}`, body)),

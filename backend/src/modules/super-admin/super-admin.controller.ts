@@ -17,6 +17,7 @@ import {
   REQUEST_TTL_HOURS, grantUsable, grantView, mintImpersonationToken,
 } from './impersonation.js';
 import { MODULE_KEYS, moduleSettingsFor, setModuleEnabled } from '../modules/module.service.js';
+import { COPY_LIMITS as ASSISTANT_COPY } from '../conversation-engine/routing/assistant-copy.js';
 import {
   enquiryById, listEnquiries, newEnquiryCount, updateEnquiry,
 } from '../enquiries/enquiry.service.js';
@@ -1001,6 +1002,15 @@ export const endImpersonation = asyncHandler(async (req: Request, res: Response)
 // ['RESTAURANT']` and the router prompt is given the category — so it is
 // immutable after creation. The label is free to change.
 
+/*
+ * The topic list's ceiling, from the one place the limits live.
+ *
+ * Lines times characters plus the newlines between them — expressed rather than typed as a round
+ * number, so raising the per-line cap cannot leave this silently inconsistent with the per-line
+ * check the tenant API applies.
+ */
+const TOPICS_MAX_CHARS = ASSISTANT_COPY.topicLines * (ASSISTANT_COPY.topicLineChars + 1);
+
 const categoryCreateSchema = z.object({
   key: z.string().trim().regex(/^[A-Z][A-Z0-9_]*$/, 'SCREAMING_SNAKE_CASE, starting with a letter').max(48),
   label: z.string().trim().min(2).max(80),
@@ -1015,6 +1025,20 @@ const categoryCreateSchema = z.object({
    */
   catalogueNoun: z.string().trim().min(2).max(24).nullish(),
   catalogueItemNoun: z.string().trim().min(2).max(24).nullish(),
+
+  /*
+   * Where a kind of business starts, before it has opinions.
+   *
+   * The assistant's persona and the topics it declines are the two pieces of copy that are
+   * genuinely category-shaped, and every workspace on this category inherits them until it writes
+   * its own — so improving one here improves every workspace that never did. Editing this changes
+   * live behaviour for those workspaces, which is why it is audited like the rest of this screen.
+   *
+   * Unset is a real answer: the assistant falls back to house text that is bland but never wrong,
+   * the same way an unset `catalogueNoun` reads "Catalogue" rather than "Menu".
+   */
+  defaultPersona: z.string().trim().max(ASSISTANT_COPY.personaChars).nullish(),
+  defaultOutOfScopeTopics: z.string().trim().max(TOPICS_MAX_CHARS).nullish(),
 });
 
 const categoryUpdateSchema = z.object({
@@ -1030,6 +1054,20 @@ const categoryUpdateSchema = z.object({
    */
   catalogueNoun: z.string().trim().min(2).max(24).nullish(),
   catalogueItemNoun: z.string().trim().min(2).max(24).nullish(),
+
+  /*
+   * Where a kind of business starts, before it has opinions.
+   *
+   * The assistant's persona and the topics it declines are the two pieces of copy that are
+   * genuinely category-shaped, and every workspace on this category inherits them until it writes
+   * its own — so improving one here improves every workspace that never did. Editing this changes
+   * live behaviour for those workspaces, which is why it is audited like the rest of this screen.
+   *
+   * Unset is a real answer: the assistant falls back to house text that is bland but never wrong,
+   * the same way an unset `catalogueNoun` reads "Catalogue" rather than "Menu".
+   */
+  defaultPersona: z.string().trim().max(ASSISTANT_COPY.personaChars).nullish(),
+  defaultOutOfScopeTopics: z.string().trim().max(TOPICS_MAX_CHARS).nullish(),
 
   isActive: z.boolean().optional(),
 });
@@ -1050,6 +1088,8 @@ export const listBusinessCategories = asyncHandler(async (_req: Request, res: Re
       sortOrder: category.sortOrder,
       catalogueNoun: category.catalogueNoun,
       catalogueItemNoun: category.catalogueItemNoun,
+      defaultPersona: category.defaultPersona,
+      defaultOutOfScopeTopics: category.defaultOutOfScopeTopics,
       isActive: category.isActive,
       workspaces: category._count.tenants,
       createdAt: category.createdAt,
@@ -1071,6 +1111,8 @@ export const createBusinessCategory = asyncHandler(async (req: Request, res: Res
       sortOrder: body.sortOrder,
       catalogueNoun: body.catalogueNoun ?? null,
       catalogueItemNoun: body.catalogueItemNoun ?? null,
+      defaultPersona: body.defaultPersona ?? null,
+      defaultOutOfScopeTopics: body.defaultOutOfScopeTopics ?? null,
     },
   });
 
@@ -1111,6 +1153,10 @@ export const updateBusinessCategory = asyncHandler(async (req: Request, res: Res
       ...(body.catalogueNoun === undefined ? {} : { catalogueNoun: body.catalogueNoun ?? null }),
       ...(body.catalogueItemNoun === undefined
         ? {} : { catalogueItemNoun: body.catalogueItemNoun ?? null }),
+      ...(body.defaultPersona === undefined
+        ? {} : { defaultPersona: body.defaultPersona ?? null }),
+      ...(body.defaultOutOfScopeTopics === undefined
+        ? {} : { defaultOutOfScopeTopics: body.defaultOutOfScopeTopics ?? null }),
       ...(body.isActive === undefined ? {} : { isActive: body.isActive }),
     },
   });

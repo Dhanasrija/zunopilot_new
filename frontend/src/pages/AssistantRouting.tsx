@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import AssistantVoice from '@/components/assistant/AssistantVoice';
 import { engine, type RoutingConflict, type RoutingWorkflowCard } from '@/lib/engine/api';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -357,6 +358,17 @@ export default function AssistantRouting() {
                 </div>
               </CardContent>
             </Card>
+          </section>
+
+          {/*
+            Voice and scope, in their own card with their own save.
+
+            Separate from the routing draft above deliberately: these five fields go to
+            `PATCH /assistants/:id` while the thresholds go to `/routing`, and one Save button
+            spanning two endpoints would have to succeed or fail as a pair it cannot.
+          */}
+          <section className="space-y-3">
+            <AssistantVoice assistantId={assistantId} assistant={data.assistant} />
           </section>
 
           {/* Workflows */}

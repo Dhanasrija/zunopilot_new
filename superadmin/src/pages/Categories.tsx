@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Info, Plus, Trash2 } from 'lucide-react';
+import { Bot, Info, Plus, Trash2 } from 'lucide-react';
 import { sa } from '../lib/api';
-import { Badge, Button, Card, CardHeader, Empty, Input, Td, Th } from '../components/ui';
+import {
+  Badge, Button, Card, CardHeader, Empty, Input, Td, Textarea, Th,
+} from '../components/ui';
 
 // Business categories.
 //
@@ -19,6 +21,14 @@ import { Badge, Button, Card, CardHeader, Empty, Input, Td, Th } from '../compon
 export default function Categories() {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
+  /*
+   * The category whose assistant copy is open, and the text being edited.
+   *
+   * One row at a time. These are paragraphs, and two open at once in a table makes it easy to save
+   * the wrong one — which here means changing what a hundred workspaces' assistants say.
+   */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [copyDraft, setCopyDraft] = useState({ persona: '', topics: '' });
   const [draft, setDraft] = useState({
     key: '', label: '', description: '', sortOrder: '100',
     catalogueNoun: '', catalogueItemNoun: '',
@@ -208,6 +218,20 @@ export default function Categories() {
                           {row.isActive ? 'Hide from signups' : 'Show again'}
                         </Button>
                         <Button
+                          variant="outline"
+                          onClick={() => {
+                            if (editing === row.id) { setEditing(null); return; }
+                            setEditing(row.id);
+                            setCopyDraft({
+                              persona: row.defaultPersona ?? '',
+                              topics: row.defaultOutOfScopeTopics ?? '',
+                            });
+                          }}
+                        >
+                          <Bot className="h-3 w-3" />
+                          {editing === row.id ? 'Close' : 'Assistant'}
+                        </Button>
+                        <Button
                           variant="danger"
                           disabled={row.workspaces > 0 || remove.isPending}
                           onClick={() => {
@@ -225,6 +249,83 @@ export default function Categories() {
                         </p>
                       )}
                     </Td>
+                  </tr>
+                ))}
+                {rows.filter((row) => row.id === editing).map((row) => (
+                  <tr key={`${row.id}-copy`} className="border-b border-slate-50 bg-slate-50/50 last:border-0">
+                    <td colSpan={7} className="px-3 py-4">
+                      <div className="space-y-4">
+                        <p className="text-xs leading-snug text-slate-600">
+                          Where a <strong>{row.label}</strong> workspace&rsquo;s assistant starts.
+                          {' '}
+                          {row.workspaces === 1
+                            ? 'One workspace inherits this'
+                            : `${row.workspaces} workspaces inherit this`}
+                          {' '}
+                          until it writes its own — so improving it here improves every one of them
+                          that never did. Leave a field blank and they fall back to generic house
+                          text, which is bland but never wrong.
+                        </p>
+
+                        <div className="space-y-1">
+                          <label htmlFor={`persona-${row.id}`} className="text-xs font-medium text-slate-700">
+                            How the assistant sounds
+                          </label>
+                          <Textarea
+                            id={`persona-${row.id}`}
+                            value={copyDraft.persona}
+                            onChange={(v) => setCopyDraft((d) => ({ ...d, persona: v }))}
+                            placeholder="Warm and quick. Short sentences, no sales language…"
+                            rows={4}
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            Tone and manner only. The rules that stop it quoting prices or promising
+                            refunds are in the code and are not editable here.
+                          </p>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label htmlFor={`topics-${row.id}`} className="text-xs font-medium text-slate-700">
+                            Topics it declines — one per line
+                          </label>
+                          <Textarea
+                            id={`topics-${row.id}`}
+                            value={copyDraft.topics}
+                            onChange={(v) => setCopyDraft((d) => ({ ...d, topics: v }))}
+                            placeholder={'nutrition or dietary advice\nrecruitment enquiries'}
+                            rows={4}
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            {/*
+                              Says what this field is *added to*, because the alternative reading —
+                              that clearing it makes the assistant answer anything — is the bug this
+                              whole mechanism was built to fix.
+                            */}
+                            Added to the topics every assistant already declines: personal matters,
+                            health, other companies, anything unrelated to the business. Ten lines
+                            at most.
+                          </p>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button
+                            disabled={update.isPending}
+                            onClick={() => update.mutate({
+                              id: row.id,
+                              // Blank means "no category default", which is null rather than an
+                              // empty string — the server reads null as "inherit the house text".
+                              body: {
+                                defaultPersona: copyDraft.persona.trim() || null,
+                                defaultOutOfScopeTopics: copyDraft.topics.trim() || null,
+                              },
+                            })}
+                          >
+                            {update.isPending ? 'Saving…' : 'Save assistant copy'}
+                          </Button>
+                          <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

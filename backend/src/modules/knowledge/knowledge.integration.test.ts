@@ -197,7 +197,10 @@ describe('what reaches the model', () => {
   const promptFor = (knowledge: string, faqs: Array<{ keywords: string[]; response: string }> = []) =>
     buildSystemPrompt({
       tenant: { businessName: 'mTouch Labs', category: null } as never,
-      assistant: { generalSystemPrompt: null },
+      // Null, not a stub: a workspace with no WhatsApp channel has no assistant, and null is what
+      // the copy resolver reads as "nothing set, inherit".
+      assistant: null,
+      category: null,
       faqs,
       knowledge,
       hasMenu: false,

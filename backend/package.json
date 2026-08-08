@@ -20,6 +20,7 @@
     "seed:superadmin": "tsx prisma/seed-superadmin.ts",
     "seed:demo-volume": "tsx prisma/seed-demo-volume.ts",
     "seed:connector-types": "tsx prisma/seed-connector-types.ts",
+    "seed:assistant-defaults": "tsx prisma/seed-assistant-defaults.ts",
     "openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
