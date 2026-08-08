@@ -5,6 +5,7 @@ import {
 import { cn, formatDateTime } from '@/lib/utils';
 import { outboundOptions, type Message } from './types';
 import { MediaAttachment, hasAttachment } from './MediaAttachment';
+import { Linkify } from './Linkify';
 import { DeliveryTick } from './DeliveryTick';
 
 // One message.
@@ -125,7 +126,9 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete, onRe
         )}
 
         {(message.body || !hasAttachment(message)) && (
-          <p className="whitespace-pre-wrap break-words">{message.body || `[${message.type}]`}</p>
+          <p className="whitespace-pre-wrap break-words">
+            {message.body ? <Linkify text={message.body} /> : `[${message.type}]`}
+          </p>
         )}
 
         {hasAttachment(message) && <MediaAttachment message={message} outbound={outbound} />}

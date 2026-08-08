@@ -108,7 +108,24 @@ export const sendTextMessage = ({
         messaging_product: 'whatsapp',
         to,
         type: 'text',
-        text: { body, preview_url: false },
+        /*
+         * `preview_url: true`, and it used to be false.
+         *
+         * WhatsApp generates the preview card on the recipient's device from this flag — there is
+         * no preview API and nothing for us to attach. With it off, every link this product has
+         * ever sent arrived as bare text: an agent pasting an invoice or a tracking URL got none
+         * of the reassurance a customer gets from seeing the destination named.
+         *
+         * On for every text send rather than only when a URL is detected. Meta ignores the flag
+         * when there is nothing to preview, so detecting links here would be a second, weaker
+         * copy of the URL matcher in `Linkify.tsx` — and the one that disagreed would be this one.
+         *
+         * The trade is real and worth knowing: WhatsApp fetches the page to build the card, so
+         * the *customer's* client reveals it opened the message to whatever was linked. That is
+         * how every WhatsApp client already behaves for a link anyone sends them, so the flag
+         * changes what our messages look like, not what WhatsApp does.
+         */
+        text: { body, preview_url: true },
         ...(quotedWaMessageId ? { context: { message_id: quotedWaMessageId } } : {}),
       },
       authHeaders(accessToken),
