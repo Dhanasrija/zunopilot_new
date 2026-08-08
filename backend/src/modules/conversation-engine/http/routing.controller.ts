@@ -44,6 +44,9 @@ const dryRoute = async (
   // model never sees.
   const stubContact = {
     id: 'route-test', tenantId: tenant.id, waId: '15550000000', name: null, phone: null,
+    // No profile name either: a route test has no real contact behind it, so there is nothing
+    // WhatsApp would have told us about them.
+    waProfileName: null,
     lastSeenAt: null, lifetimeSpend: new Prisma.Decimal(0), createdAt: new Date(), updatedAt: new Date(),
     // Marketing consent. A route test never sends anything, so the values are
     // immaterial — but "opted out" is the honest default for a contact that does

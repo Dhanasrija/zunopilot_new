@@ -271,8 +271,14 @@ describe('a customer message, from Meta’s POST to the reply', () => {
     const contact = await prisma.customer.findUniqueOrThrow({
       where: { tenantId_waId: { tenantId: TENANT, waId: CUSTOMER_WA_ID } },
     });
-    // Taken from `contacts[].profile.name`, which is a field only the real normaliser reads.
-    expect(contact.name).toBe('Asha');
+    /*
+     * Taken from `contacts[].profile.name`, which is a field only the real normaliser reads.
+     *
+     * `waProfileName`, and this assertion used to name `name` instead. That single column held
+     * both WhatsApp's profile name and the operator's own label, and the upsert overwrote it on
+     * every message — see "the customer's two names" below for what that cost.
+     */
+    expect(contact.waProfileName).toBe('Asha');
 
     const conversation = await prisma.conversation.findFirstOrThrow({
       where: { tenantId: TENANT, customerId: contact.id },
@@ -401,5 +407,50 @@ describe('a customer message, from Meta’s POST to the reply', () => {
     expect(stored.body).toBe('track my order again');
     // And nothing was said back.
     expect(mockProviderFor(channelId).sent).toHaveLength(0);
+  });
+});
+
+describe('the customer’s two names', () => {
+  /*
+   * `Customer.name` used to hold both WhatsApp's profile name and the operator's own label, and
+   * the upsert below wrote the profile name over it **on every message**. So an agent who typed
+   * "Ravi — accounts, chases invoices" kept it until the customer next said anything, which for
+   * an active customer is minutes.
+   *
+   * Asserted through the real webhook rather than by calling the upsert, because the bug was in
+   * the shape of the write and only the whole path proves which field it lands in.
+   */
+
+  it('**records WhatsApp’s profile name without touching the operator’s label**', async () => {
+    const label = 'Ravi — accounts, chases invoices';
+
+    // First contact: the customer is created, and only the profile name is known.
+    const first = await waitFor('the first event', async () => {
+      await deliver(inboundPayload('wamid.e2e.name1', 'hello'));
+      return prisma.webhookEvent.findFirst({ where: { externalEventId: { contains: 'wamid.e2e.name1' } } });
+    });
+    await handleProcessInboundMessage({ webhookEventId: first.id });
+
+    const created = await prisma.customer.findFirstOrThrow({ where: { tenantId: TENANT } });
+    expect(created.waProfileName).toBe('Asha');
+    // **Null, not the profile name.** That emptiness is what makes the two distinguishable — a
+    // create that copied the profile name into `name` would make every customer look labelled.
+    expect(created.name).toBeNull();
+
+    // An agent labels them.
+    await prisma.customer.update({ where: { id: created.id }, data: { name: label } });
+
+    // The customer messages again. Under the old code this was the moment the label died.
+    const second = await waitFor('the second event', async () => {
+      await deliver(inboundPayload('wamid.e2e.name2', 'still there?'));
+      return prisma.webhookEvent.findFirst({ where: { externalEventId: { contains: 'wamid.e2e.name2' } } });
+    });
+    await handleProcessInboundMessage({ webhookEventId: second.id });
+
+    const after = await prisma.customer.findUniqueOrThrow({ where: { id: created.id } });
+    expect(after.name).toBe(label);
+    expect(after.waProfileName).toBe('Asha');
+    // And it really did process the second message, so the assertion above is not vacuous.
+    expect(after.lastSeenAt!.getTime()).toBeGreaterThanOrEqual(created.lastSeenAt!.getTime());
   });
 });

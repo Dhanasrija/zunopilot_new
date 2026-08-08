@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { customerFacingName } from '../../utils/customer-name.js';
 
 /*
  * The values that fill a template's `{{1}}`, `{{2}}` placeholders.
@@ -95,6 +96,7 @@ export const sanitiseParam = (text: string): string => text.replace(/\s+/g, ' ')
 
 export interface ResolvableCustomer {
   name: string | null;
+  waProfileName?: string | null;
   phone: string | null;
   waId: string;
 }
@@ -103,7 +105,14 @@ const fieldOf = (customer: ResolvableCustomer, field: CustomerField): string => 
   // `phone` falls back to `waId`: the WhatsApp id *is* the number, and a customer created
   // from an inbound message has no separate `phone` at all.
   if (field === 'phone') return customer.phone ?? customer.waId;
-  return customer.name ?? '';
+  /*
+   * **The customer's own name, never the agent's label for them.**
+   *
+   * This value goes into `Hi {{1}},` on a message the customer receives. `Customer.name` is now
+   * an internal note — "Ravi — accounts, chases invoices" — and interpolating it here would send
+   * it to Ravi. `customerFacingName` prefers what WhatsApp says they call themselves.
+   */
+  return customerFacingName(customer) ?? '';
 };
 
 /**

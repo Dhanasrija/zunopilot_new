@@ -19,6 +19,10 @@ export const CUSTOMER_VIEW_SELECT = {
   id: true,
   waId: true,
   name: true,
+  // WhatsApp's own name for this person, beside the agent's label. Added on purpose, per the
+  // note above: the Inbox and the Customers table both render the two together, and without
+  // this the client would only ever see the label.
+  waProfileName: true,
   phone: true,
   lastSeenAt: true,
   lifetimeSpend: true,

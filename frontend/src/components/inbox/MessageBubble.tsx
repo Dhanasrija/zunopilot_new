@@ -1,4 +1,4 @@
-import { ChevronDown, CornerUpLeft, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, CornerUpLeft, Trash2 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -153,6 +153,33 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete, onRe
               </span>
             ))}
           </div>
+        )}
+
+        {/*
+          Why it did not arrive.
+
+          **In the bubble, not in a tooltip.** The reason was already on the tick as `title`, and
+          that made it invisible in practice: a native tooltip needs a hover held for about a
+          second, and **there is no hover on a touch screen** — the same mistake the actions menu
+          below was already corrected for. An agent looking at a red icon with no text has no way
+          to tell "the 24-hour window closed" from "this number is not on the allow-list", and
+          those want opposite responses: send a template, or stop retrying.
+
+          `no reason recorded` rather than `WhatsApp gave no reason`, because both are possible
+          and they are not distinguishable from here. Meta only attaches `errors[]` to some
+          failures — and any message that failed before delivery statuses were captured has
+          nothing stored either way. Meta never replays a status webhook, so those are gone for
+          good; claiming WhatsApp was silent would be inventing a fact about the past.
+        */}
+        {outbound && message.status === 'FAILED' && (
+          <p className="mt-1 flex items-start gap-1 rounded-md bg-danger/10 px-2 py-1 text-caption text-danger">
+            <AlertCircle aria-hidden className="mt-px h-3 w-3 shrink-0" />
+            <span className="min-w-0 break-words">
+              {message.statusError
+                ? `Not delivered — ${message.statusError}`
+                : 'Not delivered — no reason recorded'}
+            </span>
+          </p>
         )}
 
         {/*

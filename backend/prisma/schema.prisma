@@ -352,8 +352,29 @@ model Customer {
   id            String    @id @default(uuid())
   tenantId      String
   tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  waId          String
-  name          String?
+  waId String
+
+  /// **The agent's own label for this person.** Null unless somebody typed one.
+  ///
+  /// Never written by the webhook. Before `waProfileName` existed this column held both
+  /// meanings, and the inbound upsert set it on *every* message — so an agent who wrote
+  /// "Ravi — accounts, chases invoices" lost it the next time Ravi said anything. The upsert
+  /// was already careful not to resurrect `marketingOptIn` for exactly this class of reason;
+  /// this field did not get the same treatment.
+  name String?
+
+  /// What WhatsApp says this person calls themselves, refreshed on every inbound message.
+  ///
+  /// For a WhatsApp Business account this is the business's display name — it is why the Inbox
+  /// shows "The Jora Group" and not a number. **It is the only profile field Meta gives us**:
+  /// `contacts[].profile` carries `name` and nothing else, there is no endpoint for a contact's
+  /// photo, and nothing marks the sender as a business rather than a person who named their
+  /// profile after one.
+  ///
+  /// **This, not `name`, is what may be interpolated into a message to the customer.** An
+  /// agent's label is an internal note and putting it in a template would send it to them.
+  waProfileName String?
+
   phone         String?
   lastSeenAt    DateTime?
   lifetimeSpend Decimal   @default(0) @db.Decimal(12, 2)

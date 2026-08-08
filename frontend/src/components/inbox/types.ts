@@ -11,7 +11,7 @@ export interface Conversation {
   automationPaused: boolean;
   unreadCount: number;
   lastMessageAt: string | null;
-  customer: { id: string; name?: string; waId: string };
+  customer: { id: string; name?: string | null; waProfileName?: string | null; waId: string };
   assignedAgent?: { id: string; fullName: string; email: string } | null;
   /**
    * The workflow occupying this conversation, if one is.
@@ -99,5 +99,11 @@ export const outboundOptions = (message: Message): OfferedOption[] => {
   );
 };
 
-/** What to call this customer. Falls back to the number, which is already masked if masking is on. */
-export const displayName = (c: Conversation['customer']) => c.name || c.waId;
+/*
+ * What to call this customer.
+ *
+ * Re-exported from `lib/customer-name` rather than defined here: the Customers table needs the
+ * same answer, and it used to be `c.name || c.waId` in six places. Now that a person has both a
+ * WhatsApp profile name and an operator's label, six copies would be six formats.
+ */
+export { displayName, primaryName } from '@/lib/customer-name';

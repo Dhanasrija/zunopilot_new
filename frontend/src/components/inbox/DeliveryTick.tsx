@@ -52,9 +52,16 @@ const render = (message: Message): Rendered | null => {
     case 'FAILED':
       return {
         icon: AlertCircle,
-        // Meta's own reason when it gave one — it is the difference between an agent retrying
-        // pointlessly and an agent knowing the number is not on the sandbox allow-list.
-        label: message.statusError ? `Not delivered — ${message.statusError}` : 'Not delivered',
+        /*
+         * The icon says *that* it failed; `MessageBubble` says *why*, as text in the bubble.
+         *
+         * This label used to carry Meta's reason too, on the argument that it is the difference
+         * between retrying pointlessly and knowing the number is not on the allow-list. That was
+         * right about the reason mattering and wrong about where to put it: as a `title` it needed
+         * a held hover, which does not exist on a touch screen. Now that the reason is real text,
+         * repeating it here would make a screen reader read the whole thing twice.
+         */
+        label: 'Not delivered',
         className: 'text-danger',
       };
 

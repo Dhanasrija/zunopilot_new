@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn, initialsOf } from '@/lib/utils';
 import { tintFor } from '@/lib/categorical-tint';
-import { displayName, type Conversation, type TeamMember } from './types';
+import { displayName, primaryName, type Conversation, type TeamMember } from './types';
 
 // The thread header: who this is, who owns it, and the three controls that change the
 // conversation's state.
@@ -48,14 +48,18 @@ export function ThreadHeader({
           tintFor(customer.id),
         )}
       >
-        {initialsOf(customer.name, customer.waId)}
+        {initialsOf(primaryName(customer), customer.waId)}
       </span>
 
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-ink-900">{name}</p>
         {/* Only when it is not already the heading — otherwise an unnamed customer gets
-            their number printed twice. Masked upstream when masking is on. */}
-        {customer.name && (
+            their number printed twice. Masked upstream when masking is on.
+
+            Compared against the rendered heading rather than testing `customer.name`, which
+            is now the operator's label and null for most people: a customer with a WhatsApp
+            profile name but no label would have lost their number line entirely. */}
+        {name !== customer.waId && (
           <p className="truncate text-caption tabular-nums text-ink-500">{customer.waId}</p>
         )}
       </div>

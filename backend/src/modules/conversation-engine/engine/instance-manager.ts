@@ -1,6 +1,7 @@
 import { Prisma, type WorkflowInstance, type WorkflowInstanceStatus } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { logger } from '../../../config/logger.js';
+import { operatorDisplayName } from '../../../utils/customer-name.js';
 import { parseDefinition, type WorkflowDefinition } from '../domain/definition.js';
 import { notifyHandoffRequested } from '../../notifications/notification.producers.js';
 
@@ -356,12 +357,12 @@ export const handOffToHuman = async ({
   // none of them has the customer's name.
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { customer: { select: { name: true, waId: true } } },
+    select: { customer: { select: { name: true, waProfileName: true, waId: true } } },
   });
   await notifyHandoffRequested({
     tenantId,
     conversationId,
-    customerName: conversation?.customer.name ?? null,
+    customerName: conversation ? operatorDisplayName(conversation.customer) : null,
     waId: conversation?.customer.waId ?? '',
     reason,
   });

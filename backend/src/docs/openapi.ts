@@ -1124,7 +1124,23 @@ export const openapi = {
         type: 'object',
         properties: {
           id: { type: 'string', format: 'uuid' },
-          name: { type: 'string', nullable: true },
+          name: {
+            type: 'string',
+            nullable: true,
+            description:
+              'The **operator’s own label** for this person, e.g. `Ravi — accounts`. Null unless'
+              + ' somebody typed one. Never written by the webhook, and never sent to the'
+              + ' customer — use `waProfileName` for anything they will read.',
+          },
+          waProfileName: {
+            type: 'string',
+            nullable: true,
+            description:
+              'What WhatsApp reports this person calls themselves, refreshed on every inbound'
+              + ' message. For a WhatsApp Business account this is the business’s display name.'
+              + ' Read-only: it is the only profile field Meta exposes — there is no contact'
+              + ' photo and nothing marks the sender as a business.',
+          },
           waId: {
             type: 'string',
             description:
