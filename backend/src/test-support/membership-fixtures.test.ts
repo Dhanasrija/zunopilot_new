@@ -43,8 +43,15 @@ const testFiles = (dir: string): string[] => readdirSync(dir).flatMap((entry) =>
 /** Does this file insert users into Postgres? */
 const CREATES_USERS = /user\.create|users:\s*\{/;
 
-/** Does it seed memberships for them? */
-const SEEDS_MEMBERSHIPS = /seedMemberships|seedUser|syncMembership/;
+/**
+ * Does it seed memberships for them?
+ *
+ * `membership.create` counts: a fixture that builds memberships by hand has satisfied the
+ * requirement, and some must — the one that seeds a person into *two* workspaces cannot use the
+ * generic helper, because the shape it needs is the thing under test. This check is about the
+ * property, not about which function was called to get there.
+ */
+const SEEDS_MEMBERSHIPS = /seedMemberships|seedUser|syncMembership|membership\.create/;
 
 /**
  * Files that create users and deliberately do not seed memberships.

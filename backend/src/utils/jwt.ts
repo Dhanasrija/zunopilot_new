@@ -3,6 +3,18 @@ import { env } from '../config/env.js';
 
 export interface AccessTokenPayload extends JwtPayload {
   userId: string;
+  /**
+   * The workspace this session is scoped to.
+   *
+   * **The same claim name and meaning impersonation already uses.** A support token has carried
+   * `tenantId` since that feature shipped; giving the ordinary one a second spelling would mean
+   * two claims that almost agree, and eventually the impersonation check applied to the wrong one.
+   *
+   * Optional because tokens minted before it existed do not have it — see the legacy branch in
+   * `requireAuth`, which is dated for removal. It is **selected by**, never trusted: a token naming
+   * a workspace its user is not an active member of resolves to nothing and is refused.
+   */
+  tenantId?: string;
 }
 
 /**

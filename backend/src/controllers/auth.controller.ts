@@ -163,6 +163,18 @@ export const requestLoginCode = asyncHandler(async (req, res) => {
  * `User.tenantId` required, which is what stops a half-registered user existing
  * outside a workspace and reaching tenant-scoped code with no tenant.
  */
+/**
+ * The workspace a fresh login should land in.
+ *
+ * Most recently used, then longest-held. Shared with the switcher so "where do I end up" has one
+ * answer whichever door somebody comes through.
+ */
+const landingMembershipFor = (userId: string) => prisma.membership.findFirst({
+  where: { userId, isActive: true },
+  include: { tenant: true },
+  orderBy: [{ lastSelectedAt: 'desc' }, { joinedAt: 'asc' }],
+});
+
 export const verifyLoginCode = asyncHandler(async (req, res) => {
   const body = verifySchema.parse(req.body);
   const phone = await verifyOtp(body.phone, body.code);
@@ -174,18 +186,46 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
 
   if (existing) {
     if (!existing.isActive) throw ApiError.forbidden('This account has been deactivated.');
-    if (!existing.tenant.isActive) {
+
+    /*
+     * Which workspace this login lands in.
+     *
+     * `lastSelectedAt desc, joinedAt asc` — where they were working last, falling back to the one
+     * they have had longest. It matters as soon as a phone number can belong to several: signing
+     * in should put somebody back where they were, not somewhere alphabetical.
+     *
+     * Suspension is now checked against the **chosen** workspace rather than the user's, and only
+     * after choosing: one suspended workspace must not block a login whose other workspace is fine.
+     */
+    const landing = await landingMembershipFor(existing.id);
+    if (!landing) {
+      // No active membership anywhere. The account exists and can reach nothing — the honest
+      // answer is the same as a deactivated one, because from the person's side it is.
+      throw ApiError.forbidden('This account has been deactivated.');
+    }
+    if (!landing.tenant.isActive) {
       throw ApiError.forbidden('This workspace has been suspended. Please contact support.');
     }
 
     // A returning phone confirms the number again, which is the only thing an OTP
     // login can verify.
     await prisma.user.update({ where: { id: existing.id }, data: { emailVerified: existing.emailVerified } });
+    // Remembered so the next login comes back here. Written on login and on an explicit switch
+    // only — never per request, which would be a write on every call.
+    await prisma.membership.update({
+      where: { id: landing.id }, data: { lastSelectedAt: new Date() },
+    });
 
-    logger.info('Signed in with a login code', { userId: existing.id, tenantId: existing.tenantId });
+    logger.info('Signed in with a login code', { userId: existing.id, tenantId: landing.tenantId });
     res.json({
       success: true,
-      data: { token: signToken({ userId: existing.id }), ...await sessionView(existing), isNew: false },
+      data: {
+        // **The claim is what scopes the session.** Without it the request falls into
+        // `requireAuth`'s legacy branch, which refuses anybody with more than one workspace.
+        token: signToken({ userId: existing.id, tenantId: landing.tenantId }),
+        ...await sessionView(existing),
+        isNew: false,
+      },
     });
     return;
   }
@@ -244,7 +284,11 @@ export const verifyLoginCode = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    data: { token: signToken({ userId: user.id }), ...await sessionView(user), isNew: true },
+    data: {
+      token: signToken({ userId: user.id, tenantId: created.id }),
+      ...await sessionView(user),
+      isNew: true,
+    },
   });
 });
 

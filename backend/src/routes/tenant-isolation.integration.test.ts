@@ -294,27 +294,23 @@ describe('no session, no tenant, no rows', () => {
 describe('a token that names another workspace', () => {
   it('**does not read that workspace’s rows**', async () => {
     /*
-     * `signToken` already accepts extra claims and nine test sites already pass `tenantId` —
-     * where it is currently **ignored**, because `requireAuth` reads the tenant off the user row.
+     * **This assertion has tightened, and the change is the point.**
      *
-     * So today this passes because the claim does nothing. **After the membership work it will
-     * pass for a different reason**: the claim will be used to *select* a membership, no
-     * membership will match, and the request will be refused outright. The assertion below is
-     * written to hold under both, and the 401 is asserted separately once that lands — a test
-     * whose meaning changes should say so rather than quietly start proving something else.
+     * It was written before memberships, when the claim was ignored — `requireAuth` read the tenant
+     * off the user row — so the honest assertion was the weak one: *never Bravo's rows*, whether
+     * the request was refused or answered with Alpha's. It passed for a reason that had nothing to
+     * do with the claim.
+     *
+     * Now the claim *selects* the membership, no membership matches, and the request is refused
+     * outright. So the assertion is a flat 401. `middleware/membership-auth.integration.test.ts`
+     * covers the rest of that behaviour; this stays here because it belongs with the isolation
+     * matrix it was written alongside.
      */
-    const forged = signToken({ userId: 'unused', tenantId: BRAVO });
-    void forged; // the shape, for the reader — the real case is a *valid* user below.
-
     const alphaOwner = await prisma.user.findFirstOrThrow({ where: { tenantId: ALPHA } });
     const claimingBravo = signToken({ userId: alphaOwner.id, tenantId: BRAVO });
 
-    const res = await get('/api/customers', claimingBravo);
-    const body = JSON.stringify(res.body);
-
-    // Either refused, or answered with Alpha's own rows. Never Bravo's.
-    expect(body).not.toContain('BRAVOONLY');
-    if (res.status === 200) expect(body).toContain('ALPHAONLY');
+    const res = await get('/api/customers', claimingBravo).expect(401);
+    expect(JSON.stringify(res.body)).not.toContain('BRAVOONLY');
   });
 });
 
