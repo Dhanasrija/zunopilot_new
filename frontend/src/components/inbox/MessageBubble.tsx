@@ -1,4 +1,7 @@
-import { X } from 'lucide-react';
+import { ChevronDown, CornerUpLeft, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn, formatDateTime } from '@/lib/utils';
 import { outboundOptions, type Message } from './types';
 import { MediaAttachment, hasAttachment } from './MediaAttachment';
@@ -27,16 +30,28 @@ import { DeliveryTick } from './DeliveryTick';
 // The tail (one square corner on the side the message came from) is the only decoration:
 // it survives at a glance in a way that alignment alone does not once bubbles are short.
 
-export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
+export function MessageBubble({ message, myId, canDelete = false, onDelete, onReply }: {
   message: Message;
   myId?: string;
   /** `inbox:delete`. Absent for an agent unless the workspace grants it. */
   canDelete?: boolean;
   onDelete?: () => void;
+  /** Quote this message in the composer. Absent for someone who cannot reply. */
+  onReply?: () => void;
 }) {
   const outbound = message.direction === 'OUTBOUND';
   const options = outboundOptions(message);
-  const removable = canDelete && !!onDelete;
+  const actions = [
+    onReply && { key: 'reply', label: 'Reply', icon: CornerUpLeft, run: onReply },
+    canDelete && onDelete && {
+      key: 'delete',
+      // "Remove from inbox", not "Delete". WhatsApp has no unsend, so the customer keeps their
+      // copy — and this is a soft delete besides. A menu has room for the accurate word.
+      label: 'Remove from inbox',
+      icon: Trash2,
+      run: onDelete,
+    },
+  ].filter(Boolean) as Array<{ key: string; label: string; icon: typeof Trash2; run: () => void }>;
 
   return (
     <div className={cn('flex items-center gap-1', outbound && 'justify-end')}>
@@ -44,7 +59,7 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
         On the leading edge for an outbound message and the trailing edge for an inbound one, so
         it always sits on the outside of the bubble and never over the text.
       */}
-      {removable && outbound && <RemoveButton onDelete={onDelete!} />}
+      {actions.length > 0 && outbound && <MessageActions actions={actions} />}
 
       <div
         className={cn(
@@ -85,6 +100,30 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
           fires for every image, video and document, which is what made an agent's screen read
           `[SYSTEM]`.
         */}
+        {/*
+          What this message replies to.
+          A left bar and the quoted text, WhatsApp's own shape. Not clickable: scrolling a
+          transcript to a message that may be 400 rows up is its own piece of work, and a link
+          that jumps somewhere unhelpful is worse than text that does not pretend to.
+        */}
+        {message.replyTo && (
+          <div
+            className={cn(
+              'mb-1 border-l-2 pl-2 text-caption',
+              // The bar takes the colour of whoever is being quoted, so "you are quoting the
+              // customer" and "you are quoting yourself" are distinguishable at a glance.
+              message.replyTo.direction === 'OUTBOUND' ? 'border-wa-ui-tick' : 'border-ink-400',
+            )}
+          >
+            <p className="font-medium text-wa-ui-meta">
+              {message.replyTo.direction === 'OUTBOUND' ? 'You' : 'Customer'}
+            </p>
+            <p className="line-clamp-2 whitespace-pre-wrap break-words text-wa-ui-meta">
+              {message.replyTo.body || `[${message.replyTo.type.toLowerCase()}]`}
+            </p>
+          </div>
+        )}
+
         {(message.body || !hasAttachment(message)) && (
           <p className="whitespace-pre-wrap break-words">{message.body || `[${message.type}]`}</p>
         )}
@@ -124,46 +163,54 @@ export function MessageBubble({ message, myId, canDelete = false, onDelete }: {
         </div>
       </div>
 
-      {removable && !outbound && <RemoveButton onDelete={onDelete!} />}
+      {actions.length > 0 && !outbound && <MessageActions actions={actions} />}
     </div>
   );
 }
 
 /**
- * Take one message out of the thread.
+ * The actions available on one message.
  *
- * **"Remove", not "Delete", and the title says where it goes.** WhatsApp has no unsend, so the
- * customer keeps their copy whatever this does — a button labelled "Delete" would promise
- * something the platform does not offer. It is also a soft delete: the row survives for reports
- * and for the record of what was said.
+ * A menu rather than a row of icons, which is what WhatsApp does and for the same reason: the
+ * list is going to grow. Reply and Remove today; React, Star, Pin, Forward and Copy are the
+ * obvious candidates, and each of those as its own visible button would put five controls beside
+ * every bubble in a thread of five hundred.
  *
- * **Always present, quiet rather than hidden.** The first version revealed it on `group-hover`,
- * which is wrong here for a reason that has nothing to do with taste: **there is no hover on a
- * touch screen**, and this Inbox is built down to 375px — so on a phone the control would simply
- * never appear. Hover-reveal also hides a destructive action behind a gesture, and it depends on
- * a `group-hover` / `focus-within` interaction I could not verify in a browser harness, which is
- * a poor thing to rest an accessibility property on. `ink-350` keeps it from competing with the
- * message; hover and focus bring it to `danger`.
+ * **Always present, quiet rather than hidden.** An earlier version revealed the control on
+ * `group-hover`, which is wrong here for a reason that is not taste: **there is no hover on a
+ * touch screen** and this Inbox is built down to 375px, so on a phone it would never have
+ * appeared at all. `ink-350` keeps it from competing with the message.
  *
- * No confirmation on a single message. It is one row, an agent can see exactly which one, and a
- * dialog on every tidy-up is the kind of friction that trains people to click through dialogs.
- * Clearing a whole thread does confirm — see `ThreadHeader`.
+ * No confirmation on either action. Reply is not destructive, and Remove is one row an agent can
+ * see — a dialog on every tidy-up is the friction that trains people to click through dialogs.
+ * Clearing a whole thread does confirm; see `ThreadHeader`.
  */
-function RemoveButton({ onDelete }: { onDelete: () => void }) {
-  const label = 'Remove from inbox — the customer keeps their copy';
-
+function MessageActions({ actions }: {
+  actions: Array<{ key: string; label: string; icon: typeof Trash2; run: () => void }>;
+}) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onDelete}
-      className={cn(
-        'shrink-0 rounded-md p-1 text-ink-350 transition-colors',
-        'hover:bg-surface-2 hover:text-danger focus-visible:text-danger',
-      )}
-    >
-      <X aria-hidden className="h-3.5 w-3.5" />
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Message actions"
+          title="Message actions"
+          className={cn(
+            'shrink-0 rounded-md p-1 text-ink-350 transition-colors',
+            'hover:bg-surface-2 hover:text-ink-700 focus-visible:text-ink-700',
+          )}
+        >
+          <ChevronDown aria-hidden className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {actions.map(({ key, label, icon: Icon, run }) => (
+          <DropdownMenuItem key={key} onClick={run}>
+            <Icon aria-hidden className="mr-2 h-3.5 w-3.5" />
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

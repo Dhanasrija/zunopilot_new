@@ -263,3 +263,54 @@ describe('a file the platform cannot send', () => {
     expect(screen.getByText('small.mp4')).toBeInTheDocument();
   });
 });
+
+describe('the reply chip', () => {
+  const quoted = { body: 'Can you share the swagger link?', type: 'TEXT', direction: 'INBOUND' as const };
+
+  it('**shows what the reply will quote**', () => {
+    /*
+     * Above the field and impossible to miss, because the quote is invisible in the text you are
+     * typing. An agent who picked Reply four minutes ago and then wrote something unrelated needs
+     * to see what it is about to be attached to.
+     */
+    render(<Composer
+      value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+      replyingTo={quoted} onCancelReply={vi.fn()}
+    />);
+
+    expect(screen.getByText(/Can you share the swagger link/)).toBeInTheDocument();
+    expect(screen.getByText(/Replying to the customer/i)).toBeInTheDocument();
+  });
+
+  it('says whose message it is', () => {
+    render(<Composer
+      value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+      replyingTo={{ ...quoted, direction: 'OUTBOUND' }} onCancelReply={vi.fn()}
+    />);
+    expect(screen.getByText(/Replying to your message/i)).toBeInTheDocument();
+  });
+
+  it('can be cancelled', async () => {
+    const onCancelReply = vi.fn();
+    render(<Composer
+      value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+      replyingTo={quoted} onCancelReply={onCancelReply}
+    />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Cancel reply/i }));
+    expect(onCancelReply).toHaveBeenCalledOnce();
+  });
+
+  it('describes a quoted file rather than showing nothing', () => {
+    render(<Composer
+      value="" onChange={vi.fn()} onSend={vi.fn()} sending={false}
+      replyingTo={{ body: null, type: 'IMAGE', direction: 'INBOUND' }} onCancelReply={vi.fn()}
+    />);
+    expect(screen.getByText('[image]')).toBeInTheDocument();
+  });
+
+  it('is absent when nothing is being quoted', () => {
+    render(<Composer value="" onChange={vi.fn()} onSend={vi.fn()} sending={false} />);
+    expect(screen.queryByText(/Replying to/i)).not.toBeInTheDocument();
+  });
+});

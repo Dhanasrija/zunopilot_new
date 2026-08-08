@@ -36,8 +36,11 @@ export class MockWhatsAppProvider implements WhatsAppSender {
     return `wamid.mock.${this.counter}`;
   }
 
-  async sendText({ to, body }: { to: string; body: string }) {
-    this.sent.push({ to, kind: 'text', body });
+  async sendText({ to, body, quotedWaMessageId }: {
+    to: string; body: string; quotedWaMessageId?: string | null;
+  }) {
+    // The quote is recorded in `meta` so a test can assert what went to Meta as `context`.
+    this.sent.push({ to, kind: 'text', body, meta: { quotedWaMessageId: quotedWaMessageId ?? null } });
     return { messageId: this.nextId() };
   }
 

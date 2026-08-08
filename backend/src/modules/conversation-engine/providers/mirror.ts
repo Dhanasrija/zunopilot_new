@@ -43,7 +43,7 @@ type Options =
 export const recordOutboundMessage = async (
   ctx: MirrorContext,
   {
-    type, body, messageId, options, sentByUserId, mediaUrl,
+    type, body, messageId, options, sentByUserId, mediaUrl, replyToId,
   }: {
     type: MessageType;
     body: string;
@@ -52,6 +52,8 @@ export const recordOutboundMessage = async (
     sentByUserId?: string | null;
     /** Our own `/api/media/:id/file` path when the message carried a file. */
     mediaUrl?: string | null;
+    /** The message this one quotes, when an agent used Reply. */
+    replyToId?: string | null;
   },
 ) => {
   const data = {
@@ -66,6 +68,7 @@ export const recordOutboundMessage = async (
     // In the same insert as the row, not a follow-up update: two writes can disagree, and the
     // one that loses leaves a file in the thread that the thread cannot open.
     mediaUrl: mediaUrl ?? null,
+    replyToId: replyToId ?? null,
     ...(options ? { payload: { outbound: options } as Prisma.InputJsonValue } : {}),
   };
   const include = { sentByUser: { select: { id: true, fullName: true, role: true } } };

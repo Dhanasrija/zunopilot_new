@@ -333,7 +333,18 @@ export const openapi = {
           + ' reconnected.',
         parameters: [pathParam('id', 'Conversation id')],
         requestBody: jsonBody({
-          type: 'object', properties: { body: { type: 'string' } }, required: ['body'],
+          type: 'object',
+          properties: {
+            body: { type: 'string' },
+            replyToId: {
+              type: 'string', format: 'uuid', nullable: true,
+              description:
+                'Quote a specific message. Must be a visible message in **this** conversation —'
+                + ' anything else is a 400 rather than a silent unquoted send. Sends Meta'
+                + ' `context.message_id` so WhatsApp draws the quote on the customer’s phone.',
+            },
+          },
+          required: ['body'],
         }),
         responses: {
           201: ok('The message that was sent', ref('Message')),
@@ -1057,6 +1068,23 @@ export const openapi = {
               + ' from here, not from the timestamps below** — Meta delivers status webhooks out'
               + ' of order and the server refuses to move a message backwards, so a set `readAt`'
               + ' beside a null `deliveredAt` is normal rather than missing data.',
+          },
+          replyToId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'The message this one quotes, in either direction.',
+          },
+          replyTo: {
+            type: 'object', nullable: true,
+            description:
+              'A snippet of the quoted message. **Null once the quoted message is removed from'
+              + ' the inbox**, so a removal cannot leak back through a reply to it. One level'
+              + ' deep — a reply to a reply carries its own quote, not a chain.',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              direction: { type: 'string', enum: ['INBOUND', 'OUTBOUND'] },
+              type: { type: 'string', example: 'TEXT' },
+              body: { type: 'string', nullable: true },
+            },
           },
           deliveredAt: { type: 'string', format: 'date-time', nullable: true },
           readAt: { type: 'string', format: 'date-time', nullable: true },

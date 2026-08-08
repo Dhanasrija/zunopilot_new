@@ -148,9 +148,39 @@ export const listMessages = asyncHandler(async (req, res) => {
     where: { conversationId: id, ...VISIBLE_MESSAGE },
     orderBy: { createdAt: 'asc' },
     take: 500,
-    include: { sentByUser: { select: { id: true, fullName: true, role: true } } },
+    include: {
+      sentByUser: { select: { id: true, fullName: true, role: true } },
+      /*
+       * The quoted message, as a snippet rather than the whole row.
+       *
+       * An explicit `select`, not `replyTo: true` — the spread is what put a phone number on this
+       * screen once already, and a quote needs four fields. `body` is truncated in the UI, not
+       * here: the thread already ships full bodies for every message, so trimming only the quote
+       * would save nothing and lose the ability to show a longer preview later.
+       *
+       * One level deep on purpose. A reply to a reply renders its own quote, not a chain — Prisma
+       * would happily nest for ever and WhatsApp does not show chains either.
+       */
+      replyTo: {
+        select: { id: true, direction: true, type: true, body: true, deletedAt: true },
+      },
+    },
   });
-  res.json({ success: true, data: messages });
+
+  /*
+   * A quote whose target has since been removed is dropped from the response.
+   *
+   * `replyTo` is a relation, so `VISIBLE_MESSAGE` on the outer `where` does not reach it — a
+   * removed message would still have come back through the quote of a reply to it, which is
+   * exactly the leak the soft delete exists to prevent. The reply itself stays; it just loses
+   * its quote block.
+   */
+  const visible = messages.map((message) => ({
+    ...message,
+    replyTo: message.replyTo?.deletedAt ? null : message.replyTo,
+  }));
+
+  res.json({ success: true, data: visible });
 });
 
 export const markRead = asyncHandler(async (req, res) => {
@@ -225,7 +255,7 @@ export const setAutomation = asyncHandler(async (req, res) => {
 
 export const sendAgentMessage = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { body } = req.body;
+  const { body, replyToId } = req.body as { body: string; replyToId?: string };
   const conversation = await prisma.conversation.findFirst({
     where: { id, tenantId: tenantIdOf(req) },
     // **Left as a spread on purpose, and not masked.** This is the one `customer: true` in
@@ -245,9 +275,47 @@ export const sendAgentMessage = asyncHandler(async (req, res) => {
   // meant an operator could not reply at all on a demo or test workspace — the
   // bot could talk to the customer and the human could not, which is exactly
   // backwards for a shared inbox.
+  /*
+   * The message being quoted, if any.
+   *
+   * Scoped to this conversation, not just this tenant: quoting a message from a *different*
+   * customer's thread would send that customer's words to this one. `deletedAt: null` too — a
+   * message somebody removed from the inbox should not be quotable back into it.
+   *
+   * A missing or unquotable target is a 400 rather than a silent downgrade to an unquoted send.
+   * The agent chose Reply on a specific bubble; sending something else and saying nothing is how
+   * a reply ends up attached to the wrong question.
+   */
+  const quoted = replyToId
+    ? await prisma.message.findFirst({
+      where: {
+        id: replyToId,
+        conversationId: conversation.id,
+        tenantId: tenantIdOf(req),
+        deletedAt: null,
+      },
+      select: { id: true, waMessageId: true },
+    })
+    : null;
+
+  if (replyToId && !quoted) {
+    throw ApiError.badRequest('That message is no longer in this conversation, so it cannot be quoted');
+  }
+
   let sent: { messageId: string | null };
   try {
-    sent = await whatsappProviderFor(wa).sendText({ to: conversation.customer.waId, body });
+    sent = await whatsappProviderFor(wa).sendText({
+      to: conversation.customer.waId,
+      body,
+      /*
+       * Null when we never had a wamid for the quoted row — a mock-channel message, or one whose
+       * id was dropped by the mirror's duplicate fallback. WhatsApp then shows no quote on the
+       * customer's phone, while our own thread still renders it from `replyToId`. A partial quote
+       * beats refusing the reply, and refusing it is what sending an unresolvable `context` to
+       * Meta would do.
+       */
+      quotedWaMessageId: quoted?.waMessageId ?? null,
+    });
   } catch (err) {
     // Meta explains its own refusals well; the job here is only to stop that explanation
     // being thrown away. Rethrowing the `AxiosError` made every one of them a 500
@@ -271,6 +339,7 @@ export const sendAgentMessage = asyncHandler(async (req, res) => {
       // Who typed it. A null here on an OUTBOUND row means the bot, which is
       // the distinction the shared inbox is built on.
       sentByUserId: userOf(req).id,
+      replyToId: quoted?.id ?? null,
     },
   );
   await prisma.conversation.update({

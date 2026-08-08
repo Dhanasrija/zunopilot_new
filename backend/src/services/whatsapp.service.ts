@@ -87,9 +87,19 @@ export interface TemplateComponent {
 // ── Outbound messages ─────────────────────────────────────────────────────────
 
 /** Send a free-form text message inside the 24h customer service window. */
-export const sendTextMessage = ({ accessToken, phoneNumberId, to, body }: Credentials & {
+export const sendTextMessage = ({
+  accessToken, phoneNumberId, to, body, quotedWaMessageId,
+}: Credentials & {
   to: string;
   body: string;
+  /**
+   * The wamid this message quotes, so WhatsApp draws the quoted bubble on the customer's phone.
+   *
+   * Meta calls it `context`. Omitted rather than sent as null when absent: a `context` naming a
+   * message Meta cannot find fails the whole send with 131009, so an unresolvable quote must
+   * become an ordinary message rather than a refusal.
+   */
+  quotedWaMessageId?: string | null;
 }): Promise<SendResponse> =>
   graphCall('sendTextMessage', async () => {
     const { data } = await http.post<SendResponse>(
@@ -99,6 +109,7 @@ export const sendTextMessage = ({ accessToken, phoneNumberId, to, body }: Creden
         to,
         type: 'text',
         text: { body, preview_url: false },
+        ...(quotedWaMessageId ? { context: { message_id: quotedWaMessageId } } : {}),
       },
       authHeaders(accessToken),
     );

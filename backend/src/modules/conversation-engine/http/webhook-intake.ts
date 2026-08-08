@@ -28,6 +28,14 @@ export interface NormalisedInboundMessage {
     kind: 'button' | 'list' | null;
   } | null;
   location: { latitude: number | null; longitude: number | null; label: string | null } | null;
+  /**
+   * The wamid this message replies to, when the customer used WhatsApp's own Reply.
+   *
+   * Meta puts it in `context.id`. Worth capturing because a customer who sends five things and
+   * then answers the third one is unreadable in a flat transcript — the quote is what makes the
+   * thread make sense, and it is free information we were dropping.
+   */
+  quotedWaMessageId: string | null;
   raw: unknown;
 }
 
@@ -237,6 +245,9 @@ export const normaliseWebhook = (body: Record<string, any>): NormalisedWebhook[]
             text: textOf(message),
             interactive: interactiveOf(message),
             location,
+            // `context.id` is the quoted message. `context.forwarded` and the rest of that
+            // object are not read — forwarding is not modelled.
+            quotedWaMessageId: message.context?.id ?? null,
             raw: message,
           };
         }),
