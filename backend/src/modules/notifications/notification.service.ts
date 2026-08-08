@@ -209,6 +209,15 @@ const KIND_FLAG: Record<NotificationKind, keyof NotificationPreference> = {
   MESSAGE_RECEIVED: 'messageReceived',
   HANDOFF_REQUESTED: 'handoffRequested',
   ORDER_CREATED: 'orderCreated',
+  /*
+   * **Deliberately not opt-out.** Mapped onto `inApp`, which is the channel switch rather than a
+   * per-kind preference, so there is no setting that turns this one off.
+   *
+   * Being added to a workspace is not news about the business — it is news about *you*, and the
+   * only record of who did it. A preference that could suppress it would let somebody be given
+   * access to a stranger's workspace with nothing anywhere saying so.
+   */
+  ADDED_TO_WORKSPACE: 'inApp',
 };
 
 /** Does this person want to be told about this kind, on this channel? */

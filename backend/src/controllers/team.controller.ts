@@ -2,6 +2,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { logger } from '../config/logger.js';
+import { notifyAddedToWorkspace } from '../modules/notifications/notification.producers.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { countryFromPhone, normalisePhone } from '../services/otp.service.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -11,7 +12,7 @@ import { assertCanAddTeamMember } from '../modules/billing/limits.js';
 // `NO_ADMIN_LEFT` is deliberately not used here. This screen's refusal is about one named
 // person — "This is the only person who can manage the team" — while the role editor's is about
 // an edit to a role. Same guard, different sentence, because the reader's next move differs.
-import { activeAdminCount, syncMembership } from '../services/membership.service.js';
+import { activeAdminCount, revokeMembership, syncMembership } from '../services/membership.service.js';
 
 // Team management.
 //
@@ -127,37 +128,9 @@ const memberOf = async (tenantId: string, userId: string) => {
   };
 };
 
-const deactivateMember = (tenantId: string, userId: string) => prisma.$transaction(async (tx) => {
-  /*
-   * **The membership, not the login.**
-   *
-   * This wrote `user.isActive = false`, which was indistinguishable from "out of this workspace"
-   * while a person had exactly one. Now that they can have two, it would sign somebody out of the
-   * business they *run* because an unrelated workspace removed them. `User.isActive` remains the
-   * operator's global kill switch and is not this endpoint's to touch.
-   */
-  await tx.membership.update({
-    where: { userId_tenantId: { userId, tenantId } },
-    data: { isActive: false, revokedAt: new Date() },
-  });
-
-  // Unchanged: their open conversations go back to the shared pool.
-  await tx.conversation.updateMany({
-    where: { tenantId, assignedAgentId: userId, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
-    data: { assignedAgentId: null },
-  });
-
-  /*
-   * The cascade that no longer fires.
-   *
-   * `Reminder.assigneeId` and `Notification.userId` are the only `onDelete: Cascade` user foreign
-   * keys, and they were correct while removing somebody meant flipping `User.isActive` and never
-   * deleting the row. Leaving a workspace is not a login delete, so without these two lines a
-   * revoked person keeps reminders and an unread badge for a workspace they can no longer open.
-   */
-  await tx.reminder.deleteMany({ where: { tenantId, assigneeId: userId } });
-  await tx.notification.deleteMany({ where: { tenantId, userId } });
-});
+// The removal itself lives in `membership.service` as `revokeMembership`. There are two doors out
+// of a workspace now — an admin removing somebody, and that person leaving from their own switcher
+// — and they must end in the same state, including the reminder and notification cleanup.
 
 // `activeAdminCount` used to live here, in a near-identical copy of the one in
 // `role.controller`. Both now come from `membership.service`, so "who can still administer this
@@ -306,6 +279,26 @@ export const inviteMember = asyncHandler(async (req, res) => {
       tenantId, userId: existing.id, membershipId: membership.id, byUserId: userOf(req).id,
     });
 
+    /*
+     * Tell them.
+     *
+     * **Only for an attached login**, not a brand-new one: somebody whose account was just created
+     * by this invite has no other workspace to be surprised from, and their first sight of the
+     * product is this workspace. An existing person is being given access to a business they may
+     * never have heard of, and the only record of who did it would otherwise be a log line.
+     *
+     * Through `notifyQuietly`, so a bell that cannot be written never fails the invite.
+     */
+    const workspace = await prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId }, select: { businessName: true },
+    });
+    await notifyAddedToWorkspace({
+      tenantId,
+      userId: existing.id,
+      businessName: workspace.businessName || 'a ZunoPilot workspace',
+      addedByName: userOf(req).fullName || 'Someone',
+    });
+
     const attached = await memberOf(tenantId, existing.id);
     /*
      * `attached: true` so the toast can tell the truth *after* the fact.
@@ -396,7 +389,7 @@ export const updateMember = asyncHandler(async (req, res) => {
   // Deactivation goes through the shared path so their conversations are freed,
   // whichever endpoint was used.
   if (body.isActive === false && member.isActive) {
-    await deactivateMember(tenantId, member.id);
+    await revokeMembership(tenantId, member.id);
   }
 
   /*
@@ -449,7 +442,7 @@ export const removeMember = asyncHandler(async (req, res) => {
     );
   }
 
-  await deactivateMember(tenantId, member.id);
+  await revokeMembership(tenantId, member.id);
 
   res.json({ success: true });
 });

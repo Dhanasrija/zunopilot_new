@@ -244,3 +244,57 @@ export const syncMembershipsForTenant = async (
   }
   return users.length;
 };
+
+/**
+ * Take somebody out of one workspace, and tidy up after them.
+ *
+ * **One definition, because there are now two doors out.** An admin removing a colleague and a
+ * person leaving on their own end in exactly the same state, and the cleanup below is the part that
+ * is easy to get half-right: written out twice, one of the two doors eventually forgets a line and
+ * a workspace keeps handing reminders to somebody who cannot open it.
+ *
+ * What it does **not** do is touch `User.isActive`. That is the operator's global kill switch;
+ * leaving one workspace is not leaving the product.
+ *
+ * Runs in a transaction because the four writes describe a single fact. A half-applied revoke is
+ * how the two unread counters drifted apart in the notifications module.
+ */
+export const revokeMembership = (
+  tenantId: string,
+  userId: string,
+  client: Client = prisma,
+): Promise<void> => {
+  const run = async (tx: Client) => {
+    await tx.membership.update({
+      where: { userId_tenantId: { userId, tenantId } },
+      data: { isActive: false, revokedAt: new Date() },
+    });
+
+    // Their open conversations go back to the shared pool rather than sitting with a name that can
+    // no longer answer them.
+    await tx.conversation.updateMany({
+      where: { tenantId, assignedAgentId: userId, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
+      data: { assignedAgentId: null },
+    });
+
+    /*
+     * The cascade that no longer fires.
+     *
+     * `Reminder.assigneeId` and `Notification.userId` are the only `onDelete: Cascade` user foreign
+     * keys, and they were correct while removing somebody meant flipping `User.isActive` and never
+     * deleting the row. Leaving a workspace is not a login delete, so without these two lines a
+     * revoked person keeps reminders and an unread badge for a workspace they can no longer open.
+     *
+     * Deliberately not touched: `Lead.ownerId` and `Ticket.assigneeId` stay assigned, exactly as
+     * they did before memberships existed. Reassigning somebody's pipeline is a decision for the
+     * workspace, not a side effect of their departure.
+     */
+    await tx.reminder.deleteMany({ where: { tenantId, assigneeId: userId } });
+    await tx.notification.deleteMany({ where: { tenantId, userId } });
+  };
+
+  // Already inside one? Join it. `$transaction` exists only on the top-level client, and calling it
+  // on a transaction client is a runtime error rather than a type error — hence the check.
+  const top = client as Partial<PrismaClient>;
+  return typeof top.$transaction === 'function' ? top.$transaction(run) : run(client);
+};

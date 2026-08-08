@@ -422,3 +422,146 @@ describe('POST /api/auth/workspaces/switch', () => {
     expect(res.body.data.activeWorkspaceId).toBe(ALPHA);
   });
 });
+
+describe('DELETE /api/auth/workspaces/:tenantId', () => {
+  /*
+   * The door out, which exists because an invite needs no acceptance.
+   *
+   * Somebody can be added to a workspace they have never heard of, immediately and by decision.
+   * That is only defensible if they can leave without asking the people who put them there.
+   */
+  const leave = (tenantId: string, token: string) => request(app)
+    .delete(`/api/auth/workspaces/${tenantId}`).set(auth(token));
+
+  it('**leaves the workspace and returns the ones that remain**', async () => {
+    // Bravo, where they are only a reader. Alpha is where they are the sole owner.
+    const res = await leave(BRAVO, ctx.bravoToken).expect(200);
+
+    expect(res.body.data.workspaces.map((w: { id: string }) => w.id)).toEqual([ALPHA]);
+
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { id: ctx.bravoMembershipId },
+    });
+    expect(membership.isActive).toBe(false);
+    expect(membership.revokedAt).not.toBeNull();
+  });
+
+  it('**invalidates the token for the workspace just left, and only that one**', async () => {
+    await leave(BRAVO, ctx.bravoToken).expect(200);
+
+    /*
+     * No new token is issued, so the one they hold still *names* Bravo — and that is the point.
+     * `requireAuth` selects a membership by the claim and now finds nothing active, so the session
+     * is refused rather than quietly falling back to Alpha.
+     */
+    await get('/api/tenant/me', ctx.bravoToken).expect(401);
+    await get('/api/tenant/me', ctx.alphaToken).expect(200);
+  });
+
+  it('**takes their reminders and unread badge with them**', async () => {
+    /*
+     * The cascade that stops firing. `Reminder.assigneeId` and `Notification.userId` are
+     * `onDelete: Cascade` on `User`, which was enough while leaving a workspace meant deactivating
+     * the login. It is not a login delete any more, so without the explicit cleanup this person
+     * keeps a badge for a workspace they can no longer open.
+     */
+    await prisma.reminder.create({
+      data: {
+        tenantId: BRAVO, assigneeId: ctx.userId, note: 'Call back', dueAt: new Date(),
+      },
+    });
+    await prisma.notification.create({
+      data: {
+        tenantId: BRAVO, userId: ctx.userId, kind: 'MESSAGE_RECEIVED', title: 'New message', body: 'x',
+      },
+    });
+    // Alpha's are untouched, which is what proves this is scoped to the workspace being left.
+    await prisma.notification.create({
+      data: {
+        tenantId: ALPHA, userId: ctx.userId, kind: 'MESSAGE_RECEIVED', title: 'New message', body: 'x',
+      },
+    });
+
+    await leave(BRAVO, ctx.bravoToken).expect(200);
+
+    expect(await prisma.reminder.count({ where: { tenantId: BRAVO, assigneeId: ctx.userId } })).toBe(0);
+    expect(await prisma.notification.count({ where: { tenantId: BRAVO, userId: ctx.userId } })).toBe(0);
+    expect(await prisma.notification.count({ where: { tenantId: ALPHA, userId: ctx.userId } })).toBe(1);
+  });
+
+  it('hands their open conversations back to the workspace', async () => {
+    const customer = await prisma.customer.create({
+      data: { tenantId: BRAVO, phone: '15558809001', waId: '15558809001', name: 'Waiting' },
+    });
+    const conversation = await prisma.conversation.create({
+      data: {
+        tenantId: BRAVO, customerId: customer.id, status: 'HUMAN_TAKEOVER', assignedAgentId: ctx.userId,
+      },
+    });
+
+    await leave(BRAVO, ctx.bravoToken).expect(200);
+
+    const after = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+    expect(after.assignedAgentId).toBeNull();
+  });
+
+  it('**refuses when it would leave nobody able to manage the workspace**', async () => {
+    // Alpha's only owner. Leaving would strand live customer conversations in a workspace where
+    // nobody can invite, change a role or pay the bill.
+    const res = await leave(ALPHA, ctx.alphaToken).expect(400);
+    expect(res.body.message).toMatch(/nobody able to manage/i);
+
+    expect((await prisma.membership.findUniqueOrThrow({
+      where: { id: ctx.alphaMembershipId },
+    })).isActive).toBe(true);
+  });
+
+  it('**does not mistake "there were never any admins" for "you were the last one"**', async () => {
+    /*
+     * `activeAdminCount` returns 0 for both, and a reader in a workspace with no owner is the
+     * ordinary case — a workspace whose owner has already gone. Reading it as the last-admin refusal
+     * would trap that person in a workspace they never administered and cannot leave.
+     */
+    await prisma.membership.update({
+      where: { id: ctx.alphaMembershipId }, data: { roleId: ctx.alpha.readerRole.id },
+    });
+    // Somebody has to be left behind, or the only-workspace rule refuses first.
+    const other = await prisma.user.create({
+      data: { tenantId: BRAVO, phone: '15558809002', fullName: 'Also Here', role: 'AGENT' },
+    });
+    await prisma.membership.create({
+      data: { userId: other.id, tenantId: BRAVO, roleId: ctx.bravo.readerRole.id },
+    });
+
+    await leave(BRAVO, ctx.bravoToken).expect(200);
+  });
+
+  it('**refuses to leave the only workspace**', async () => {
+    /*
+     * A login with no memberships cannot sign in anywhere — `requireAuth` answers
+     * `WORKSPACE_REQUIRED` and the switcher offers an empty list. That is account closure through a
+     * door not built for it, and unrecoverable without support.
+     */
+    await prisma.membership.update({
+      where: { id: ctx.alphaMembershipId }, data: { isActive: false },
+    });
+
+    const res = await leave(BRAVO, ctx.bravoToken).expect(400);
+    expect(res.body.message).toMatch(/only workspace/i);
+  });
+
+  it('answers 404, not 403, for a workspace you are not in', async () => {
+    await prisma.membership.delete({ where: { id: ctx.bravoMembershipId } });
+
+    await leave(BRAVO, ctx.alphaToken).expect(404);
+    await leave('00000000-0000-4000-8000-000000000000', ctx.alphaToken).expect(404);
+  });
+
+  it('**works while the workspace is suspended**', async () => {
+    // The reason it is on `requireSession`. Behind `requireAuth` the workspace somebody most wants
+    // out of would be the one they cannot reach the endpoint from.
+    await prisma.tenant.update({ where: { id: BRAVO }, data: { isActive: false } });
+
+    await leave(BRAVO, ctx.bravoToken).expect(200);
+  });
+});

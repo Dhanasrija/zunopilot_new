@@ -244,6 +244,53 @@ describe('changing the team', () => {
     expect(again.body.data.fullName).toBe('X');
   });
 
+  it('**tells the person they were added, and by whom**', async () => {
+    /*
+     * The other half of an invite that needs no acceptance. Being attached to a workspace you have
+     * never heard of, with nothing anywhere saying who did it, was not part of the decision to make
+     * invites immediate — the notification and the self-leave endpoint are what make it defensible.
+     */
+    const created = await request(app).post('/api/team').set(as(owner))
+      .send({ phone: '+91 98999 19998', fullName: 'Newcomer', roleId: roleIds[TENANT]!.AGENT });
+
+    // **Not for a brand-new login.** Their first sight of the product *is* this workspace, so there
+    // is nothing to be surprised by and nobody to tell them about.
+    expect(await prisma.notification.count({
+      where: { userId: created.body.data.id, kind: 'ADDED_TO_WORKSPACE' },
+    })).toBe(0);
+
+    await request(app).delete(`/api/team/${created.body.data.id}`).set(as(owner)).expect(200);
+    await request(app).post('/api/team').set(as(owner))
+      .send({ phone: '919899919998', fullName: 'Ignored', roleId: roleIds[TENANT]!.AGENT })
+      .expect(201);
+
+    const notice = await prisma.notification.findFirstOrThrow({
+      where: { userId: created.body.data.id, kind: 'ADDED_TO_WORKSPACE' },
+    });
+    // Addressed to them by name, not to the workspace — the one notification that is about a
+    // person rather than about the business.
+    expect(notice.tenantId).toBe(TENANT);
+    expect(notice.title).toContain('Team Test');
+    // Who did it. Without this the only record is a log line nobody outside the company can read.
+    expect(notice.body).toContain('owner');
+  });
+
+  it('**limits how many invitations a workspace can send in a day**', async () => {
+    /*
+     * An invite used to be able to create only a brand-new account. It can now attach an existing
+     * login, which makes an unthrottled endpoint a way to probe which phone numbers have accounts.
+     *
+     * Asserted through the `RateLimit-*` headers rather than by sending sixty requests: the limit is
+     * generous on purpose, and the property that matters is that the limiter is mounted on *this*
+     * route at all. Take it off and these headers disappear.
+     */
+    const res = await request(app).post('/api/team').set(as(owner))
+      .send({ phone: '+91 98999 19997', fullName: 'Rate Limit', roleId: roleIds[TENANT]!.AGENT })
+      .expect(201);
+
+    expect(res.headers['ratelimit-limit']).toBe('60');
+  });
+
   it('**still refuses somebody who is already on this team**', async () => {
     // Inviting the same person twice is a mistake, and silently succeeding would look like it
     // worked. This is the one case that stays a conflict.

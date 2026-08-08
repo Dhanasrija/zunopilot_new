@@ -3185,6 +3185,14 @@ enum NotificationKind {
   HANDOFF_REQUESTED
   /// An order was placed over WhatsApp.
   ORDER_CREATED
+  /// Somebody added this person to a workspace.
+  ///
+  /// **Recorded in the workspace they were added to, which is a real limitation.** Notifications are
+  /// tenant-scoped by `visibleTo`, so this does not appear in the bell while they are working in a
+  /// different workspace — the discoverable signal there is the new entry in their switcher. This
+  /// exists so that when they do arrive, the bell says who put them there and when, rather than
+  /// leaving them to guess.
+  ADDED_TO_WORKSPACE
 }
 
 /// What a person wants to be told, and how.

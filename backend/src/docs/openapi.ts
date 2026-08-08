@@ -252,6 +252,35 @@ export const openapi = {
         },
       },
     },
+    '/auth/workspaces/{tenantId}': {
+      delete: {
+        tags: ['Auth'], security: auth, summary: 'Leave a workspace',
+        description:
+          'The exit that has to exist because an invite needs no acceptance: somebody can be added'
+          + ' to a workspace they have never heard of, so the door must open from the inside too.\n\n'
+          + 'Refused when it would leave the workspace with nobody able to manage the team, and'
+          + ' refused when it is the only workspace this login can reach — a login with no'
+          + ' workspaces cannot sign in anywhere, which is account closure rather than leaving.\n\n'
+          + '**No new token is issued.** The one you hold may still name the workspace just left,'
+          + ' and that is safe: it now resolves to no active membership and is refused. Use the'
+          + ' returned list to switch.',
+        parameters: [
+          {
+            name: 'tenantId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          200: ok('The workspaces that remain', {
+            type: 'object',
+            properties: { workspaces: { type: 'array', items: ref('Workspace') } },
+          }),
+          400: errors[400],
+          401: errors[401],
+          403: errors[403],
+          404: errors[404],
+        },
+      },
+    },
     '/auth/profile': {
       put: {
         tags: ['Auth'], security: auth, summary: 'Finish onboarding',

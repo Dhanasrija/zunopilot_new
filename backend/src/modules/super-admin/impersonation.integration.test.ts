@@ -262,6 +262,29 @@ describe('the session is read-only', () => {
     // It is a tenant token, so the separate secret and audience already refuse it.
     await request(app).get('/sa/overview').set(bearer(token)).expect(401);
   });
+
+  it('**cannot see or change which workspace it is in**', async () => {
+    /*
+     * The switcher routes are on `requireSession`, which resolves no membership — so the read-only
+     * rule enforced in `requireAuth` never runs for them, and the `req.impersonation` checks written
+     * in those two handlers could never fire. All three are refused where the token is read.
+     *
+     * Listing is refused too, not just switching: a grant is consent from **one** workspace, and the
+     * list would tell the operator which other businesses this person belongs to.
+     */
+    const { token } = await activeSession();
+
+    await request(customerApp).get('/api/auth/workspaces').set(bearer(token)).expect(403);
+    await request(customerApp).post('/api/auth/workspaces/switch')
+      .set(bearer(token)).send({ tenantId: TENANT }).expect(403);
+    await request(customerApp).delete(`/api/auth/workspaces/${TENANT}`)
+      .set(bearer(token)).expect(403);
+
+    // And nothing moved: the grant's own membership is untouched.
+    expect((await prisma.membership.findFirstOrThrow({
+      where: { tenantId: TENANT }, orderBy: { joinedAt: 'asc' },
+    })).isActive).toBe(true);
+  });
 });
 
 describe('the session is time-boxed', () => {
