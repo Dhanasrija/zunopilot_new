@@ -15,7 +15,7 @@ import { parseDefinition } from '../domain/definition.js';
 import { handleProcessInboundMessage } from './handlers/process-inbound.js';
 import { sweepImpersonationGrants } from '../../super-admin/impersonation.js';
 import { sweepOtpChallenges } from '../../../services/otp.service.js';
-import { pushEnabled, pushNotification } from '../../notifications/push.service.js';
+import { pushAvailable, pushNotification } from '../../notifications/push.service.js';
 import {
   QUEUES, registerWorker, scheduleMaintenance,
   type DeliverPushNotificationJob, type ExecuteWorkflowInstanceJob, type SendWhatsAppMessageJob,
@@ -249,7 +249,7 @@ const handleApplyPlanChanges = async () => {
  * deleted, a conversation cascaded — and that is not a failure worth retrying.
  */
 const handleDeliverPushNotification = async ({ notificationId }: DeliverPushNotificationJob) => {
-  if (!pushEnabled()) return;
+  if (!pushAvailable()) return;
 
   const notification = await prisma.notification.findUnique({ where: { id: notificationId } });
   if (!notification) return;

@@ -34,6 +34,101 @@ import { requireActiveMember } from '../services/membership.service.js';
  */
 export const VISIBLE_MESSAGE = { deletedAt: null } as const;
 
+/*
+ * ── Asking what changed, instead of re-reading everything ────────────────────
+ *
+ * The Inbox polls the conversation list and the open thread **once a second**, and both reads
+ * return everything every time: up to a hundred conversations with their newest message, and up to
+ * five hundred messages. It has to, because there was no way to ask a narrower question — and the
+ * reason it polls that fast is delivery ticks, which are not new rows but changes to old ones.
+ *
+ * On a laptop that is merely wasteful. On a phone on mobile data it is the difference between an
+ * app that works and one that eats the battery, which is why this exists now.
+ *
+ * Three things about the cursor that are not obvious, and each of them is a bug if you get it
+ * wrong:
+ *
+ * **1. It is `updatedAt`, not `createdAt`.** A message is written once and then mutated: SENT →
+ *    DELIVERED → READ arrive as three separate webhooks against the same row. A `createdAt` cursor
+ *    would deliver the message and then never mention it again, so the ticks would never move —
+ *    which is exactly the thing the one-second poll is there to catch.
+ *
+ * **2. A delta has to carry removals.** With `deletedAt: null` in the filter, a message deleted
+ *    after the client last looked simply stops being mentioned, and "stops being mentioned" is
+ *    indistinguishable from "unchanged" — the client would show it for ever. So a delta drops that
+ *    filter and returns a **tombstone**: the row's identity, with its content stripped.
+ *
+ * **3. The cursor is a timestamp *and* an id.** `updateMany` stamps every row it touches with one
+ *    timestamp, so deleting a thread gives hundreds of rows the same `updatedAt`. A timestamp-only
+ *    cursor advanced past a full page would skip whatever ties fell after the cut, permanently.
+ *    Comparing `(updatedAt, id)` as a pair has no such boundary.
+ */
+
+/** How many rows a single read returns. Unchanged from what these two endpoints already did. */
+const CONVERSATION_PAGE = 100;
+const MESSAGE_PAGE = 500;
+
+/** A place in the change log: a timestamp, and an id to break ties at that timestamp. */
+interface Cursor { since: Date; sinceId: string | null }
+
+/**
+ * Read `?since=` and `?sinceId=`, or null for "give me the current state".
+ *
+ * A malformed cursor is a **400 rather than a silent full read**. Ignoring it would work — the
+ * client would get everything, which is correct if wasteful — and would hide the client bug for
+ * months while the app quietly re-downloaded every thread on every poll.
+ */
+const readCursor = (query: Record<string, unknown>): Cursor | null => {
+  const raw = query.since;
+  if (raw === undefined || raw === '') return null;
+  if (typeof raw !== 'string') throw ApiError.badRequest('since must be a single ISO 8601 timestamp');
+
+  const since = new Date(raw);
+  if (Number.isNaN(since.getTime())) {
+    throw ApiError.badRequest('since must be an ISO 8601 timestamp, for example 2026-08-10T09:15:00.000Z');
+  }
+
+  const sinceId = typeof query.sinceId === 'string' && query.sinceId ? query.sinceId : null;
+  return { since, sinceId };
+};
+
+/**
+ * "Everything after this point", as a Prisma filter.
+ *
+ * Strictly after the pair, so a client that echoes back what it was given never re-reads the row
+ * it echoed — and never skips a row that shares its timestamp.
+ */
+const after = (cursor: Cursor): Prisma.MessageWhereInput | Prisma.ConversationWhereInput => ({
+  OR: [
+    { updatedAt: { gt: cursor.since } },
+    ...(cursor.sinceId ? [{ updatedAt: cursor.since, id: { gt: cursor.sinceId } }] : []),
+  ],
+});
+
+/**
+ * Where the client should resume from, given the page it just received.
+ *
+ * Three cases, and the middle one is the one worth stating:
+ *
+ * - **A delta with rows**: the last row of the page, which is the largest `(updatedAt, id)` pair
+ *   the client has now seen.
+ * - **A delta with no rows**: the cursor it sent, handed straight back. It must *not* advance to
+ *   now — nothing was observed, so stepping to the current moment would step over anything written
+ *   between the two polls.
+ * - **A full read**: the moment the query was issued, not the moment it finished and not the newest
+ *   row it happened to return. A row written while the query was running belongs to the next delta,
+ *   and a cursor taken after the fact would skip it.
+ */
+const nextCursor = <T extends { id: string; updatedAt: Date }>(
+  rows: T[], cursor: Cursor | null, startedAt: Date,
+) => {
+  if (!cursor) return { nextSince: startedAt.toISOString(), nextSinceId: null };
+
+  const last = rows[rows.length - 1];
+  if (!last) return { nextSince: cursor.since.toISOString(), nextSinceId: cursor.sinceId };
+  return { nextSince: last.updatedAt.toISOString(), nextSinceId: last.id };
+};
+
 // Gets-or-creates an OPEN conversation for the given customer.
 // Used by the CRM "Start conversation" button so agents can jump from a
 // customer profile straight into the inbox.
@@ -69,6 +164,9 @@ export const startConversation = asyncHandler(async (req, res) => {
 });
 
 export const listConversations = asyncHandler(async (req, res) => {
+  const startedAt = new Date();
+  const cursor = readCursor(req.query as Record<string, unknown>);
+
   const status = queryEnum(req.query.status, Object.values(ConversationStatus));
   const where: Prisma.ConversationWhereInput = { tenantId: tenantIdOf(req) };
   if (status) where.status = status;
@@ -76,6 +174,17 @@ export const listConversations = asyncHandler(async (req, res) => {
   // The shared pool: what nobody has picked up. This is the queue an agent
   // works from, so it needs to be one filter rather than a visual scan.
   if (queryBool(req.query.unassigned)) where.assignedAgentId = null;
+
+  /*
+   * Only what changed, when the client asks for that.
+   *
+   * **Combining `since` with a filter has an edge worth knowing about**, so it is written down
+   * rather than discovered: a conversation that changes *out* of the filtered set — closed while
+   * you are looking at OPEN — is not in the delta, because it no longer matches. The client keeps
+   * showing it until it does a full read. An app that wants a reliable delta should poll the
+   * unfiltered list and filter locally; a filtered delta is for cheap top-ups, not for truth.
+   */
+  if (cursor) Object.assign(where, after(cursor));
 
   // Resolved once for the whole page rather than per row: it is one tenant read, and
   // computing it inside a map would run it a hundred times.
@@ -107,16 +216,33 @@ export const listConversations = asyncHandler(async (req, res) => {
         },
       },
     },
-    orderBy: { lastMessageAt: 'desc' },
-    take: 100,
+    /*
+     * A delta is ordered by the cursor, not by recency.
+     *
+     * Paging on one ordering while cursoring on another is the classic way to lose rows: the page
+     * boundary would fall somewhere unrelated to where the client resumes. A full read keeps
+     * `lastMessageAt desc`, which is the order the list is drawn in.
+     */
+    orderBy: cursor ? [{ updatedAt: 'asc' }, { id: 'asc' }] : { lastMessageAt: 'desc' },
+    // One over the page, to answer "is there more" without a second count query.
+    take: cursor ? CONVERSATION_PAGE + 1 : CONVERSATION_PAGE,
   });
+
+  const page = cursor ? conversations.slice(0, CONVERSATION_PAGE) : conversations;
 
   res.json({
     success: true,
-    data: conversations.map((conversation) => ({
+    data: page.map((conversation) => ({
       ...conversation,
       customer: maskContact(conversation.customer, seeFull),
     })),
+    // Alongside `data` rather than wrapped around it, so every client that reads `data` as an
+    // array — which is all of them today — keeps working untouched.
+    meta: {
+      ...nextCursor(page, cursor, startedAt),
+      /** More is already waiting: ask again immediately rather than on the next tick. */
+      hasMore: cursor ? conversations.length > CONVERSATION_PAGE : false,
+    },
   });
 });
 
@@ -143,12 +269,19 @@ export const getConversation = asyncHandler(async (req, res) => {
 
 export const listMessages = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const startedAt = new Date();
+  const cursor = readCursor(req.query as Record<string, unknown>);
+
   const conversation = await prisma.conversation.findFirst({ where: { id, tenantId: tenantIdOf(req) } });
   if (!conversation) throw ApiError.notFound('Conversation not found');
   const messages = await prisma.message.findMany({
-    where: { conversationId: id, ...VISIBLE_MESSAGE },
-    orderBy: { createdAt: 'asc' },
-    take: 500,
+    where: cursor
+      // No `VISIBLE_MESSAGE` on a delta, deliberately: a removed message has to be reported as
+      // removed. It is redacted below rather than filtered out here.
+      ? { conversationId: id, ...(after(cursor) as Prisma.MessageWhereInput) }
+      : { conversationId: id, ...VISIBLE_MESSAGE },
+    orderBy: cursor ? [{ updatedAt: 'asc' }, { id: 'asc' }] : { createdAt: 'asc' },
+    take: cursor ? MESSAGE_PAGE + 1 : MESSAGE_PAGE,
     include: {
       sentByUser: { select: { id: true, fullName: true, role: true } },
       /*
@@ -176,12 +309,42 @@ export const listMessages = asyncHandler(async (req, res) => {
    * exactly the leak the soft delete exists to prevent. The reply itself stays; it just loses
    * its quote block.
    */
-  const visible = messages.map((message) => ({
-    ...message,
-    replyTo: message.replyTo?.deletedAt ? null : message.replyTo,
-  }));
+  const page = cursor ? messages.slice(0, MESSAGE_PAGE) : messages;
 
-  res.json({ success: true, data: visible });
+  const visible = page.map((message) => {
+    /*
+     * A removed message comes back as a tombstone: enough to recognise the row, and nothing else.
+     *
+     * Only reachable on the delta path, because a full read filters removed rows out entirely. The
+     * client's rule is "`deletedAt` set means drop it from the thread" — and the content is stripped
+     * here rather than trusted to that rule, so a client that has not implemented it yet cannot
+     * display what an agent deleted.
+     */
+    if (message.deletedAt) {
+      return {
+        id: message.id,
+        conversationId: message.conversationId,
+        direction: message.direction,
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+        deletedAt: message.deletedAt,
+      };
+    }
+
+    return {
+      ...message,
+      replyTo: message.replyTo?.deletedAt ? null : message.replyTo,
+    };
+  });
+
+  res.json({
+    success: true,
+    data: visible,
+    meta: {
+      ...nextCursor(page, cursor, startedAt),
+      hasMore: cursor ? messages.length > MESSAGE_PAGE : false,
+    },
+  });
 });
 
 /**

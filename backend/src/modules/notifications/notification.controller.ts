@@ -7,7 +7,8 @@ import { tenantIdOf, userOf } from '../../middleware/auth.js';
 import {
   listFor, markAllRead, markRead, preferencesFor, unreadCountFor, updatePreferences,
 } from './notification.service.js';
-import { pushPublicKey, pushEnabled } from './push.service.js';
+import { pushPublicKey, webPushAvailable } from './push.service.js';
+import { fcmAvailable } from './fcm.js';
 
 // Notification endpoints.
 //
@@ -60,10 +61,18 @@ export const getPreferences = asyncHandler(async (req: Request, res: Response) =
       /**
        * What the client needs to decide whether to offer push at all.
        *
-       * `pushEnabled` is false when the server has no VAPID keys, and the UI must
-       * hide the control rather than offer a button that cannot work.
+       * **Two answers, because there are two transports.** `available` is false when the
+       * server has no VAPID keys, and the browser must hide its control rather than offer a
+       * button that cannot work. `mobileAvailable` is the same question for FCM, and the two
+       * are genuinely independent — a server can reach the app and not the browser. One
+       * combined flag would have the web UI offering a subscribe button on a box with only
+       * FCM configured, which is exactly the broken button this field exists to prevent.
        */
-      push: { available: pushEnabled(), publicKey: pushPublicKey() },
+      push: {
+        available: webPushAvailable(),
+        publicKey: pushPublicKey(),
+        mobileAvailable: fcmAvailable(),
+      },
     },
   });
 });
@@ -113,7 +122,7 @@ const subscriptionBody = z.object({
 export const postSubscribe = asyncHandler(async (req: Request, res: Response) => {
   const parsed = subscriptionBody.safeParse(req.body);
   if (!parsed.success) throw ApiError.badRequest('That is not a usable push subscription');
-  if (!pushEnabled()) throw ApiError.unprocessable('Push is not configured on this server');
+  if (!webPushAvailable()) throw ApiError.unprocessable('Push is not configured on this server');
 
   const userId = userOf(req).id;
   const { endpoint, keys } = parsed.data;
@@ -122,6 +131,7 @@ export const postSubscribe = asyncHandler(async (req: Request, res: Response) =>
     where: { endpoint },
     update: {
       userId,
+      platform: 'WEB',
       p256dh: keys.p256dh,
       auth: keys.auth,
       userAgent: req.get('user-agent')?.slice(0, 300) ?? null,
@@ -130,6 +140,7 @@ export const postSubscribe = asyncHandler(async (req: Request, res: Response) =>
     },
     create: {
       userId,
+      platform: 'WEB',
       endpoint,
       p256dh: keys.p256dh,
       auth: keys.auth,
@@ -166,9 +177,122 @@ export const getDevices = asyncHandler(async (req: Request, res: Response) => {
   const devices = await prisma.pushSubscription.findMany({
     where: { userId: userOf(req).id },
     orderBy: { createdAt: 'desc' },
-    // Never the keys. They are useless without our private key, but there is no reason
-    // to hand them back either.
-    select: { id: true, endpoint: true, userAgent: true, createdAt: true, lastUsedAt: true },
+    // Never the keys, and never the FCM token. None of them are credentials of ours and
+    // none of them are useful to the person reading this list, so there is no reason to
+    // hand them back — and a token in a response body is a token in a log.
+    select: {
+      id: true,
+      platform: true,
+      endpoint: true,
+      deviceName: true,
+      appVersion: true,
+      userAgent: true,
+      createdAt: true,
+      lastUsedAt: true,
+    },
   });
   res.json({ success: true, data: devices });
+});
+
+// ── The app's devices ─────────────────────────────────────────────────────────
+
+const deviceBody = z.object({
+  // Only the two mobile platforms. `WEB` has its own endpoint, and accepting it here
+  // would let a caller create a browser row with no keys — a device the fan-out can
+  // never send to and nothing would explain why.
+  platform: z.enum(['ANDROID', 'IOS']),
+  /** The FCM registration token. Long, opaque, and not stable — see below. */
+  token: z.string().min(20).max(4096),
+  /**
+   * The app's own install id, generated once and kept.
+   *
+   * **Required, because the token cannot play this part.** An FCM token rotates — on
+   * reinstall, on restore from a backup, when app data is cleared, and sometimes on its
+   * own. Without a stable id, every rotation would leave the previous row in place and the
+   * same phone would be sent to twice, then three times, each stale token still accepting
+   * deliveries for a while before it starts answering UNREGISTERED.
+   */
+  deviceId: z.string().min(8).max(128),
+  /** "Pixel 8", for the list a person revokes from. */
+  deviceName: z.string().max(120).optional(),
+  appVersion: z.string().max(40).optional(),
+}).strict();
+
+/**
+ * Register this phone for push, or update what is registered for it.
+ *
+ * Called on sign-in and on every token refresh the app is told about. Idempotent by
+ * construction: the same phone re-registering rewrites one row.
+ *
+ * Like `postSubscribe`, this switches the `push` preference on — somebody who has just
+ * granted notification permission on their phone has already said what they want.
+ */
+export const postDevice = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = deviceBody.safeParse(req.body);
+  if (!parsed.success) throw ApiError.badRequest('That is not a usable device registration');
+  if (!fcmAvailable()) {
+    throw ApiError.unprocessable('Mobile push is not configured on this server');
+  }
+
+  const userId = userOf(req).id;
+  const { platform, token, deviceId, deviceName, appVersion } = parsed.data;
+
+  const device = await prisma.$transaction(async (tx) => {
+    /*
+     * Take this token off any other row first.
+     *
+     * Two real situations produce a token that already belongs somewhere else: a phone
+     * handed to a colleague who signs in as themselves, and two logins used on one device.
+     * `deviceToken` is unique, so without this the upsert below would fail — but the reason
+     * it is unique is the more important half: a token left on the old row keeps delivering
+     * that person's notifications to a screen that is now somebody else's.
+     */
+    await tx.pushSubscription.deleteMany({
+      where: { deviceToken: token, NOT: { userId, deviceId } },
+    });
+
+    return tx.pushSubscription.upsert({
+      // The stable pair, not the token.
+      where: { userId_deviceId: { userId, deviceId } },
+      update: {
+        platform,
+        deviceToken: token,
+        deviceName: deviceName ?? null,
+        appVersion: appVersion ?? null,
+        // Reset on re-register: this device demonstrably works again.
+        failureCount: 0,
+      },
+      create: {
+        userId,
+        platform,
+        deviceToken: token,
+        deviceId,
+        deviceName: deviceName ?? null,
+        appVersion: appVersion ?? null,
+      },
+      select: { id: true, platform: true, deviceName: true, appVersion: true, createdAt: true },
+    });
+  });
+
+  const preference = await updatePreferences(userId, { push: true });
+  res.status(201).json({ success: true, data: { device, preference } });
+});
+
+/**
+ * Stop pushing to one device, whichever transport it is on.
+ *
+ * By id rather than by token, so signing out of the app does not have to send the token
+ * back — and so the same call works for a browser row the person revoked from the list.
+ *
+ * Like `postUnsubscribe`, this deliberately leaves the `push` preference alone: the person
+ * may still want push on their other phone.
+ */
+export const deleteDevice = asyncHandler(async (req: Request, res: Response) => {
+  // Scoped by userId: an id is not authorisation to unregister someone else's phone.
+  const { count } = await prisma.pushSubscription.deleteMany({
+    where: { id: req.params.id, userId: userOf(req).id },
+  });
+  // Not a 404 when nothing matched. Signing out twice, or on a device whose row was
+  // already pruned as dead, is not an error worth showing anybody.
+  res.json({ success: true, data: { removed: count } });
 });

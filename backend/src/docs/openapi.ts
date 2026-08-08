@@ -70,6 +70,30 @@ const okPaged = (description: string, item: unknown) => ({
   },
 });
 
+/**
+ * A list plus its delta cursor, for the two Inbox reads a client follows incrementally.
+ *
+ * Separate from `okPaged` because the two `meta` shapes answer different questions: one is "where
+ * am I in a list", the other is "what have I already seen". Sharing one schema would leave every client
+ * guessing which fields are populated.
+ */
+const okDelta = (description: string, item: unknown) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          data: { type: 'array', items: item },
+          meta: { $ref: '#/components/schemas/DeltaMeta' },
+        },
+        required: ['success', 'data', 'meta'],
+      },
+    },
+  },
+});
+
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const arrayOf = (name: string) => ({ type: 'array', items: ref(name) });
 
@@ -121,9 +145,21 @@ export const openapi = {
       '- **422** — WhatsApp refused something, and `message` carries their own words.',
       '',
       '### Push notifications',
-      'The endpoints under `/notifications/push` are **Web Push (VAPID)**. There is no FCM or',
-      'APNs support yet, so a native client cannot receive pushes through them — the in-app',
-      'list and unread count under `/notifications` do work.',
+      'Two transports, and a client uses exactly one of them.',
+      '',
+      '- **A native app** registers with `POST /notifications/push/devices`, sending its FCM',
+      '  registration token and a `deviceId` it generates once and keeps. Re-send on every',
+      '  token refresh — the `deviceId` is what makes that an update rather than a duplicate.',
+      '  iOS is delivered through FCM as well, so there is one call for both platforms.',
+      '- **A browser** uses `POST /notifications/push/subscribe` with a VAPID subscription.',
+      '',
+      '`GET /notifications/preferences` reports which of the two this server can actually do,',
+      'as `push.available` (browser) and `push.mobileAvailable` (app). Every device a person',
+      'has registered is sent to, so being signed in on two phones means both of them buzz.',
+      '',
+      'A push payload carries `tenantId`. Switch to that workspace before following `link` —',
+      '`link` is a relative path with no workspace in it, so following it while the app is',
+      'showing a different workspace opens the wrong inbox.',
     ].join('\n'),
   },
   servers: [
@@ -354,8 +390,29 @@ export const openapi = {
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['OPEN', 'HUMAN_TAKEOVER', 'CLOSED'] } },
           { name: 'assignedToMe', in: 'query', schema: { type: 'boolean' } },
+          {
+            name: 'since',
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+            description: [
+          'A cursor for asking **what changed** instead of re-reading the list. Send the `nextSince`',
+          'and `nextSinceId` from the previous response; the reply contains only rows modified since,',
+          'and `meta.hasMore` says whether to ask again straight away rather than waiting for the next',
+          'tick. Omit both for the current state. **A filter plus a cursor has one gap**: a',
+          'conversation that changes out of the filtered set is not in the delta, so poll the',
+          'unfiltered list and filter locally if you need it to be exact.',
+        ].join(' '),
+          },
+          {
+            name: 'sinceId',
+            in: 'query',
+            schema: { type: 'string' },
+            description:
+              'The other half of the cursor. Breaks ties between rows sharing one `since`, which'
+              + ' happens whenever a bulk update stamps many rows at the same instant.',
+          },
         ],
-        responses: { 200: ok('Conversations', arrayOf('Conversation')), ...errors },
+        responses: { 200: okDelta('Conversations', ref('Conversation')), ...errors },
       },
       post: {
         tags: ['Inbox'], security: auth, summary: 'Open a conversation with a customer',
@@ -394,8 +451,32 @@ export const openapi = {
       },
       get: {
         tags: ['Inbox'], security: auth, summary: 'The messages in a conversation',
-        parameters: [pathParam('id', 'Conversation id')],
-        responses: { 200: ok('Messages, oldest first', arrayOf('Message')), ...errors },
+        description: [
+          'Without `since`, the thread as it stands, oldest first, with removed messages left out.',
+          '',
+          'With `since` and `sinceId`, **only what changed** — ordered by when it changed, and',
+          'including delivery-status updates to messages you already have. This is how a client',
+          'follows the ticks without re-reading the thread: status arrives as a change to an existing',
+          'row, not as a new one.',
+          '',
+          'A delta also reports **removals**. A message an agent deleted comes back as a tombstone —',
+          '`id`, `conversationId`, `direction`, the timestamps and `deletedAt`, with no content. Drop',
+          'it from the thread when you see one.',
+          '',
+          'Echo `meta.nextSince` and `meta.nextSinceId` back on the next call, and call again',
+          'immediately while `meta.hasMore` is true.',
+        ].join('\n'),
+        parameters: [
+          pathParam('id', 'Conversation id'),
+          {
+            name: 'since',
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+            description: 'From `meta.nextSince`. An unparseable value is a 400, not a full read.',
+          },
+          { name: 'sinceId', in: 'query', schema: { type: 'string' }, description: 'From `meta.nextSinceId`.' },
+        ],
+        responses: { 200: okDelta('Messages, oldest first', ref('Message')), ...errors },
       },
       post: {
         tags: ['Inbox'], security: auth, summary: 'Reply as a human',
@@ -774,9 +855,46 @@ export const openapi = {
     },
     '/notifications/push/devices': {
       get: {
-        tags: ['Notifications'], security: auth, summary: 'Registered Web Push devices',
-        description: '**Web Push only — not FCM or APNs.** A native client cannot use these yet.',
+        tags: ['Notifications'], security: auth, summary: 'Registered devices',
+        description: [
+          'Every device registered for push, browsers and phones together. `platform` is `WEB`,',
+          '`ANDROID` or `IOS`. Neither the browser keys nor the FCM token are returned — use',
+          '`id` with the DELETE below to unregister one.',
+        ].join(' '),
         responses: { 200: ok('Devices', { type: 'array', items: { type: 'object' } }), 401: errors[401] },
+      },
+      post: {
+        tags: ['Notifications'], security: auth, summary: 'Register this phone (FCM)',
+        description: [
+          'Call on sign-in and on every FCM token refresh. `deviceId` is the app\'s own install',
+          'id, stable across token rotation — the same `deviceId` updates its row instead of',
+          'adding a second one for the same phone. Also switches the `push` preference on.',
+          '**422** means this server has no FCM credentials.',
+        ].join(' '),
+        requestBody: jsonBody({
+          type: 'object',
+          properties: {
+            platform: { type: 'string', enum: ['ANDROID', 'IOS'] },
+            token: { type: 'string', description: 'The FCM registration token' },
+            deviceId: { type: 'string', description: 'Generated once by the app and kept' },
+            deviceName: { type: 'string', example: 'Pixel 8' },
+            appVersion: { type: 'string', example: '1.4.0' },
+          },
+          required: ['platform', 'token', 'deviceId'],
+        }),
+        responses: { 201: ok('Registered', { type: 'object' }), ...errors },
+      },
+    },
+    '/notifications/push/devices/{id}': {
+      delete: {
+        tags: ['Notifications'], security: auth, summary: 'Unregister a device',
+        description: [
+          'What signing out of the app calls. Works for a browser row too. Idempotent — an id',
+          'that is already gone answers 200 with `removed: 0`. Deliberately leaves the `push`',
+          'preference alone: the person may still want push on their other phone.',
+        ].join(' '),
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { 200: ok('Removed', { type: 'object' }), 401: errors[401] },
       },
     },
     '/notifications/push/subscribe': {
@@ -1038,6 +1156,28 @@ export const openapi = {
           details: { description: 'Field-level problems, when the failure was a validation one' },
         },
         required: ['success', 'message'],
+      },
+      DeltaMeta: {
+        type: 'object',
+        description: 'Where to resume from. Echo the two cursor fields back on the next call.',
+        properties: {
+          nextSince: {
+            type: 'string', format: 'date-time',
+            description:
+              'Send as `since` next time. On an empty delta this is the cursor you sent, unchanged —'
+              + ' it deliberately does not jump to now, because nothing was observed in between.',
+          },
+          nextSinceId: {
+            type: 'string', nullable: true,
+            description: 'Send as `sinceId` next time. Breaks ties at `nextSince`.',
+          },
+          hasMore: {
+            type: 'boolean',
+            description:
+              'The page was full and more is already waiting. Call again immediately rather than'
+              + ' waiting for the next tick.',
+          },
+        },
       },
       PageMeta: {
         type: 'object',

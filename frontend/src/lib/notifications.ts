@@ -33,11 +33,27 @@ export interface PushCapability {
   /** False when the server has no VAPID keys. The UI must then offer nothing. */
   available: boolean;
   publicKey: string | null;
+  /**
+   * False when the server has no FCM credentials.
+   *
+   * Nothing on the web depends on this — it is here because it comes back in the same payload,
+   * and because the device list below now shows phones registered by the app. Deliberately a
+   * second flag rather than one combined one: a server can reach the app and not the browser,
+   * and a single flag would have this page offering a subscribe button that cannot work.
+   */
+  mobileAvailable?: boolean;
 }
 
 export interface PushDevice {
   id: string;
-  endpoint: string;
+  /** `WEB` for a browser; `ANDROID` or `IOS` for the app. */
+  platform: 'WEB' | 'ANDROID' | 'IOS';
+  /** Null on a phone, where there is no push-service URL. */
+  endpoint: string | null;
+  /** What the app calls this phone — "Pixel 8". Null for a browser. */
+  deviceName: string | null;
+  appVersion: string | null;
+  /** Set for a browser. Null for a phone, which sends `deviceName` instead. */
   userAgent: string | null;
   createdAt: string;
   lastUsedAt: string | null;

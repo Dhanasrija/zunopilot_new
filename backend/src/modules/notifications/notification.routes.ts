@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import {
-  getDevices, getNotifications, getPreferences, getUnreadCount,
-  postMarkAllRead, postMarkRead, postSubscribe, postUnsubscribe, putPreferences,
+  deleteDevice, getDevices, getNotifications, getPreferences, getUnreadCount,
+  postDevice, postMarkAllRead, postMarkRead, postSubscribe, postUnsubscribe, putPreferences,
 } from './notification.controller.js';
 
 // Notifications.
@@ -33,6 +33,13 @@ router.put('/preferences', putPreferences);
 router.get('/push/devices', getDevices);
 router.post('/push/subscribe', postSubscribe);
 router.post('/push/unsubscribe', postUnsubscribe);
+
+// The Flutter app's half. `POST` registers or re-registers a phone by its own install id;
+// `DELETE` takes any device off, whichever transport it uses, which is what signing out of
+// the app calls. `/push/devices/:id` cannot shadow anything — every other path under
+// `/push/` is a fixed word.
+router.post('/push/devices', postDevice);
+router.delete('/push/devices/:id', deleteDevice);
 
 // Last, so every fixed path above wins over it.
 router.post('/:id/read', postMarkRead);

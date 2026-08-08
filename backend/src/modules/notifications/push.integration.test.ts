@@ -108,9 +108,9 @@ describe('whether push is even available', () => {
   it('**is disabled with no keys, and says so rather than half-working**', async () => {
     delete process.env.VAPID_PUBLIC_KEY;
     delete process.env.VAPID_PRIVATE_KEY;
-    const { pushEnabled, pushPublicKey, pushNotification } = await load();
+    const { webPushAvailable, pushPublicKey, pushNotification } = await load();
 
-    expect(pushEnabled()).toBe(false);
+    expect(webPushAvailable()).toBe(false);
     expect(pushPublicKey()).toBeNull();
     expect(await pushNotification(await notification())).toMatchObject({ skipped: 'not-configured' });
     expect(sendNotification).not.toHaveBeenCalled();
@@ -120,8 +120,8 @@ describe('whether push is even available', () => {
     // A half-configured key pair cannot sign anything, and treating it as enabled would
     // fail every send with a confusing error instead of one clear "not configured".
     delete process.env.VAPID_PRIVATE_KEY;
-    const { pushEnabled } = await load();
-    expect(pushEnabled()).toBe(false);
+    const { webPushAvailable } = await load();
+    expect(webPushAvailable()).toBe(false);
   });
 
   it('**reads the keys at the point of use, not from an import-time snapshot**', async () => {

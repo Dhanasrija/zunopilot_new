@@ -265,11 +265,16 @@ export default function NotificationSettings() {
                   <ul className="mt-1 space-y-1">
                     {devices.data?.map((device) => (
                       <li key={device.id} className="flex items-center gap-2 text-caption text-ink-500">
-                        {/^.*(iPhone|Android|Mobile).*$/.test(device.userAgent ?? '')
-                          ? <Smartphone className="h-3 w-3 shrink-0" />
-                          : <Monitor className="h-3 w-3 shrink-0" />}
+                        {/*
+                          The platform, not a guess from the user agent. A phone registered by the
+                          app has no user agent at all, so sniffing it drew a monitor next to
+                          "Unknown device" for the one device that knows exactly what it is called.
+                        */}
+                        {device.platform === 'WEB'
+                          ? <Monitor className="h-3 w-3 shrink-0" />
+                          : <Smartphone className="h-3 w-3 shrink-0" />}
                         <span className="truncate">
-                          {device.userAgent?.slice(0, 60) ?? 'Unknown device'}
+                          {device.deviceName ?? device.userAgent?.slice(0, 60) ?? 'Unknown device'}
                         </span>
                       </li>
                     ))}
