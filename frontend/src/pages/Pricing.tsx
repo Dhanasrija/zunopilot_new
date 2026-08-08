@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useCatalogue, type BillingInterval } from '@/lib/pricing';
 import { Disclosures, IntervalSwitch, PlanCard } from '@/components/billing/PlanGrid';
 import { Button } from '@/components/ui/button';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 // The public pricing page.
 //
@@ -12,6 +14,7 @@ import { Button } from '@/components/ui/button';
 // this page hardcoded it.
 
 export default function Pricing() {
+  useDocumentHead(PAGE_HEADS.pricing);
   const { data, isLoading } = useCatalogue();
   // Monthly until the catalogue answers, which also says monthly. Seeding this with a
   // different interval would flash the wrong prices on a slow connection.

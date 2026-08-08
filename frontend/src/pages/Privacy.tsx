@@ -1,6 +1,9 @@
 import LegalLayout from '@/components/layout/LegalLayout';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 export default function Privacy() {
+  useDocumentHead(PAGE_HEADS.privacy);
   return (
     <LegalLayout
       title="Privacy Policy"
@@ -59,11 +62,26 @@ export default function Privacy() {
         <Bullets items={[
           ['Service Providers', 'Secure hosting environments (Postgres instances, server infrastructures) acting strictly on our instructions.'],
           ['Meta Platforms, Inc', 'Access tokens and payload details sent to the WhatsApp API endpoints to transmit messages.'],
+          ['Google Analytics', 'Page paths and standard web analytics data for our public website, as described in section 5. Never your message content or customer records.'],
           ['Legal Requirements', 'If required to do so by law, court orders, or regulations.'],
         ]} />
       </Section>
 
-      <Section title="5. Security of Your Data">
+      <Section title="5. Cookies & Website Analytics">
+        <p>
+          We use Google Analytics to understand how people find and move through our
+          public website. It sets cookies in your browser and reports which pages were
+          visited, from which country, and on what kind of device.
+        </p>
+        <Bullets items={[
+          ['What we send', 'The page path only. Query strings are stripped before anything is sent, and identifiers in a URL — an order, a lead, a conversation — are replaced with a placeholder, so a report cannot be traced back to one of your customers.'],
+          ['No advertising', 'Google Signals and ad personalisation are switched off. Your visit is not used to build an advertising profile or to retarget you.'],
+          ['Nothing from inside WhatsApp', 'Message content, phone numbers and customer records never reach Google. Analytics runs on our website; it has no access to your inbox.'],
+          ['Opting out', "Browser-level tracking protection, or Google's own opt-out browser add-on, will stop this collection. Nothing on the site depends on it."],
+        ]} />
+      </Section>
+
+      <Section title="6. Security of Your Data">
         <p>
           We employ industry-standard physical, technical, and administrative
           measures to secure your credentials, passwords, and Meta developer access
@@ -72,7 +90,7 @@ export default function Privacy() {
         </p>
       </Section>
 
-      <Section title="6. Your Privacy Rights">
+      <Section title="7. Your Privacy Rights">
         <p>
           Depending on your location, you may have rights under GDPR, CCPA, or local
           laws to access, correct, delete, or limit the processing of your data. To
@@ -81,7 +99,7 @@ export default function Privacy() {
         </p>
       </Section>
 
-      <Section title="7. Contact Information">
+      <Section title="8. Contact Information">
         <p>
           For questions, clarifications, or requests regarding this Privacy Policy,
           please reach out to:

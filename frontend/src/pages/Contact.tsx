@@ -17,6 +17,8 @@ import {
   type Country,
 } from '@/lib/countries';
 import { INTERESTS, interestFromUrl } from '@/lib/enquiry';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 
 const NAV = [
@@ -30,6 +32,7 @@ const NAV = [
 type Errors = Partial<Record<'fullName' | 'email' | 'phone' | 'interest' | 'message' | 'agree', string>>;
 
 export default function Contact() {
+  useDocumentHead(PAGE_HEADS.contact);
   const [searchParams] = useSearchParams();
   // Read once, as the initial value. Deriving it on every render would fight the
   // visitor: change the dropdown after arriving from a demo link and the URL would

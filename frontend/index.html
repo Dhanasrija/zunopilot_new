@@ -14,10 +14,15 @@
     shared zunopilot.com link previewed as a bare "ZunoPilot" with no description and no
     image, which for a product whose premise is WhatsApp was the wrong first impression.
 
-    Consequence worth knowing: these tags are the same on every route. `/pricing` claims
-    the home page's title until per-route meta exists, which needs a `useDocumentHead` hook
-    and is a separate change. Google runs JS and would honour per-route tags; scrapers still
-    would not, so the only complete fix is prerendering.
+    Consequence worth knowing, and now only half true: these tags are what the *document*
+    ships, and `src/lib/document-head.ts` rewrites the title, description, canonical and og
+    URL per route once React runs. Google executes JS and honours that, so indexing is
+    correct. Scrapers — WhatsApp, LinkedIn, Facebook, X — do not, so a shared /pricing link
+    still previews with the values below. Prerendering is the only complete fix for previews.
+
+    Which makes these the *home page's* tags specifically, and they must stay in step with
+    `PAGE_HEADS.landing`. A test asserts they match, because a drift here shows up as Google
+    indexing one thing and WhatsApp previewing another.
 
     The URLs are absolute and hardcoded, because a static file cannot know its own origin.
     A staging deploy therefore serves tags claiming production — if staging is publicly
@@ -45,9 +50,8 @@
   <link rel="canonical" href="https://zunopilot.com/" />
   <meta name="robots" content="index, follow, max-image-preview:large" />
 
-  <!-- Open Graph. `og:image` is the one thing here that is not finished: it wants a
-       purpose-made 1200×630 card dropped into `public/`. Until that file exists this points
-       at a 404 and previews render text-only — better than today, but not done. -->
+  <!-- Open Graph. `og:image` is done: `public/og-image.png` exists and serves 200. The note
+       here used to say it pointed at a 404, which was true when it was written. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="ZunoPilot" />
   <meta property="og:title" content="ZunoPilot – AI-Powered WhatsApp Business Automation Platform" />

@@ -17,6 +17,8 @@ import { useCountUp } from '@/hooks/useCountUp';
 import { useAuthStore } from '@/stores/auth.store';
 import { formatRupees, useCatalogue } from '@/lib/pricing';
 import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 /* -------------------------------------------------------------------------- */
 /*                          Shared animation variants                          */
@@ -169,6 +171,7 @@ const NAV = [
 ];
 
 export default function Landing() {
+  useDocumentHead(PAGE_HEADS.landing);
   const [open, setOpen] = useState(false);
 
   return (

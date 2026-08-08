@@ -65,7 +65,10 @@ server {
     # non-simple CORS request — so serving the API cross-origin would add a preflight round
     # trip to each one. A prefix location always beats `location /`, so try_files below cannot
     # swallow these.
-    location /api {
+    # `^~`, not a bare prefix: it makes this outrank the regex location below, which would
+    # otherwise capture an /api path ending in a matched extension and try to serve it from
+    # disk. A regex location beats an ordinary prefix; only `^~` beats a regex.
+    location ^~ /api {
         # A file flag rather than a config edit, so taking the API down for a maintenance
         # window does not mean touching (and possibly breaking) this file under pressure.
         # 503 and not 200: Meta retries a 5xx webhook for days, and a 200 discards the
@@ -91,7 +94,11 @@ server {
     # Uploaded media is served by the backend, not from disk here. Proxying it same-origin
     # also sidesteps helmet's default Cross-Origin-Resource-Policy, which would block an
     # <img> on this origin pointing at api.zunopilot.com.
-    location /media {
+    # `^~` for the same reason as /api, and it matters more here: these URLs end in the
+    # uploaded file's own name, so `/media/<uuid>/invoice.pdf` matches the regex below
+    # exactly. Without this, every template image Meta tries to fetch would 404 from disk
+    # instead of reaching the backend that has it.
+    location ^~ /media {
         proxy_pass http://127.0.0.1:4000;
         proxy_set_header Host              $host;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -104,9 +111,32 @@ server {
     location = /index.html {
         add_header Cache-Control "no-cache, must-revalidate" always;
     }
-    location /assets/ {
+    # `^~` so hashed bundles keep their immutable caching. Several of the extensions in the
+    # regex below (.svg, .png, .woff2, .map) live under here, and a regex match would drop
+    # these headers — turning a year of browser cache into a revalidation on every load.
+    location ^~ /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable" always;
+    }
+
+    # A missing file must 404, not fall through to the app shell.
+    #
+    # `try_files $uri /index.html` is right for a route like /orders/42 and wrong for
+    # /sitemap_index.xml: a path that looks like a file and is not one answered **HTTP 200
+    # with text/html**, so a crawler that asked for a sitemap got the home page. Google
+    # cannot parse HTML as XML and reports "Couldn't fetch" — a server fault that presents as
+    # a Search Console problem, and one that survives every check on the sitemap that does
+    # exist, because that file is fine.
+    #
+    # It is not only sitemaps. Every mistyped asset URL was a 200 duplicate of "/", which is
+    # the duplicate-content problem robots.txt is written to avoid for the authenticated
+    # routes, arriving through a different door.
+    #
+    # Extensions rather than a list of app routes: routes change with every feature and the
+    # list would drift, while "has a file extension" is a property of the request. An
+    # extensionless path stays a client-side route, which is what every real one looks like.
+    location ~* \.(xml|txt|json|map|ico|png|jpe?g|gif|svg|webp|avif|woff2?|ttf|eot|mp4|webm|pdf|csv|zip|gz)$ {
+        try_files $uri =404;
     }
 
     # Client-side routing: /orders/:id and friends are not files on disk.
