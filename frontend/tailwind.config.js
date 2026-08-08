@@ -172,6 +172,27 @@ export default {
       // guidelines open by calling that a hard rule, so `check-brand.mjs` holds an
       // allowlist for it.
       'wa-green': 'oklch(0.72 0.19 150 / <alpha-value>)',
+
+      /*
+       * The read tick, and it is **not** WhatsApp's own blue.
+       *
+       * WhatsApp uses #53BDEB, which works because its outbound bubble is pale green. Ours is a
+       * saturated violet (`accent-600`), and #53BDEB measures **2.51:1** on it — present if you
+       * already know to look for it, invisible otherwise, which is useless for the one pixel
+       * that tells an agent the customer read the message.
+       *
+       * This is the same hue family, lightened until it clears the bar: 3.60:1 on `accent-600`.
+       * That bar is 3:1, not 4.5:1, and the reason is recorded in `check-contrast.mjs` — a tick
+       * is a non-text graphic. 4.5:1 is unreachable for any blue here: it needs a relative
+       * luminance of 0.83, and blue contributes only 0.0722 of luminance, so solving for it
+       * produces a pale cyan that no longer reads as a state at all.
+       *
+       * Deliberately a token of its own rather than `wa-ui.tick`: that block reproduces
+       * WhatsApp's chrome inside template previews and says it must never be used as a brand
+       * colour. Reaching for it here would pass `check-brand.mjs`, whose rule is keyed on
+       * `wa-green`, while breaking the rule the config actually states.
+       */
+      'wa-tick-read': 'oklch(0.86 0.15 230 / <alpha-value>)',
       // Darkened from the guidelines' original 0.62, which measured **3.27:1** on
       // `surface-0` and failed the 4.5:1 that §2.4 demands — the document
       // contradicted itself. 0.52 clears AA on both surfaces and on its own tint.

@@ -35,6 +35,7 @@ const setup = (props: Partial<Parameters<typeof ThreadHeader>[0]> = {}) => {
     onHandBackToBot: vi.fn(),
     onToggleAutomation: vi.fn(),
     onRaiseTicket: vi.fn(),
+    onClearThread: vi.fn(),
   };
   render(<ThreadHeader
     conversation={conversation()}
@@ -43,6 +44,7 @@ const setup = (props: Partial<Parameters<typeof ThreadHeader>[0]> = {}) => {
     canAssignOthers={false}
     hasSupport
     canRaiseTicket
+    canDelete
     handingBack={false}
     {...handlers}
     {...props}
@@ -87,8 +89,9 @@ describe('claiming and releasing', () => {
   it('gives the reassignment menu only to someone who holds the permission', () => {
     const { unmount } = render(<ThreadHeader
       conversation={conversation()} team={TEAM} myId={MY_ID}
-      canAssignOthers={false} hasSupport canRaiseTicket handingBack={false}
-      onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()} onRaiseTicket={vi.fn()}
+      canAssignOthers={false} hasSupport canRaiseTicket canDelete handingBack={false}
+      onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()}
+      onRaiseTicket={vi.fn()} onClearThread={vi.fn()}
     />);
     expect(screen.queryByRole('button', { name: /Unassigned/ })).not.toBeInTheDocument();
     unmount();
@@ -180,7 +183,8 @@ describe('raising a ticket', () => {
     const { unmount } = render(<ThreadHeader
       conversation={conversation()} team={TEAM} myId={MY_ID} canAssignOthers={false}
       hasSupport={false} canRaiseTicket handingBack={false}
-      onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()} onRaiseTicket={vi.fn()}
+      canDelete onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()}
+      onRaiseTicket={vi.fn()} onClearThread={vi.fn()}
     />);
     expect(screen.queryByRole('button', { name: /Raise ticket/ })).not.toBeInTheDocument();
     unmount();
@@ -217,7 +221,8 @@ describe('the customer’s number', () => {
     const { unmount } = render(<ThreadHeader
       conversation={conversation()} team={TEAM} myId={MY_ID} canAssignOthers={false}
       hasSupport canRaiseTicket handingBack={false}
-      onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()} onRaiseTicket={vi.fn()}
+      canDelete onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()}
+      onRaiseTicket={vi.fn()} onClearThread={vi.fn()}
     />);
     expect(screen.getByText('Asha Rao')).toBeInTheDocument();
     expect(screen.getByText('15550001111')).toBeInTheDocument();
@@ -232,5 +237,54 @@ describe('the customer’s number', () => {
     setup();
     expect(document.querySelector('a[href^="tel:"]')).toBeNull();
     expect(document.querySelector('a[href*="wa.me"]')).toBeNull();
+  });
+});
+
+describe('clearing the thread', () => {
+  const open = async () => {
+    await userEvent.click(screen.getByRole('button', { name: /More actions/i }));
+  };
+
+  it('**is hidden from someone without the permission**', async () => {
+    const { unmount } = render(<ThreadHeader
+      conversation={conversation()} team={TEAM} myId={MY_ID} canAssignOthers={false}
+      hasSupport canRaiseTicket canDelete={false} handingBack={false}
+      onAssign={vi.fn()} onHandBackToBot={vi.fn()} onToggleAutomation={vi.fn()}
+      onRaiseTicket={vi.fn()} onClearThread={vi.fn()}
+    />);
+    expect(screen.queryByRole('button', { name: /More actions/i })).not.toBeInTheDocument();
+    unmount();
+  });
+
+  it('**asks first, and says the customer keeps their copy**', async () => {
+    /*
+     * The two things somebody about to clear a thread does not know: that WhatsApp has no unsend,
+     * and that this hides rather than destroys. Without both, "clear" reads as "wipe the record"
+     * — so an agent either avoids a safe action or takes one they would not have chosen.
+     */
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onClearThread = vi.fn();
+    const handlers = setup({ onClearThread });
+
+    await open();
+    await userEvent.click(screen.getByRole('menuitem', { name: /Clear this thread/i }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/customer's phone/i));
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/stay in your reports/i));
+    expect(onClearThread).toHaveBeenCalledOnce();
+    expect(handlers.onAssign).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('does nothing when the confirmation is declined', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const onClearThread = vi.fn();
+    setup({ onClearThread });
+
+    await open();
+    await userEvent.click(screen.getByRole('menuitem', { name: /Clear this thread/i }));
+
+    expect(onClearThread).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 });

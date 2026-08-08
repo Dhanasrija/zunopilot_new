@@ -1,4 +1,4 @@
-import { Bot, Check, ChevronDown, LifeBuoy } from 'lucide-react';
+import { Bot, Check, ChevronDown, LifeBuoy, MoreVertical, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -17,8 +17,8 @@ import { displayName, type Conversation, type TeamMember } from './types';
 // uses. Same two states, same mutation.
 
 export function ThreadHeader({
-  conversation, team, myId, canAssignOthers, hasSupport, canRaiseTicket,
-  onAssign, onHandBackToBot, handingBack, onToggleAutomation, onRaiseTicket,
+  conversation, team, myId, canAssignOthers, hasSupport, canRaiseTicket, canDelete,
+  onAssign, onHandBackToBot, handingBack, onToggleAutomation, onRaiseTicket, onClearThread,
 }: {
   conversation: Conversation;
   team: TeamMember[];
@@ -31,6 +31,9 @@ export function ThreadHeader({
   handingBack: boolean;
   onToggleAutomation: (paused: boolean) => void;
   onRaiseTicket: () => void;
+  /** `inbox:delete`. Absent for an agent unless the workspace grants it. */
+  canDelete: boolean;
+  onClearThread: () => void;
 }) {
   const { customer, assignedAgent, activeWorkflowInstance } = conversation;
   const name = displayName(customer);
@@ -151,6 +154,42 @@ export function ThreadHeader({
             onCheckedChange={(v) => onToggleAutomation(!v)}
           />
         </label>
+        {/*
+          Clearing the thread lives behind an overflow menu, not a visible button.
+          It is the only control here that takes something away, and a destructive action sitting
+          next to "Assign to me" is one mis-click from an emptied conversation.
+        */}
+        {canDelete && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" aria-label="More actions" className="px-2">
+                <MoreVertical aria-hidden className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => {
+                  /*
+                   * The confirmation says the two things somebody about to do this does not know:
+                   * that the customer keeps their copy — WhatsApp has no unsend — and that this
+                   * is only the Inbox view, not the record. Without both, "clear" reads as
+                   * "destroy", and an agent either avoids a safe action or takes a wrong one.
+                   */
+                  if (window.confirm(
+                    `Remove every message in this conversation with ${name} from the inbox?\n\n`
+                    + 'They stay on the customer\'s phone — WhatsApp has no way to unsend — and '
+                    + 'they stay in your reports. This only clears what your team sees here.',
+                  )) {
+                    onClearThread();
+                  }
+                }}
+              >
+                <Trash2 aria-hidden className="mr-2 h-3.5 w-3.5" />
+                Clear this thread
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </div>
   );

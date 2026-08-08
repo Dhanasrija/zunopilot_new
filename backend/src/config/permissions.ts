@@ -22,6 +22,16 @@ export const PERMISSIONS = [
   'inbox:assign_others',
   'inbox:toggle_automation',
   'inbox:add_note',
+  /*
+   * Removing a message, or a whole thread, from the Inbox.
+   *
+   * **Not on AGENT.** It is the only inbox capability that takes something away rather than
+   * adding to it, and the person who most needs to reply is not the person who should be able to
+   * clear a thread. Owners hold it implicitly (`resolvePermissions` gives an owner role every
+   * permission), and a workspace that wants its agents to have it can grant it in the role
+   * editor — which is the shape a destructive capability should have.
+   */
+  'inbox:delete',
 
   // Customers, orders, catalogue
   'customers:read',
@@ -184,6 +194,7 @@ const AGENT: Permission[] = [
 const MANAGER: Permission[] = [
   ...AGENT,
   'inbox:assign_others',
+  'inbox:delete',
   'customers:write',
   'orders:write',
   'catalogue:write',
@@ -306,6 +317,12 @@ export const PERMISSION_GROUPS: Array<{
         key: 'inbox:toggle_automation',
         label: 'Pause the assistant on a conversation',
         hint: 'Needed to take over from the bot and hand back.',
+      },
+      {
+        key: 'inbox:delete',
+        label: 'Remove messages from a thread',
+        hint: 'Hides them here only — the customer keeps their copy, and nothing is erased from '
+          + 'reports or the record of what was said.',
       },
     ],
   },

@@ -303,6 +303,22 @@ export const openapi = {
       },
     },
     '/inbox/conversations/{id}/messages': {
+      delete: {
+        tags: ['Inbox'], security: auth, summary: 'Clear a thread',
+        description:
+          'Needs `inbox:delete`. Soft-removes every message in the conversation. **Messages'
+          + ' only** — the conversation, the customer, their orders, the internal notes and any'
+          + ' linked ticket all survive, and the thread stays in the list reading as empty.'
+          + ' `lastMessageAt` is left alone, so the queue order does not move.',
+        parameters: [pathParam('id', 'Conversation id')],
+        responses: {
+          200: ok('Cleared', {
+            type: 'object',
+            properties: { removed: { type: 'integer', description: 'How many were removed.' } },
+          }),
+          ...errors,
+        },
+      },
       get: {
         tags: ['Inbox'], security: auth, summary: 'The messages in a conversation',
         parameters: [pathParam('id', 'Conversation id')],
@@ -348,6 +364,23 @@ export const openapi = {
           201: ok('The message that was sent', ref('Message')),
           422: { $ref: '#/components/responses/WhatsappRefused' },
           424: { $ref: '#/components/responses/WhatsappDisconnected' },
+          ...errors,
+        },
+      },
+    },
+    '/inbox/messages/{id}': {
+      delete: {
+        tags: ['Inbox'], security: auth, summary: 'Remove a message from the inbox',
+        description:
+          'Needs `inbox:delete`. **A soft delete, and not an unsend.** The row survives with'
+          + ' `deletedAt` set, so reports and the record of what was said are unaffected — and'
+          + ' WhatsApp has no unsend, so the customer keeps their copy regardless. Idempotent:'
+          + ' removing an already-removed message answers 404 and keeps the original remover.',
+        parameters: [pathParam('id', 'Message id')],
+        responses: {
+          200: ok('Removed', {
+            type: 'object', properties: { removed: { type: 'integer', example: 1 } },
+          }),
           ...errors,
         },
       },
@@ -1015,7 +1048,26 @@ export const openapi = {
           id: { type: 'string', format: 'uuid' },
           direction: { type: 'string', enum: ['INBOUND', 'OUTBOUND'] },
           type: { type: 'string', example: 'TEXT' },
-          status: { type: 'string', example: 'SENT' },
+          status: {
+            type: 'string',
+            enum: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'RECEIVED'],
+            example: 'READ',
+            description:
+              'Delivery state, from Meta. `RECEIVED` is the inbound default. **Take the state'
+              + ' from here, not from the timestamps below** — Meta delivers status webhooks out'
+              + ' of order and the server refuses to move a message backwards, so a set `readAt`'
+              + ' beside a null `deliveredAt` is normal rather than missing data.',
+          },
+          deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+          readAt: { type: 'string', format: 'date-time', nullable: true },
+          failedAt: { type: 'string', format: 'date-time', nullable: true },
+          statusError: {
+            type: 'string', nullable: true,
+            description:
+              "Why Meta refused it, in Meta's own words, with phone numbers scrubbed. Set only"
+              + ' alongside `FAILED`.',
+            example: '131030: Add recipient phone number to recipient list',
+          },
           body: { type: 'string', nullable: true },
           mediaUrl: { type: 'string', nullable: true },
           waMessageId: { type: 'string', nullable: true },

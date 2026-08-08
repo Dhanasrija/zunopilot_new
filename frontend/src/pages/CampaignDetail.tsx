@@ -93,10 +93,25 @@ export default function CampaignDetail() {
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3"><CardTitle className="text-body">Delivery</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {/*
+              **These are a funnel, and `counts` is not.**
+
+              `counts` comes from a `groupBy` on status, so the buckets are mutually exclusive: a
+              recipient that has been read is in READ and *no longer in SENT*. Printing
+              `counts.SENT` under a heading of "Sent" would therefore report 0 sent and 190 read
+              on a campaign that went out perfectly — the numbers would not even add up.
+
+              So each row below is cumulative over everything at least that far along, which is
+              also how WhatsApp Manager reports it. Sent + Failed + Opted out + Pending is the
+              total; Delivered and Read are subsets of Sent.
+            */}
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               {([
                 ['Recipients', progress.total],
-                ['Sent', progress.counts.SENT ?? 0],
+                ['Sent', (progress.counts.SENT ?? 0)
+                  + (progress.counts.DELIVERED ?? 0) + (progress.counts.READ ?? 0)],
+                ['Delivered', (progress.counts.DELIVERED ?? 0) + (progress.counts.READ ?? 0)],
+                ['Read', progress.counts.READ ?? 0],
                 // Named plainly rather than folded into "failed": a refusal
                 // honoured is not an error, and nobody should try to retry it.
                 ['Opted out mid-send', progress.counts.SKIPPED_OPTED_OUT ?? 0],

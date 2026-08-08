@@ -284,6 +284,7 @@ model User {
   assignedConversations Conversation[] @relation("AssignedAgent")
   internalNotes         InternalNote[]
   sentMessages          Message[]      @relation("SentMessages")
+  deletedMessages       Message[]      @relation("DeletedMessages")
 
   impersonationResponses ImpersonationGrant[] @relation("ImpersonationResponder")
   impersonationSubjectOf ImpersonationGrant[] @relation("ImpersonationSubject")
@@ -559,6 +560,29 @@ model Message {
   payload        Json?
   mediaUrl       String?
 
+  /// When Meta said each thing happened — its clock, not ours.
+  ///
+  /// Separate columns rather than deriving times from `status`, because **Meta never replays a
+  /// status webhook**: a delivery time not captured when it arrives is gone for good, so these
+  /// cannot be added later and backfilled. `CampaignRecipient` already models it this way.
+  ///
+  /// **A null `deliveredAt` beside a set `readAt` is normal, not missing data.** Meta delivers
+  /// status webhooks out of order, and the monotonic guard in `webhook-intake.ts` rejects a
+  /// `delivered` that arrives after a `read` — correctly, since the message is already further
+  /// along. Anything reading these must take the state from `status` and use the timestamps
+  /// only for a label. Coalescing one from the other invents a fact.
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
+
+  /// Why Meta refused this message, in its own words, phone numbers scrubbed.
+  ///
+  /// Set only alongside `FAILED`. A flat column rather than a corner of `payload`: `payload`
+  /// carries Meta's original interactive shape that the ordering FSM reads back, and Prisma
+  /// cannot merge JSON in an `updateMany` — writing it would mean read-then-write, which is
+  /// exactly the non-atomic pattern the status guard exists to avoid.
+  statusError String?
+
   /// Who sent this, for OUTBOUND messages.
   ///
   /// **Null on an OUTBOUND message means the bot sent it** — the workflow
@@ -571,6 +595,24 @@ model Message {
   /// of what they said to customers.
   sentByUserId String?
   sentByUser   User?   @relation("SentMessages", fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  /// Removed from the Inbox by somebody, and **not removed from the customer's phone.**
+  ///
+  /// The WhatsApp Cloud API has no unsend, so this is only ever about our own record. A soft
+  /// delete rather than a `DELETE`, because a message is the evidence in a payment dispute and
+  /// the context of a support ticket — an agent tidying a thread must not be able to destroy
+  /// what a customer was promised.
+  ///
+  /// **Which reads honour it is a rule, not a convention.** Anything a person browses filters
+  /// these out — the Inbox thread, the conversation preview, the customer's history, and the
+  /// history handed to the assistant, since an assistant quoting a removed message back to the
+  /// customer would undo the removal. Anything that reasons about what *actually happened* does
+  /// not: the 24-hour window (`windowStateFor`), the analytics counters, the super admin's
+  /// activity view, and webhook deduplication. Deleting a row from our inbox cannot be allowed
+  /// to change what WhatsApp permits or what the operator sees.
+  deletedAt      DateTime?
+  deletedByUserId String?
+  deletedByUser   User?    @relation("DeletedMessages", fields: [deletedByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
@@ -2886,6 +2928,10 @@ model CampaignRecipient {
 
   @@unique([campaignId, customerId])
   @@index([campaignId, status])
+  // Delivery-status webhooks look a recipient up by the wamid Meta gave us at send time.
+  // Without this it is a full scan of the table per status event, and a broadcast produces
+  // one event per recipient per state.
+  @@index([waMessageId])
 }
 
 // ---------------- Module 23: contact enquiries ----------------

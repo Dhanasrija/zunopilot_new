@@ -2,6 +2,7 @@ import { queryBool, queryEnum, queryInt, queryOffset, queryString } from '../uti
 import { holds, tenantIdOf } from '../middleware/auth.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
+import { VISIBLE_MESSAGE } from './inbox.controller.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { moduleEnabled } from '../modules/modules/module.service.js';
@@ -299,7 +300,10 @@ export const getCustomerMessages = asyncHandler(async (req, res) => {
   const customer = await prisma.customer.findFirst({ where: { id, tenantId: tenantIdOf(req) } });
   if (!customer) throw ApiError.notFound();
   const messages = await prisma.message.findMany({
-    where: { customerId: id },
+    // Removed messages stay removed here too. This is the same history under a different
+    // heading, and a message hidden in the Inbox but visible on the customer's profile is a
+    // soft delete that only half happened.
+    where: { customerId: id, ...VISIBLE_MESSAGE },
     orderBy: { createdAt: 'desc' },
     take: 200,
   });

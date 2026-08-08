@@ -194,7 +194,9 @@ export const respondGenerally = async ({
       : [],
     prisma.menuItem.count({ where: { tenantId: tenant.id, inStock: true } }),
     prisma.message.findMany({
-      where: { conversationId: conversation.id },
+      // Removed messages are withheld here too — see the note in `ai-router.ts`. An assistant
+      // repeating a message an agent had just taken out of the thread is the failure this avoids.
+      where: { conversationId: conversation.id, deletedAt: null },
       orderBy: { createdAt: 'desc' },
       take: HISTORY_LIMIT + 1,
       select: { direction: true, body: true },

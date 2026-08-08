@@ -48,7 +48,7 @@ interface GraphErrorBody {
  * Bystanders like an HTTP status or a message-per-second limit are two or three digits and
  * survive, which is what keeps the remaining text worth reading.
  */
-const withoutNumbers = (text: string): string =>
+export const withoutNumbers = (text: string): string =>
   text.replace(/\+?[\d][\d\s().-]{5,}\d/g, (run) =>
     run.replace(/\D/g, '').length >= 7 ? '[number]' : run);
 

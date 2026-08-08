@@ -42,6 +42,24 @@ export interface Message {
    */
   mediaUrl?: string | null;
   payload?: unknown;
+
+  /**
+   * What Meta last told us about getting this to the customer.
+   *
+   * Outbound only in practice — every outbound row is born `SENT` and `RECEIVED` is the inbound
+   * default. Optional because older rows and the campaign test-send path predate it.
+   *
+   * **Take the tick's state from here, and use the timestamps below only for the label.** Meta
+   * delivers status webhooks out of order, and the monotonic guard on the server rejects a
+   * `delivered` that arrives after a `read` — so a set `readAt` beside a null `deliveredAt` is
+   * the guard working, not missing data. Coalescing one from the other invents a fact.
+   */
+  status?: 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'RECEIVED';
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  /** Why Meta refused it, in its own words, phone numbers already scrubbed server-side. */
+  statusError?: string | null;
+
   createdAt: string;
   /**
    * Who sent it. Null on an OUTBOUND message means the bot — the workflow engine or the
