@@ -1,5 +1,6 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { seedMemberships } from '../../test-support/members.js';
 import request from 'supertest';
 
 /*
@@ -364,6 +365,8 @@ describe('the test send', () => {
         roleId: agentRole.id,
       },
     });
+    // Created inside the test body, after every hook has run.
+    await seedMemberships();
 
     await request(app).post('/api/campaigns/test')
       .set(auth(signToken({ userId: composer.id })))
@@ -476,6 +479,8 @@ describe('fixing a draft', () => {
         roleId: readOnly.id,
       },
     });
+    // Created inside the test body, after every hook has run.
+    await seedMemberships();
     const campaignId = await makeCampaign(await makeTemplate(), { 1: 'there' });
 
     await request(app).patch(`/api/campaigns/${campaignId}`)
@@ -484,3 +489,16 @@ describe('fixing a draft', () => {
       .set(auth(signToken({ userId: viewer.id }))).expect(403);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

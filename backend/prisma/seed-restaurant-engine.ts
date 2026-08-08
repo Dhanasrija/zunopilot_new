@@ -2,6 +2,7 @@ import { PrismaClient, Prisma, UserRole } from '@prisma/client';
 import { templateById } from '../src/modules/conversation-engine/domain/templates.js';
 import { validateWorkflowDefinition } from '../src/modules/conversation-engine/validation/definition-validator.js';
 import { assertSeedable } from './guard.js';
+import { syncMembershipsForTenant } from '../src/services/membership.service.js';
 
 // Zuno Kitchen — the ordering demo for the conversation engine.
 //
@@ -256,6 +257,16 @@ const main = async () => {
       priority: 90,
     },
   });
+
+  /*
+   * Memberships for the people this seed just created.
+   *
+   * One call rather than a sync threaded through each nested `users: { create: … }`, because the
+   * tenant is built in a single statement and this stays right if the seed later adds a second
+   * person. `Membership` is written alongside `User` everywhere else too — see
+   * `services/membership.service.ts`.
+   */
+  await syncMembershipsForTenant(tenant.id);
 
   console.log(`
 Zuno Kitchen seeded.

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../test-support/members.js';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import { buildApp } from '../app.js';
@@ -176,6 +177,23 @@ describe('changing the team', () => {
     expect(created.passwordHash).toBeNull();
     // Derived from the calling code, the same way it is at signup.
     expect(created.country).toBe('IN');
+
+    /*
+     * **And a membership, written alongside the user.**
+     *
+     * Asserted here rather than left to the whole-database invariant in
+     * `membership-backfill.integration.test.ts`, which cannot catch this: that file scans
+     * persistent rows, and this suite deletes its tenant in teardown — so an un-synced colleague
+     * is gone before the scan runs. Removing the sync from `inviteMember` left that invariant
+     * green. Every write path needs its own assertion.
+     */
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: created.id, tenantId: TENANT } },
+    });
+    expect(membership.roleId).toBe(roleIds[TENANT]!.AGENT);
+    expect(membership.isActive).toBe(true);
+    // The one value `User` has nowhere to record.
+    expect(membership.invitedById).toBe(owner.id);
   });
 
   it('treats email as optional, and does not claim an unverified address is verified', async () => {
@@ -229,11 +247,18 @@ describe('changing the team', () => {
     expect(response.status).toBe(400);
   });
 
-  it('changes a role', async () => {
+  it('changes a role, on the user and on their membership', async () => {
     const response = await request(app).patch(`/api/team/${agent.id}`).set(as(owner))
       .send({ roleId: roleIds[TENANT]!.MANAGER });
     expect(response.status).toBe(200);
     expect(response.body.data.assignedRole.name).toBe('Manager');
+
+    // The membership is what permissions will be read from, so a role change that reached only
+    // the user would take effect nowhere once the switch flips.
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: agent.id, tenantId: TENANT } },
+    });
+    expect(membership.roleId).toBe(roleIds[TENANT]!.MANAGER);
   });
 
   it('cannot touch a member of another workspace', async () => {
@@ -302,6 +327,20 @@ describe('the guard rails', () => {
     // And their queue goes back to the shared pool.
     const released = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
     expect(released.assignedAgentId).toBeNull();
+
+    /*
+     * **And the membership goes with them, with a time on it.**
+     *
+     * The membership is what will decide whether they can reach this workspace, so a deactivation
+     * that reached only `User.isActive` would stop working the moment the switch flips — and once
+     * a person can belong to several workspaces, writing `User.isActive` is the *wrong* field
+     * anyway: it would sign them out of all of them.
+     */
+    const membership = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: agent.id, tenantId: TENANT } },
+    });
+    expect(membership.isActive).toBe(false);
+    expect(membership.revokedAt).not.toBeNull();
   });
 
   it('frees their conversations whichever way they are deactivated', async () => {
@@ -342,3 +381,16 @@ describe('the guard rails', () => {
     expect(response.status).toBe(401);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

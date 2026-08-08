@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../test-support/members.js';
 import request from 'supertest';
 import { buildApp } from '../app.js';
 import { prisma } from '../config/prisma.js';
@@ -293,27 +294,23 @@ describe('no session, no tenant, no rows', () => {
 describe('a token that names another workspace', () => {
   it('**does not read that workspace’s rows**', async () => {
     /*
-     * `signToken` already accepts extra claims and nine test sites already pass `tenantId` —
-     * where it is currently **ignored**, because `requireAuth` reads the tenant off the user row.
+     * **This assertion has tightened, and the change is the point.**
      *
-     * So today this passes because the claim does nothing. **After the membership work it will
-     * pass for a different reason**: the claim will be used to *select* a membership, no
-     * membership will match, and the request will be refused outright. The assertion below is
-     * written to hold under both, and the 401 is asserted separately once that lands — a test
-     * whose meaning changes should say so rather than quietly start proving something else.
+     * It was written before memberships, when the claim was ignored — `requireAuth` read the tenant
+     * off the user row — so the honest assertion was the weak one: *never Bravo's rows*, whether
+     * the request was refused or answered with Alpha's. It passed for a reason that had nothing to
+     * do with the claim.
+     *
+     * Now the claim *selects* the membership, no membership matches, and the request is refused
+     * outright. So the assertion is a flat 401. `middleware/membership-auth.integration.test.ts`
+     * covers the rest of that behaviour; this stays here because it belongs with the isolation
+     * matrix it was written alongside.
      */
-    const forged = signToken({ userId: 'unused', tenantId: BRAVO });
-    void forged; // the shape, for the reader — the real case is a *valid* user below.
-
     const alphaOwner = await prisma.user.findFirstOrThrow({ where: { tenantId: ALPHA } });
     const claimingBravo = signToken({ userId: alphaOwner.id, tenantId: BRAVO });
 
-    const res = await get('/api/customers', claimingBravo);
-    const body = JSON.stringify(res.body);
-
-    // Either refused, or answered with Alpha's own rows. Never Bravo's.
-    expect(body).not.toContain('BRAVOONLY');
-    if (res.status === 200) expect(body).toContain('ALPHAONLY');
+    const res = await get('/api/customers', claimingBravo).expect(401);
+    expect(JSON.stringify(res.body)).not.toContain('BRAVOONLY');
   });
 });
 
@@ -420,3 +417,16 @@ describe('notifications reach one workspace', () => {
     expect(theirs.body.data.count).toBe(1);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

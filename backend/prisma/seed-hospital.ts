@@ -3,6 +3,7 @@ import type { WorkflowDefinition } from '../src/modules/conversation-engine/doma
 import type { CapabilityContract } from '../src/modules/conversation-engine/domain/capability.js';
 import { validateWorkflowDefinition } from '../src/modules/conversation-engine/validation/definition-validator.js';
 import { assertSeedable } from './guard.js';
+import { syncMembershipsForTenant } from '../src/services/membership.service.js';
 
 // Acme Hospital — the conversation engine demo.
 //
@@ -678,6 +679,16 @@ const main = async () => {
       expectedWorkflowId: test.expect ? created[test.expect]! : null,
     })),
   });
+
+  /*
+   * Memberships for the people this seed just created.
+   *
+   * One call rather than a sync threaded through each nested `users: { create: … }`, because the
+   * tenant is built in a single statement and this stays right if the seed later adds a second
+   * person. `Membership` is written alongside `User` everywhere else too — see
+   * `services/membership.service.ts`.
+   */
+  await syncMembershipsForTenant(tenant.id);
 
   console.log(`
 Acme Hospital seeded.

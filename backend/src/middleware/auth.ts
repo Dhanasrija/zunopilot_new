@@ -29,18 +29,125 @@ declare global {
   }
 }
 
-export const requireAuth = async (req: Request, _res: Response, next: NextFunction) => {
+/** The bearer token on this request, or null. */
+const bearerOf = (req: Request): string | null => {
+  const header = req.headers.authorization || '';
+  return header.startsWith('Bearer ') ? header.slice(7) : null;
+};
+
+/**
+ * Which workspace this session is acting in, or null.
+ *
+ * ── Selected by the claim, never validated against it ────────────────────────
+ *
+ * The old code read the tenant off the *user row* and used the token's claim, where one existed,
+ * only as a cross-check. Now the claim chooses, and a claim naming a workspace this person is not
+ * an **active** member of resolves to nothing and the request is refused. Two consequences worth
+ * being explicit about:
+ *
+ *   • Revoking a membership takes effect on the **next request**, not at token expiry. There is no
+ *     window in which an already-issued token keeps working against a workspace somebody has been
+ *     removed from.
+ *   • A token cannot be edited into another workspace. The claim is signed, and even if it were
+ *     not, an unmatched claim resolves to nothing rather than to a default.
+ */
+const membershipFor = async (userId: string, claimed: string | null) => {
+  const active = await prisma.membership.findMany({
+    where: { userId, isActive: true },
+    include: { tenant: true, assignedRole: true },
+    // Most recently used first, then oldest membership. Only matters for the legacy branch and for
+    // deciding where a fresh login lands.
+    orderBy: [{ lastSelectedAt: 'desc' }, { joinedAt: 'asc' }],
+  });
+
+  if (claimed) return active.find((membership) => membership.tenantId === claimed) ?? null;
+
+  /*
+   * ── Tokens minted before the claim existed ─────────────────────────────────
+   *
+   * Everyone who is signed in when this deploys. Refusing them all would sign out the entire
+   * customer base for no reason; guessing would put somebody in a workspace they did not choose.
+   *
+   * So: exactly one membership resolves, and anything ambiguous **refuses** with a code the client
+   * can act on. A silent pick here would be a cross-workspace read with a valid signature and no
+   * audit trail, and it would be invisible for as long as this branch lives.
+   *
+   * `JWT_EXPIRES_IN` is a day, so the whole population turns over in one. Cardinality was 1:1 when
+   * memberships shipped, so in practice every one of these tokens has exactly one membership.
+   *
+   * **DELETE THIS BRANCH — target 2026-08-16**, a week after C5 reaches production. While it lives,
+   * a token with no claim is a token whose workspace we chose rather than the client did.
+   */
+  return active.length === 1 ? active[0]! : null;
+};
+
+/**
+ * Identity only: who is this, with no workspace resolved.
+ *
+ * **Exists so somebody can always reach the workspace switcher.** `requireAuth` refuses a session
+ * whose workspace is suspended, or whose legacy token is ambiguous — and if the endpoints that list
+ * and change workspaces sat behind it, the only way out of either state would be a support ticket.
+ * The two switcher routes mount on this instead.
+ *
+ * It deliberately does **not** set `req.tenantId`, so a tenant-scoped query in a handler behind
+ * this middleware throws in `tenantIdOf` rather than silently returning every workspace's rows.
+ */
+export const requireSession = async (req: Request, _res: Response, next: NextFunction) => {
   try {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = bearerOf(req);
     if (!token) throw ApiError.unauthorized('Missing access token');
 
     const decoded = verifyToken(token);
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: { tenant: true, assignedRole: true },
-    });
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    // `User.isActive` is the operator's kill switch on the *login*, distinct from a membership
+    // being revoked. Both refuse; this one refuses everywhere at once.
     if (!user || !user.isActive) throw ApiError.unauthorized('User not active');
+
+    req.user = user;
+    /*
+     * The workspace this token *names*, carried unvalidated.
+     *
+     * `requireSession` deliberately resolves no membership, so it cannot say which workspace the
+     * session is really in — that is `requireAuth`'s job. But the switcher still needs to mark a row
+     * as current, and the claim is the only thing that knows. Cosmetic by construction: a claim
+     * naming a workspace this person is not in matches no row and highlights nothing.
+     *
+     * Never use it to scope a query. `tenantIdOf` remains the only source for that, and it is
+     * deliberately unset here.
+     */
+    req.claimedTenantId = typeof decoded.tenantId === 'string' ? decoded.tenantId : null;
+    req.tokenExp = typeof decoded.exp === 'number' ? decoded.exp : null;
+    next();
+  } catch (err) {
+    next(asAuthError(err));
+  }
+};
+
+export const requireAuth = async (req: Request, _res: Response, next: NextFunction) => {
+  try {
+    const token = bearerOf(req);
+    if (!token) throw ApiError.unauthorized('Missing access token');
+
+    const decoded = verifyToken(token);
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    if (!user || !user.isActive) throw ApiError.unauthorized('User not active');
+
+    const claimed = typeof decoded.tenantId === 'string' ? decoded.tenantId : null;
+    const membership = await membershipFor(user.id, claimed);
+
+    if (!membership) {
+      /*
+       * Two different failures, told apart because the client's next move differs.
+       *
+       * A token that named a workspace has been revoked from it — sign in again, or switch. A token
+       * with no claim at all belongs to somebody with several workspaces and no way to say which:
+       * the answer is not "log in again", it is "ask which workspace", and `GET /auth/workspaces`
+       * answers that. `ApiError.details` already reaches the client through the error handler.
+       */
+      throw claimed
+        ? ApiError.unauthorized('This session is not a member of that workspace')
+        : new ApiError(401, 'Choose a workspace to continue', { code: 'WORKSPACE_REQUIRED' });
+    }
 
     // A suspended workspace, set by an operator in the super admin console.
     //
@@ -48,7 +155,7 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
     // endpoints honour is not a suspension. Deliberately 403 with an explicit
     // message rather than a generic 401: the user's credentials are fine, and
     // "invalid token" would send them resetting a password that works.
-    if (!user.tenant.isActive) {
+    if (!membership.tenant.isActive) {
       throw ApiError.forbidden(
         'This workspace has been suspended. Please contact support.',
       );
@@ -66,9 +173,17 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
     if ((decoded as { imp?: unknown }).imp === true) {
       const grant = await resolveImpersonation(decoded as Record<string, unknown>);
 
-      // The grant is bound to a workspace. If the user the token names has since
-      // moved or the grant points elsewhere, refuse rather than reconcile.
-      if (grant.tenantId !== user.tenantId) {
+      /*
+       * The grant is bound to a workspace, and the person it names must still be in it.
+       *
+       * This check used to be nearly tautological: it compared the grant against `user.tenantId`,
+       * and a user had exactly one. What survives is substantive — the membership above was
+       * *selected by* the token's claim, and `resolveImpersonation` has already asserted that the
+       * claim matches the grant, so reaching here means an **active membership exists in the
+       * granted workspace**. That is now what makes support access stop working the moment the
+       * viewed person is removed, rather than at token expiry.
+       */
+      if (membership.tenantId !== grant.tenantId) {
         throw ApiError.unauthorized('Support access token does not match this workspace');
       }
 
@@ -92,17 +207,30 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
     }
 
     req.user = user;
-    req.tenantId = user.tenantId;
-    // Resolved once per request rather than per check: `can()` is called several
-    // times on some routes, and the answer cannot change mid-request.
-    req.permissions = resolvePermissions(user.assignedRole, user.role);
+    req.membership = membership;
+    req.tenantId = membership.tenantId;
+    req.tokenExp = typeof decoded.exp === 'number' ? decoded.exp : null;
+    /*
+     * Resolved once per request rather than per check: `can()` is called several times on some
+     * routes, and the answer cannot change mid-request.
+     *
+     * From the **membership's** role and legacy floor, not the user's. That is the whole point of
+     * the split: the same person can be an owner here and hold two inbox permissions there.
+     * `resolvePermissions` itself needed no change — its parameter was already structural.
+     */
+    req.permissions = resolvePermissions(membership.assignedRole, membership.legacyRole);
     next();
   } catch (err) {
-    const error = err as Error;
-    next(error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError'
-      ? ApiError.unauthorized('Invalid or expired token')
-      : error);
+    next(asAuthError(err));
   }
+};
+
+/** A malformed or expired token is a 401, not a 500. */
+const asAuthError = (err: unknown): Error => {
+  const error = err as Error;
+  return error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError'
+    ? ApiError.unauthorized('Invalid or expired token')
+    : error;
 };
 
 /**
@@ -188,6 +316,18 @@ export const requireModule = (module: ModuleKey): RequestHandler => async (req, 
 export const tenantIdOf = (req: Request): string => {
   if (!req.tenantId) throw ApiError.unauthorized('Request is not authenticated');
   return req.tenantId;
+};
+
+/**
+ * The membership this request is acting under, for routes behind `requireAuth`.
+ *
+ * Throws rather than returning undefined, for the same reason `tenantIdOf` does: the alternative is
+ * a caller quietly building a session payload — or a query — with no workspace in it. Absent under
+ * `requireSession`, which resolves identity and deliberately no workspace.
+ */
+export const membershipOf = (req: Request): NonNullable<Request['membership']> => {
+  if (!req.membership) throw ApiError.unauthorized('Request is not scoped to a workspace');
+  return req.membership;
 };
 
 /** The authenticated user, for routes behind `requireAuth`. Throws otherwise. */

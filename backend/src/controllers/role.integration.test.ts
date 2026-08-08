@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../test-support/members.js';
 import request from 'supertest';
 import { buildApp } from '../app.js';
 import { prisma } from '../config/prisma.js';
@@ -31,6 +32,9 @@ const makeUser = async (tenantId: string, email: string, roleId: string) => {
   const user = await prisma.user.create({
     data: { tenantId, email, fullName: email.split('@')[0]!, roleId, role: 'AGENT' },
   });
+  // In the helper, because these are created inside test bodies — after any hook has run. A
+  // membership is part of what it means to make a user, so it belongs where the user is made.
+  await seedMemberships();
   return { id: user.id, token: signToken({ userId: user.id }) };
 };
 
@@ -288,3 +292,16 @@ describe('assigning roles to people', () => {
     expect(response.status).toBe(400);
   });
 });
+
+/*
+ * Memberships for the users this fixture inserts directly.
+ *
+ * In the product every path that creates a user writes a `Membership` too. Fixtures bypass those
+ * paths, so without this they produce a login belonging to no workspace — which works while
+ * `requireAuth` reads `User.tenantId` and 401s the moment it reads memberships.
+ *
+ * Registered last in the file so it runs after every fixture hook above, whichever of them created
+ * the users. Idempotent. See `test-support/members.ts` for why this is an explicit call rather than
+ * a global hook.
+ */
+beforeEach(async () => { await seedMemberships(); });

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { seedMemberships } from '../test-support/members.js';
 import request from 'supertest';
 import { buildApp } from '../app.js';
 import { prisma } from '../config/prisma.js';
@@ -71,6 +72,10 @@ const makeWorkspace = async (tenantId: string, phone: string) => {
       body: 'Do you deliver to Banjara Hills?',
     },
   });
+
+  // Inside the fixture, not in a file-level hook: this workspace is built by a `beforeEach`
+  // inside a `describe`, and an outer hook always runs before an inner one.
+  await seedMemberships();
 
   return {
     customer, thread, otherThread, ownerUser, agentUser,
@@ -272,3 +277,4 @@ describe('clearing a thread also clears its counters', () => {
     expect(await unreadCountOf(ctx.otherThread.id)).toBe(5);
   });
 });
+
