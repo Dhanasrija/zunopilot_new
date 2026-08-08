@@ -45,6 +45,7 @@ import Privacy from '@/pages/Privacy';
 import Terms from '@/pages/Terms';
 import Contact from '@/pages/Contact';
 import ScrollToTop from '@/components/layout/ScrollToTop';
+import PageViews from '@/components/layout/PageViews';
 
 // Split out: React Flow is a large dependency and only the canvas needs it, so
 // everyone who never opens a workflow avoids paying for it.
@@ -60,6 +61,7 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <ScrollToTop />
+        <PageViews />
         <Routes>
           {/* Public Website Routes */}
           <Route path="/" element={<Landing />} />
