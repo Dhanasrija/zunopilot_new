@@ -3,7 +3,7 @@ import type { Tenant } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { withContext } from '../../../config/logger.js';
 import { env } from '../../../config/env.js';
-import { llmProvider } from '../providers/llm.js';
+import { authoringProvider } from '../providers/llm.js';
 import { validateWorkflowDefinition, type ValidationIssue } from '../validation/definition-validator.js';
 import { IMPLEMENTED_NODE_TYPES } from '../engine/executors/index.js';
 import { DATABASE_RESOURCES, DATABASE_WRITES } from '../domain/node-types.js';
@@ -133,7 +133,14 @@ export const generateWorkflow = async ({
   const logger = withContext({ tenantId: tenant.id });
   const context = await generationContext(tenant.id);
 
-  const provider = llmProvider();
+  /*
+   * **Always OpenAI, whatever this workspace is pinned to** — see `authoringProvider`.
+   *
+   * Generating a whole node graph against a strict schema is not the job a per-workspace vendor is
+   * chosen for, and it is the one place where losing `json_schema` strict mode costs a visible retry
+   * rather than a duller answer.
+   */
+  const provider = authoringProvider();
   const startedAt = Date.now();
 
   // Byte-identical across every attempt, so the cache keeps hitting on the larger

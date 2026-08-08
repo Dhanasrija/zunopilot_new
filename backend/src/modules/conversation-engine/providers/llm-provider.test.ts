@@ -30,7 +30,22 @@ const providerWith = async (envOverrides: Record<string, string | undefined>) =>
     else process.env[key] = value;
   }
   const { OpenAIProvider } = await import('./llm.js');
-  return new OpenAIProvider('test-key');
+  const { env } = await import('../../../config/env.js');
+  /*
+   * The platform block, with a key forced on.
+   *
+   * `OpenAIProvider` now holds a whole `VendorSettings` rather than reading `env` per call — that is
+   * what lets two vendors coexist in one process. These tests are still about the *platform* settings,
+   * so they pass exactly those, freshly re-imported against the overridden environment above.
+   */
+  return new OpenAIProvider({
+    apiKey: 'test-key',
+    model: env.llm.model,
+    baseUrl: env.llm.baseUrl,
+    structuredMode: env.llm.structuredMode,
+    timeoutMs: env.llm.timeoutMs,
+    extraBody: env.llm.extraBody,
+  });
 };
 
 const A_REPLY = (content: string) => ({

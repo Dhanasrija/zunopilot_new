@@ -4,7 +4,8 @@ import { withContext } from '../../../config/logger.js';
 import { channelForTenant } from '../../../services/whatsapp-account.service.js';
 import { whatsappProviderFor } from '../providers/whatsapp.js';
 import { mirrorOutbound } from '../providers/mirror.js';
-import { MOCK_INTEGRATIONS, MockLlmProvider, MockHttpCaller } from '../providers/mock.js';
+import { MOCK_INTEGRATIONS, MockHttpCaller, MockLlmProvider } from '../providers/mock.js';
+import { providerForVendor } from '../providers/llm.js';
 import { findActiveInstance, startInstance, ActiveInstanceExistsError } from '../engine/instance-manager.js';
 import { resumeWithUserInput } from '../engine/resume.js';
 import { walk, type WalkDeps } from '../engine/walker.js';
@@ -89,7 +90,24 @@ const servicesFor = (args: RouteArgs, dryRun: boolean): NodeServices => {
       conversationId: args.conversation.id,
       customerId: args.contact.id,
     }),
-    llm: new MockLlmProvider(),
+    /*
+     * A real model, at last — and the workspace's own.
+     *
+     * This was `new MockLlmProvider()`, at runtime, in the live worker. So an `AI_AGENT` node in a
+     * published workflow answered a paying customer with "This is a mock assistant reply." The
+     * gate above it was checked, the module was consulted, and then a placeholder was sent.
+     *
+     * Nothing in this database uses that node type yet, which is the only reason this is a
+     * one-line fix rather than an incident. It is fixed here rather than filed because this commit
+     * is the one that claims the operator's vendor choice reaches every model call — and a call
+     * site wired to a mock would make that claim false.
+     */
+    /*
+     * A dry run keeps the mock. The simulator is somebody testing a workflow from the builder, and a
+     * click there must not spend the workspace's AI allowance or reach a vendor at all — the same
+     * reason `whatsapp` above is not mirrored on a dry run.
+     */
+    llm: dryRun ? new MockLlmProvider() : providerForVendor(args.tenant.llmVendor),
     http: new MockHttpCaller(),
     integrations: MOCK_INTEGRATIONS,
   };

@@ -42,6 +42,13 @@ superAdminRoutes.patch('/tenants/:tenantId/active', sa.setTenantActive);
 superAdminRoutes.post('/tenants/:tenantId/plan', sa.assignTenantPlan);
 superAdminRoutes.get('/tenants/:tenantId/modules', sa.getTenantModules);
 superAdminRoutes.patch('/tenants/:tenantId/modules', sa.setTenantModule);
+/*
+ * Which model answers this workspace's customers.
+ *
+ * Beside the module toggles because it is the same kind of decision — ours about cost and latency
+ * rather than the workspace's about behaviour — and audited the same way.
+ */
+superAdminRoutes.patch('/tenants/:tenantId/llm-vendor', sa.setTenantLlmVendor);
 
 superAdminRoutes.patch('/users/:userId', sa.updateUser);
 

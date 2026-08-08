@@ -4,7 +4,7 @@ import { prisma } from '../../config/prisma.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../../middleware/auth.js';
-import { llmProvider } from '../conversation-engine/providers/llm.js';
+import { providerForVendor } from '../conversation-engine/providers/llm.js';
 import { buildSystemPrompt } from '../conversation-engine/routing/general-response.js';
 import { aiAgentGate } from '../modules/module.service.js';
 import { moduleEnabled } from '../modules/module.service.js';
@@ -204,7 +204,9 @@ export const tryKnowledge = asyncHandler(async (req: Request, res: Response) => 
   ]);
 
   const started = Date.now();
-  const completion = await llmProvider().complete({
+  // The workspace's own vendor, so a preview is answered by the model that will answer its
+  // customers. Previewing on a different model is a preview of something else.
+  const completion = await providerForVendor(tenant.llmVendor).complete({
     systemPrompt: buildSystemPrompt({
       tenant,
       // Null rather than a stub: a workspace with no channel has no assistant, and `null` is what

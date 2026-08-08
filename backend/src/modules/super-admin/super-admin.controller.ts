@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import type { LlmVendor } from '@prisma/client';
 import type { BillingInterval as PrismaInterval, PlanCode as PrismaPlan } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
@@ -18,6 +19,7 @@ import {
 } from './impersonation.js';
 import { MODULE_KEYS, moduleSettingsFor, setModuleEnabled } from '../modules/module.service.js';
 import { COPY_LIMITS as ASSISTANT_COPY } from '../conversation-engine/routing/assistant-copy.js';
+import { LLM_VENDORS, env } from '../../config/env.js';
 import {
   enquiryById, listEnquiries, newEnquiryCount, updateEnquiry,
 } from '../enquiries/enquiry.service.js';
@@ -258,6 +260,8 @@ export const getTenant = asyncHandler(async (req: Request, res: Response) => {
       id: true, businessName: true, category: true, contactNumber: true, address: true,
       website: true, isActive: true, createdAt: true, updatedAt: true,
       gstin: true, gstStateCode: true,
+      // Which model answers this workspace's customers. Null is the platform default.
+      llmVendor: true,
       users: {
         select: {
           id: true, email: true, fullName: true, role: true, isActive: true,
@@ -323,6 +327,15 @@ export const getTenant = asyncHandler(async (req: Request, res: Response) => {
       invoices,
       payments,
       connectors,
+      /*
+       * What this workspace's model choice actually resolves to, and what else this box could serve.
+       *
+       * The console needs three things the `llmVendor` column alone cannot say: which vendors have a
+       * key here (so it can disable the rest rather than offering a model the server cannot reach),
+       * which model each one means, and what "platform default" resolves to today. Read from the
+       * environment at request time, because that is where the answer lives.
+       */
+      llm: llmChoices(tenant.llmVendor),
       // What the workspace would be charged today, so an operator answering
       // "what do I owe" does not have to do the GST arithmetic themselves.
       pricing: {
@@ -542,6 +555,108 @@ export const setTenantModule = asyncHandler(async (req: Request, res: Response) 
   });
 
   res.json({ success: true, data: setting });
+});
+
+// ── Which model answers a workspace ───────────────────────────────────────────
+
+/**
+ * The model options for a workspace, and what its current choice means.
+ *
+ * `available: false` is the important field: it means this box has no key for that vendor, so the
+ * console disables it. An operator pinning a workspace to a vendor the server cannot reach would
+ * produce a workspace whose every message falls back with a warning nobody reads.
+ */
+const llmChoices = (pinned: LlmVendor | null) => ({
+  /** What this workspace is pinned to, or null for the platform default. */
+  pinned,
+  /** What null means today, so "Platform default" can name a model rather than being a mystery. */
+  platform: {
+    vendor: (env.llm.vendor || null) as string | null,
+    model: env.llm.apiKey ? env.llm.model : null,
+  },
+  vendors: LLM_VENDORS.map((vendor) => {
+    const settings = env.llm.byVendor[vendor];
+    return {
+      vendor,
+      available: settings !== null,
+      model: settings?.model ?? null,
+      baseUrl: settings?.baseUrl || null,
+      /** Groq is `json_object`; the router's schema is only *enforced* under `json_schema`. */
+      structuredMode: settings?.structuredMode ?? null,
+    };
+  }),
+  /**
+   * Writing workflows is pinned to OpenAI whatever is chosen here, so the console can say so rather
+   * than leaving an operator to wonder why a Groq workspace's generated drafts name a GPT model.
+   */
+  authoringVendor: 'OPENAI' as const,
+});
+
+const llmVendorPatchSchema = z.object({
+  /**
+   * `null` means the platform default, and is a real choice rather than an omission — it is how an
+   * operator un-pins a workspace.
+   */
+  vendor: z.enum(LLM_VENDORS).nullable(),
+  note: z.string().trim().max(300).nullish(),
+});
+
+/**
+ * Choose which vendor answers a workspace's customers.
+ *
+ * An operator's decision, beside the module toggles, for the same reason those are: it is our cost
+ * per message and our latency budget, not the workspace's preference. It takes effect on the next
+ * message — there is no cache to clear, because the provider is chosen per call from this column.
+ */
+export const setTenantLlmVendor = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = requireId(req.params.tenantId, 'workspace');
+  const body = llmVendorPatchSchema.parse(req.body);
+  const admin = adminOf(req);
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { businessName: true, llmVendor: true },
+  });
+  if (!tenant) throw ApiError.notFound('Workspace not found');
+
+  /*
+   * Refused rather than accepted-with-a-warning.
+   *
+   * A vendor with no key on this box cannot answer anything: every message would fall back to the
+   * platform default and log a line. Storing that choice would make the console show a model the
+   * workspace is not actually using, which is worse than not offering it.
+   */
+  if (body.vendor && env.llm.byVendor[body.vendor] === null) {
+    throw ApiError.badRequest(
+      `${body.vendor} has no API key on this server, so a workspace cannot be pinned to it. `
+      + `Set ${body.vendor}_LLM_API_KEY and restart.`,
+    );
+  }
+
+  const updated = await prisma.tenant.update({
+    where: { id: tenantId },
+    data: { llmVendor: body.vendor },
+    select: { llmVendor: true },
+  });
+
+  await audit(req, {
+    action: 'tenant.llm_vendor_changed',
+    tenantId,
+    targetType: 'Tenant',
+    targetId: tenantId,
+    summary: body.vendor
+      ? `Set ${tenant.businessName}'s model to ${body.vendor} (${env.llm.byVendor[body.vendor]?.model})`
+      : `Put ${tenant.businessName} back on the platform default model`,
+    metadata: {
+      from: tenant.llmVendor, to: body.vendor, note: body.note ?? null, by: admin.email,
+    },
+  });
+
+  logger.info('Tenant LLM vendor changed', {
+    tenantId, from: tenant.llmVendor, to: body.vendor, superAdminId: admin.id,
+  });
+
+  res.json({ success: true, data: llmChoices(updated.llmVendor) });
 });
 
 // ── Contact enquiries ─────────────────────────────────────────────────────────

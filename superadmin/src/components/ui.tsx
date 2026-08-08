@@ -141,7 +141,15 @@ export function Textarea({
 export function Select({ value, onChange, options, className }: {
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ value: string; label: string }>;
+  /**
+   * `disabled` marks an option that exists but cannot be chosen.
+   *
+   * Added for the model selector, where a vendor with no API key on the server has to be *shown* —
+   * an operator who cannot find Groq would conclude the feature is missing rather than that one
+   * variable is unset — but must not be selectable. Without this the prop was accepted by the caller
+   * and dropped here, which renders an unpickable option as pickable.
+   */
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
   className?: string;
 }) {
   return (
@@ -154,7 +162,9 @@ export function Select({ value, onChange, options, className }: {
       )}
     >
       {options.map((option) => (
-        <option key={option.value} value={option.value}>{option.label}</option>
+        <option key={option.value} value={option.value} disabled={option.disabled}>
+          {option.label}
+        </option>
       ))}
     </select>
   );

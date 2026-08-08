@@ -116,11 +116,38 @@ export interface TenantRow {
   orders: number;
 }
 
+/** The vendors a workspace can be pinned to. Mirrors `enum LlmVendor` in the schema. */
+export type LlmVendor = 'OPENAI' | 'GROQ';
+
+/**
+ * A workspace's model choice, and what the server can actually serve.
+ *
+ * `available: false` means this box has no key for that vendor — the selector disables it, because
+ * pinning a workspace to a model the server cannot reach would make every message fall back with a
+ * warning in a log nobody is reading.
+ */
+export interface LlmChoices {
+  pinned: LlmVendor | null;
+  /** What "platform default" resolves to today, so the option can name a model. */
+  platform: { vendor: string | null; model: string | null };
+  vendors: Array<{
+    vendor: LlmVendor;
+    available: boolean;
+    model: string | null;
+    baseUrl: string | null;
+    structuredMode: 'json_schema' | 'json_object' | null;
+  }>;
+  /** Workflow generation is pinned to this whatever the workspace uses for chat. */
+  authoringVendor: LlmVendor;
+}
+
 export interface TenantDetail {
   tenant: {
     id: string; businessName: string; category: string; contactNumber: string | null;
     address: string | null; website: string | null; isActive: boolean;
     createdAt: string; gstin: string | null; gstStateCode: string | null;
+    /** Which vendor answers this workspace's customers. Null = the platform default. */
+    llmVendor: LlmVendor | null;
     users: Array<{
       id: string; email: string; fullName: string; role: string;
       isActive: boolean; emailVerified: boolean; createdAt: string;
@@ -133,6 +160,8 @@ export interface TenantDetail {
     _count: Record<string, number>;
   };
   entitlements: Record<string, unknown>;
+  /** Which model answers this workspace, what it resolves to, and the options this box supports. */
+  llm: LlmChoices;
   /** Mirrors `UsageSnapshot` in the backend's billing service. */
   usage: {
     used: number;
@@ -329,6 +358,8 @@ export const sa = {
   tenantModules: (id: string) =>
     unwrap<ModuleSetting[]>(api.get(`/tenants/${id}/modules`)),
 
+  setTenantLlmVendor: (id: string, body: { vendor: LlmVendor | null; note?: string }) =>
+    unwrap<LlmChoices>(api.patch(`/tenants/${id}/llm-vendor`, body)),
   setTenantModule: (id: string, body: { module: ModuleKey; enabled: boolean; note?: string }) =>
     unwrap<ModuleSetting>(api.patch(`/tenants/${id}/modules`, body)),
 

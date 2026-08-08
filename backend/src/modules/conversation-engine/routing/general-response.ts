@@ -1,7 +1,7 @@
 import type { Assistant, BusinessCategory, Conversation, Customer, Tenant } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { withContext } from '../../../config/logger.js';
-import { llmProvider } from '../providers/llm.js';
+import { providerForVendor } from '../providers/llm.js';
 import { moduleEnabled } from '../../modules/module.service.js';
 import { knowledgeAsPrompt, knowledgeFor } from '../../knowledge/knowledge.service.js';
 import { resolveAssistantCopy, topicLines } from './assistant-copy.js';
@@ -374,7 +374,7 @@ export const respondGenerally = async ({
   const startedAt = Date.now();
 
   try {
-    const completion = await llmProvider().complete({
+    const completion = await providerForVendor(tenant.llmVendor).complete({
       systemPrompt: buildSystemPrompt({
         tenant,
         assistant,

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMemberships } from '../../test-support/members.js';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
@@ -552,6 +552,125 @@ describe('the connector type catalog', () => {
     const tenantToken = signToken({ userId: ownerId });
     await request(app).get('/sa/connector-types').set(asAdmin(tenantToken)).expect(401);
     await request(app).get('/sa/connector-types').expect(401);
+  });
+});
+
+describe('which model answers a workspace', () => {
+  /*
+   * An operator's choice, and the reason it is one: it decides who we pay per message and how long a
+   * customer waits. A workspace has no route to it at all.
+   *
+   * The property worth protecting is the refusal. Pinning a workspace to a vendor with no key on this
+   * server produces a workspace whose every message quietly falls back — working, on the wrong model,
+   * with the console displaying the one it is not using.
+   */
+  it('**pins a workspace to a vendor, and un-pins it**', async () => {
+    const token = await login();
+
+    // OPENAI is configured in the test environment; GROQ's availability depends on the box, so this
+    // asserts on the one that is always there.
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: 'OPENAI', note: 'cost test' }).expect(200);
+
+    expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
+      .toBe('OPENAI');
+
+    // Null is a real choice — it is how an operator hands a workspace back to the platform default,
+    // so that changing `LLM_VENDOR` later reaches it again.
+    const back = await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: null }).expect(200);
+
+    expect(back.body.data.pinned).toBeNull();
+    expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor).toBeNull();
+  });
+
+  it('**refuses a vendor with no API key on this server**', async () => {
+    const token = await login();
+
+    // Blanked for this request only. A stored choice nothing can serve would make every message fall
+    // back to the platform default while the console showed the pinned vendor — worse than refusing.
+    const saved = process.env.GROQ_LLM_API_KEY;
+    process.env.GROQ_LLM_API_KEY = '';
+    vi.resetModules();
+    try {
+      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
+      const fresh = buildSuperAdminApp();
+      const res = await request(fresh).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+        .set(asAdmin(token)).send({ vendor: 'GROQ' }).expect(400);
+
+      expect(res.body.message).toContain('GROQ_LLM_API_KEY');
+      expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
+        .toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
+      else process.env.GROQ_LLM_API_KEY = saved;
+      vi.resetModules();
+    }
+  });
+
+  it('records who changed it, and to what', async () => {
+    // This changes which vendor is billed for a workspace's traffic. Six months later the question is
+    // "who moved this workspace and why", and only the audit trail can answer it.
+    const token = await login();
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: 'OPENAI', note: 'latency complaint' }).expect(200);
+
+    const event = await prisma.auditEvent.findFirstOrThrow({
+      where: { tenantId: TENANT_A, action: 'tenant.llm_vendor_changed' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(event.superAdminId).toBe(adminId);
+    expect(JSON.stringify(event.metadata)).toContain('latency complaint');
+  });
+
+  it('**tells the console what each option resolves to, and which are unavailable**', async () => {
+    const token = await login();
+    const res = await request(app).get(`/sa/tenants/${TENANT_A}`).set(asAdmin(token)).expect(200);
+
+    const { llm } = res.body.data;
+    expect(llm.vendors.map((v: { vendor: string }) => v.vendor)).toEqual(['OPENAI', 'GROQ']);
+    // A model name per option, so the selector offers a model rather than a brand.
+    const openai = llm.vendors.find((v: { vendor: string }) => v.vendor === 'OPENAI');
+    expect(openai.available).toBe(true);
+    expect(openai.model).toBeTruthy();
+    // And that generation is pinned, so nobody wonders why a Groq workspace's drafts name a GPT model.
+    expect(llm.authoringVendor).toBe('OPENAI');
+  });
+
+  it('**reports a vendor with no key here as unavailable**', async () => {
+    /*
+     * Asserted against a *blanked* key rather than against whatever this box happens to have.
+     *
+     * The first version checked `available === true` for OpenAI, which is true on any developer
+     * machine whether the field is computed or hardcoded — so hardcoding it would have gone
+     * unnoticed, and the console would have offered a model the server cannot reach.
+     */
+    const token = await login();
+    const saved = process.env.GROQ_LLM_API_KEY;
+    process.env.GROQ_LLM_API_KEY = '';
+    vi.resetModules();
+    try {
+      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
+      const res = await request(buildSuperAdminApp()).get(`/sa/tenants/${TENANT_A}`)
+        .set(asAdmin(token)).expect(200);
+
+      const groq = res.body.data.llm.vendors.find((v: { vendor: string }) => v.vendor === 'GROQ');
+      expect(groq.available).toBe(false);
+      // And no model claimed for it, so the option cannot read "GROQ — llama-…" while unusable.
+      expect(groq.model).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
+      else process.env.GROQ_LLM_API_KEY = saved;
+      vi.resetModules();
+    }
+  });
+
+  it('needs an operator token — a customer token is not enough', async () => {
+    const tenantToken = signToken({ userId: ownerId, tenantId: TENANT_A });
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+      .set(asAdmin(tenantToken)).send({ vendor: 'OPENAI' }).expect(401);
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+      .send({ vendor: 'OPENAI' }).expect(401);
   });
 });
 

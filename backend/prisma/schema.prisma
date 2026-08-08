@@ -115,6 +115,23 @@ model Tenant {
   /// Turning it off does not silence the bot. Carts, keyword rules and published workflows keep
   /// running; only the model is skipped. See `degradeToNonAi` in conversation-engine/routing.
   aiAgentEnabled Boolean  @default(true)
+
+  /// Which vendor answers this workspace's customers, or null for the platform default.
+  ///
+  /// **An operator's choice, not the workspace's** — it is set in the super admin console beside the
+  /// module toggles, for the same reason those live there: it decides who we pay per message and how
+  /// fast the reply arrives, which is our cost and our latency budget, not theirs.
+  ///
+  /// **Null is the ordinary state and means "whatever `LLM_VENDOR` says".** Writing today's default
+  /// into every row instead would freeze it: changing the platform's vendor would then reach only
+  /// workspaces created afterwards, and nothing would distinguish "an operator chose OpenAI for this
+  /// one" from "OpenAI was the default the day they signed up".
+  ///
+  /// Credentials are **not** per workspace. This names a vendor whose key lives in the environment;
+  /// a column holding somebody's API key would put live credentials in every backup and in the
+  /// console's own responses. A workspace pinned to a vendor with no key on the box falls back to the
+  /// platform default and logs it — see `providerForVendor`.
+  llmVendor LlmVendor?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -2509,6 +2526,16 @@ model Role {
 /// A string-keyed table rather than a set of boolean columns on `Tenant`,
 /// because adding the fourth module should not be a schema change to the table
 /// every request already loads.
+/// Who serves the model for a workspace. Must match `LLM_VENDORS` in `config/env.ts`.
+///
+/// Deliberately a short list rather than a free-text vendor name: each one needs its own settings
+/// block in the environment and its own structured-output mode, so a value nothing can resolve is
+/// not a configuration, it is a typo that stops the assistant answering.
+enum LlmVendor {
+  OPENAI
+  GROQ
+}
+
 enum ModuleKey {
   MARKETING
   LEADS
