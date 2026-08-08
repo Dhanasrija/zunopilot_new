@@ -1,6 +1,7 @@
 import { Prisma, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
+import { logger } from '../config/logger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { countryFromPhone, normalisePhone } from '../services/otp.service.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -74,7 +75,13 @@ const inviteSchema = z.object({
 });
 
 const updateSchema = z.object({
-  fullName: z.string().min(1).max(120).optional(),
+  /*
+   * **`fullName` is deliberately absent.**
+   *
+   * One shared profile means editing it here would rename that person in *every* workspace they
+   * belong to — so an admin in one business could rename somebody as their colleagues in another
+   * business see them. People edit their own name through `PUT /auth/profile`.
+   */
   roleId: z.string().min(1).optional(),
   isActive: z.boolean().optional(),
 });
@@ -91,16 +98,65 @@ const updateSchema = z.object({
  *
  * Both routes now come through here, so the two cannot drift again.
  */
+/**
+ * One member of this workspace, in the shape the team screen reads.
+ *
+ * Asked of the membership: a user id that belongs to somebody in another workspace, or to somebody
+ * whose login merely happens to be rooted here, is **not** a member of this one and must read as
+ * "not found" rather than as a target.
+ */
+const memberOf = async (tenantId: string, userId: string) => {
+  const membership = await prisma.membership.findUnique({
+    where: { userId_tenantId: { userId, tenantId } },
+    select: {
+      isActive: true,
+      roleId: true,
+      legacyRole: true,
+      assignedRole: { select: { id: true, name: true, isOwner: true, permissions: true } },
+      user: { select: { id: true, phone: true, email: true, fullName: true, emailVerified: true } },
+    },
+  });
+  if (!membership) return null;
+
+  return {
+    ...membership.user,
+    roleId: membership.roleId,
+    assignedRole: membership.assignedRole,
+    role: membership.legacyRole,
+    isActive: membership.isActive,
+  };
+};
+
 const deactivateMember = (tenantId: string, userId: string) => prisma.$transaction(async (tx) => {
-  await tx.user.update({ where: { id: userId }, data: { isActive: false } });
+  /*
+   * **The membership, not the login.**
+   *
+   * This wrote `user.isActive = false`, which was indistinguishable from "out of this workspace"
+   * while a person had exactly one. Now that they can have two, it would sign somebody out of the
+   * business they *run* because an unrelated workspace removed them. `User.isActive` remains the
+   * operator's global kill switch and is not this endpoint's to touch.
+   */
+  await tx.membership.update({
+    where: { userId_tenantId: { userId, tenantId } },
+    data: { isActive: false, revokedAt: new Date() },
+  });
+
+  // Unchanged: their open conversations go back to the shared pool.
   await tx.conversation.updateMany({
     where: { tenantId, assignedAgentId: userId, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
     data: { assignedAgentId: null },
   });
-  // Inside the transaction, so a failure cannot leave the user deactivated and the membership
-  // still active. An interactive transaction rather than the array form for exactly that reason —
-  // `syncMembership` reads the row it is mirroring.
-  await syncMembership(userId, { client: tx });
+
+  /*
+   * The cascade that no longer fires.
+   *
+   * `Reminder.assigneeId` and `Notification.userId` are the only `onDelete: Cascade` user foreign
+   * keys, and they were correct while removing somebody meant flipping `User.isActive` and never
+   * deleting the row. Leaving a workspace is not a login delete, so without these two lines a
+   * revoked person keeps reminders and an unread badge for a workspace they can no longer open.
+   */
+  await tx.reminder.deleteMany({ where: { tenantId, assigneeId: userId } });
+  await tx.notification.deleteMany({ where: { tenantId, userId } });
 });
 
 // `activeAdminCount` used to live here, in a near-identical copy of the one in
@@ -108,11 +164,41 @@ const deactivateMember = (tenantId: string, userId: string) => prisma.$transacti
 // workspace" has one answer — and it keeps having one when membership moves off `User`.
 
 export const listTeam = asyncHandler(async (req, res) => {
-  const members = await prisma.user.findMany({
+  /*
+   * The roster is a list of **memberships**, not of logins.
+   *
+   * It used to be `user.findMany({ where: { tenantId } })`, which answers "logins created in this
+   * workspace" — not the same list once a person can join from elsewhere. A colleague attached by
+   * the invite below would have been **missing from the Team screen while holding a working
+   * session**, so the workspace's own owner could neither see them nor take them off.
+   *
+   * Ordered by `joinedAt` rather than the account's `createdAt`: the question here is when this
+   * person joined *this* workspace, which may be long after their account was made somewhere else.
+   */
+  const memberships = await prisma.membership.findMany({
     where: { tenantId: tenantIdOf(req) },
-    select: memberSelect,
-    orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+    select: {
+      isActive: true,
+      joinedAt: true,
+      roleId: true,
+      legacyRole: true,
+      assignedRole: { select: { id: true, name: true, isOwner: true, permissions: true } },
+      user: { select: { id: true, phone: true, email: true, fullName: true, emailVerified: true } },
+    },
+    orderBy: [{ isActive: 'desc' }, { joinedAt: 'asc' }],
   });
+
+  // Flattened into the shape the team screen already reads, so the client needs no change: the
+  // per-workspace facts come from the membership, the identity from the login.
+  const members = memberships.map((membership) => ({
+    ...membership.user,
+    roleId: membership.roleId,
+    assignedRole: membership.assignedRole,
+    /** @deprecated The legacy enum, per workspace now. Still only a label. */
+    role: membership.legacyRole,
+    isActive: membership.isActive,
+    createdAt: membership.joinedAt,
+  }));
 
   // Conversation counts per member, so the team screen can show who is carrying
   // the load rather than just who exists.
@@ -145,19 +231,92 @@ export const inviteMember = asyncHandler(async (req, res) => {
   const phone = normalisePhone(body.phone);
   const email = body.email?.trim().toLowerCase() || null;
 
-  // `phone` is globally unique, not unique per tenant, so a number already in
-  // another workspace cannot be invited here. Saying which workspace would leak
-  // it, so the message stays generic.
-  const byPhone = await prisma.user.findUnique({ where: { phone } });
-  if (byPhone) throw ApiError.conflict('That mobile number is already in use');
+  /*
+   * ── A number that already has an account is **attached**, not refused ──────
+   *
+   * This used to be a flat conflict: `phone` is globally unique, so any number registered anywhere
+   * on the platform could not be invited, and the message stayed generic so it did not reveal which
+   * workspace held it. That was correct given a login could only ever be in one workspace. It is
+   * the reason somebody running two businesses had to use two phone numbers.
+   *
+   * Now the login is reused and a **membership** is added. Three things follow, and each is a
+   * deliberate choice rather than a consequence:
+   *
+   *   • **Already a member here is still a conflict.** Inviting the same person twice is a mistake,
+   *     and silently doing nothing would look like it worked.
+   *   • **A revoked membership is revived rather than duplicated.** `@@unique([userId, tenantId])`
+   *     makes that structural: one row per person per workspace, reused, so the team screen cannot
+   *     show somebody twice.
+   *   • **Their own name wins.** One shared profile means the name typed here is only used for a
+   *     number new to the platform. Overwriting an existing person's name from another workspace's
+   *     invite form would rename them everywhere.
+   */
+  const existing = await prisma.user.findUnique({
+    where: { phone },
+    include: { memberships: { where: { tenantId } } },
+  });
 
-  if (email) {
+  if (existing?.memberships.some((membership) => membership.isActive)) {
+    throw ApiError.conflict('That person is already on this team');
+  }
+
+  /*
+   * The email check only applies to a **new** login.
+   *
+   * For an existing one the address is already theirs, and refusing "already in use" against the
+   * person you are inviting would be nonsense. It stays for a genuinely new account, where two
+   * accounts claiming one address is the thing being prevented.
+   */
+  if (email && !existing) {
     const byEmail = await prisma.user.findFirst({ where: { email } });
     if (byEmail) throw ApiError.conflict('That email address is already in use');
   }
 
   const role = await prisma.role.findFirst({ where: { id: body.roleId, tenantId } });
   if (!role) throw ApiError.badRequest('Choose a role for them');
+
+  if (existing) {
+    /*
+     * Revive or create the membership, in one statement.
+     *
+     * `joinedAt` is reset on a rejoin: they are joining now, and the team screen orders by it. The
+     * login itself is untouched — not their name, not their email, not `User.isActive`, and
+     * certainly not `homeTenantId`, which records where the account came from.
+     */
+    const membership = await prisma.membership.upsert({
+      where: { userId_tenantId: { userId: existing.id, tenantId } },
+      create: {
+        userId: existing.id,
+        tenantId,
+        roleId: role.id,
+        legacyRole: legacyEnumFor(role),
+        invitedById: userOf(req).id,
+      },
+      update: {
+        isActive: true,
+        revokedAt: null,
+        joinedAt: new Date(),
+        roleId: role.id,
+        legacyRole: legacyEnumFor(role),
+        invitedById: userOf(req).id,
+      },
+    });
+
+    logger.info('Existing login attached to a workspace', {
+      tenantId, userId: existing.id, membershipId: membership.id, byUserId: userOf(req).id,
+    });
+
+    const attached = await memberOf(tenantId, existing.id);
+    /*
+     * `attached: true` so the toast can tell the truth *after* the fact.
+     *
+     * "They can sign in with their mobile number now" is wrong here — they already could, and what
+     * happened is that a stranger's existing account gained immediate access to this workspace.
+     * The client needs to be able to say so.
+     */
+    res.status(201).json({ success: true, data: attached, meta: { attached: true } });
+    return;
+  }
 
   const member = await prisma.user.create({
     data: {
@@ -184,7 +343,7 @@ export const inviteMember = asyncHandler(async (req, res) => {
   // `invitedById` is the one thing a membership knows that `User` has nowhere to record.
   await syncMembership(member.id, { invitedById: userOf(req).id });
 
-  res.status(201).json({ success: true, data: member });
+  res.status(201).json({ success: true, data: member, meta: { attached: false } });
 });
 
 export const updateMember = asyncHandler(async (req, res) => {
@@ -192,10 +351,7 @@ export const updateMember = asyncHandler(async (req, res) => {
   const tenantId = tenantIdOf(req);
   const actor = userOf(req);
 
-  const member = await prisma.user.findFirst({
-    where: { id: req.params.userId, tenantId },
-    select: memberSelect,
-  });
+  const member = await memberOf(tenantId, req.params.userId!);
   if (!member) throw ApiError.notFound('Team member not found');
 
   // Does this person currently administer the workspace, and would the change take
@@ -243,22 +399,27 @@ export const updateMember = asyncHandler(async (req, res) => {
     await deactivateMember(tenantId, member.id);
   }
 
-  const updated = await prisma.user.update({
-    where: { id: member.id },
+  /*
+   * **The membership for this workspace, not the login.**
+   *
+   * This wrote the role onto `User` and then mirrored it with `syncMembership`, which copies the
+   * user row onto their *home* membership. For a colleague who joined from another workspace that
+   * writes the new role into **the wrong workspace** — changing what they can do somewhere else and
+   * leaving this workspace unchanged. It was invisible while every membership was a home membership.
+   *
+   * `User.role` and `User.roleId` are no longer written here at all. They describe the login's
+   * origin, and the per-workspace answer lives on the membership.
+   */
+  await prisma.membership.update({
+    where: { userId_tenantId: { userId: member.id, tenantId } },
     data: {
-      ...(body.fullName !== undefined ? { fullName: body.fullName.trim() } : {}),
-      ...(nextRole ? { roleId: nextRole.id, role: legacyEnumFor(nextRole) } : {}),
+      ...(nextRole ? { roleId: nextRole.id, legacyRole: legacyEnumFor(nextRole) } : {}),
       // Already applied above when deactivating; this covers reactivation.
-      ...(body.isActive === true ? { isActive: true } : {}),
+      ...(body.isActive === true ? { isActive: true, revokedAt: null } : {}),
     },
-    select: memberSelect,
   });
 
-  // Covers a role change and a reactivation. A deactivation already synced inside
-  // `deactivateMember`'s transaction; calling again is idempotent and cheaper than reasoning
-  // about which branch ran.
-  await syncMembership(member.id);
-
+  const updated = await memberOf(tenantId, member.id);
   res.json({ success: true, data: updated });
 });
 
@@ -275,10 +436,7 @@ export const removeMember = asyncHandler(async (req, res) => {
   const tenantId = tenantIdOf(req);
   const actor = userOf(req);
 
-  const member = await prisma.user.findFirst({
-    where: { id: req.params.userId, tenantId },
-    select: memberSelect,
-  });
+  const member = await memberOf(tenantId, req.params.userId!);
   if (!member) throw ApiError.notFound('Team member not found');
 
   if (member.id === actor.id) throw ApiError.badRequest('You cannot remove your own account.');

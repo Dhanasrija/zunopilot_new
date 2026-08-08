@@ -216,17 +216,51 @@ describe('changing the team', () => {
     expect(withEmail.body.data.emailVerified).toBe(false);
   });
 
-  it('refuses a mobile number already in use anywhere', async () => {
-    const response = await request(app).post('/api/team').set(as(owner))
+  it('**attaches a number that already has an account, rather than refusing it**', async () => {
+    /*
+     * **The behaviour this whole change exists for**, and it is the reverse of what this test used
+     * to assert. `User.phone` is globally unique, so a number registered anywhere on the platform
+     * used to be refused outright with a deliberately vague "already in use" — which is why running
+     * two businesses meant using two phone numbers.
+     */
+    const created = await request(app).post('/api/team').set(as(owner))
       .send({ phone: '+91 98999 19999', fullName: 'X', roleId: roleIds[TENANT]!.AGENT });
-    expect(response.status).toBe(201);
+    expect(created.status).toBe(201);
+    expect(created.body.meta.attached).toBe(false);
 
-    // Globally unique, so a number in another workspace cannot be invited here —
-    // and the message never says which workspace holds it.
+    // Now remove them, so the same number is a login that exists but is not on this team.
+    await request(app).delete(`/api/team/${created.body.data.id}`).set(as(owner)).expect(200);
+
     const again = await request(app).post('/api/team').set(as(owner))
       .send({ phone: '919899919999', fullName: 'Y', roleId: roleIds[TENANT]!.AGENT });
+    expect(again.status).toBe(201);
+    // `attached` so the toast can say what actually happened rather than "they can sign in now".
+    expect(again.body.meta.attached).toBe(true);
+    // The same login, revived — not a second row. `@@unique([userId, tenantId])` makes that
+    // structural, so the roster cannot show one person twice.
+    expect(again.body.data.id).toBe(created.body.data.id);
+    // **Their own name wins.** One shared profile, so the name typed on somebody else's invite form
+    // must not rename them.
+    expect(again.body.data.fullName).toBe('X');
+  });
+
+  it('**still refuses somebody who is already on this team**', async () => {
+    // Inviting the same person twice is a mistake, and silently succeeding would look like it
+    // worked. This is the one case that stays a conflict.
+    //
+    // Invited fresh rather than reusing a fixture member: those are created with an email and no
+    // phone, and the invite form requires a number — so `agent.phone` would fail validation and the
+    // test would pass on a 400 that has nothing to do with what it is checking.
+    await request(app).post('/api/team').set(as(owner))
+      .send({ phone: '919899918888', fullName: 'On The Team', roleId: roleIds[TENANT]!.AGENT })
+      .expect(201);
+
+    const again = await request(app).post('/api/team').set(as(owner))
+      .send({ phone: '+91 98999 18888', fullName: 'Dup', roleId: roleIds[TENANT]!.AGENT });
+
     expect(again.status).toBe(409);
-    expect(again.body.message).toMatch(/already in use/i);
+    expect(again.body.message).toMatch(/already on this team/i);
+    // Still never names another workspace.
     expect(again.body.message).not.toMatch(/workspace|tenant/i);
   });
 
@@ -320,9 +354,22 @@ describe('the guard rails', () => {
     const response = await request(app).delete(`/api/team/${agent.id}`).set(as(owner));
     expect(response.status).toBe(200);
 
-    // The row survives, because it is referenced by everything they ever did.
+    /*
+     * **The membership goes, the login stays.**
+     *
+     * This asserted `user.isActive === false`, which was indistinguishable from "out of this
+     * workspace" while a person had one. Writing it now would sign them out of every workspace they
+     * belong to — including the business they run — because an unrelated one removed them.
+     * `User.isActive` is the operator's global kill switch and is not this endpoint's to touch.
+     */
     const stillThere = await prisma.user.findUniqueOrThrow({ where: { id: agent.id } });
-    expect(stillThere.isActive).toBe(false);
+    expect(stillThere.isActive).toBe(true);
+
+    const revoked = await prisma.membership.findUniqueOrThrow({
+      where: { userId_tenantId: { userId: agent.id, tenantId: TENANT } },
+    });
+    expect(revoked.isActive).toBe(false);
+    expect(revoked.revokedAt).not.toBeNull();
 
     // And their queue goes back to the shared pool.
     const released = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../config/prisma.js';
+import { seedMemberships } from '../test-support/members.js';
 import { ROLE_PERMISSIONS } from '../config/permissions.js';
 import {
   activeAdminCount, countSeats, requireActiveMember, syncMembership, syncMembershipsForTenant,
@@ -56,6 +57,16 @@ const makeWorkspace = async (tenantId: string, phoneStem: string) => {
       tenantId, phone: `${phoneStem}02`, fullName: 'An Agent', role: 'AGENT', roleId: plainRole.id,
     },
   });
+
+  /*
+   * The memberships the product would have written. These helpers ask `Membership` now, not `User`,
+   * so a fixture that inserts only users describes a workspace with no members — every count zero
+   * and every lookup refused.
+   *
+   * The `syncMembership` block below deletes these again on purpose: "a user with no membership" is
+   * the state that function exists to repair.
+   */
+  await seedMemberships();
 
   return { ownerRole, plainRole, owner, agent };
 };

@@ -55,12 +55,21 @@ export const requireActiveMember = async (
   userId: string,
   client: Client = prisma,
 ): Promise<{ id: string; fullName: string }> => {
-  const member = await client.user.findFirst({
-    where: { id: userId, tenantId, isActive: true },
-    select: { id: true, fullName: true },
+  /*
+   * Asked of `Membership`, not `User`.
+   *
+   * Both conditions have to hold: an **active membership in this workspace**, and a login that has
+   * not been switched off globally. They are different switches — `Membership.isActive` means "out
+   * of this workspace", `User.isActive` is the operator's kill switch — and checking only one would
+   * either let a suspended login be handed work, or let somebody removed from this workspace keep
+   * receiving it.
+   */
+  const membership = await client.membership.findFirst({
+    where: { userId, tenantId, isActive: true, user: { isActive: true } },
+    select: { user: { select: { id: true, fullName: true } } },
   });
-  if (!member) throw ApiError.badRequest(NOT_A_MEMBER);
-  return member;
+  if (!membership) throw ApiError.badRequest(NOT_A_MEMBER);
+  return membership.user;
 };
 
 /**
@@ -96,12 +105,13 @@ export const activeAdminCount = async (
   const adminRoleIds = await adminRoleIdsOf(tenantId, client);
   if (adminRoleIds.length === 0) return 0;
 
-  return client.user.count({
+  return client.membership.count({
     where: {
       tenantId,
       isActive: true,
+      user: { isActive: true },
       roleId: { in: adminRoleIds },
-      ...(excludingUserId ? { id: { not: excludingUserId } } : {}),
+      ...(excludingUserId ? { userId: { not: excludingUserId } } : {}),
     },
   });
 };
@@ -121,7 +131,15 @@ export const NO_ADMIN_LEFT = 'That would leave nobody able to manage the team. G
  * inviting does.
  */
 export const countSeats = (tenantId: string, client: Client = prisma): Promise<number> =>
-  client.user.count({ where: { tenantId, isActive: true } });
+  /*
+   * Memberships, not users.
+   *
+   * A person in two workspaces consumes **one seat in each**, which is the honest answer: each
+   * workspace gets a seat's worth of use out of them, and neither should be billed for the other's
+   * team. `user: { isActive: true }` too, so a globally suspended login stops consuming a seat
+   * anywhere rather than being billed in workspaces it cannot reach.
+   */
+  client.membership.count({ where: { tenantId, isActive: true, user: { isActive: true } } });
 
 // ── Keeping `Membership` in step with `User` ──────────────────────────────────
 //

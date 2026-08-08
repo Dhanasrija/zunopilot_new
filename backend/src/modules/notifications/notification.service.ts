@@ -239,9 +239,17 @@ export const updatePreferences = (
  */
 export const recipientsOf = async (notification: Notification): Promise<string[]> => {
   if (notification.userId) return [notification.userId];
-  const users = await prisma.user.findMany({
-    where: { tenantId: notification.tenantId, isActive: true },
-    select: { id: true },
+  /*
+   * Everybody who can reach this workspace — memberships, not logins rooted here.
+   *
+   * `user.findMany({ where: { tenantId } })` would miss a colleague who joined from another
+   * workspace, so they would never be told about an inbound message while being fully able to
+   * answer it. And it would reach somebody whose login was created here but who has since been
+   * removed.
+   */
+  const memberships = await prisma.membership.findMany({
+    where: { tenantId: notification.tenantId, isActive: true, user: { isActive: true } },
+    select: { userId: true },
   });
-  return users.map((u) => u.id);
+  return memberships.map((membership) => membership.userId);
 };
