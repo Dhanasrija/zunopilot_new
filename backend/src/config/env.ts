@@ -77,6 +77,94 @@ const llmSetting = (suffix: string): string | undefined => {
   return value?.trim() ? value : undefined;
 };
 
+/*
+ * ── Every vendor, not only the selected one ──────────────────────────────────
+ *
+ * `llmSetting` above answers "what is *this box* configured to use", which was the whole question
+ * while one process meant one model. It stopped being the whole question when the vendor became a
+ * per-workspace choice an operator makes in the console: two workspaces can be answered by two
+ * vendors inside the same process, so both blocks have to be resolved at boot.
+ *
+ * **Credentials stay here and are never stored per workspace.** The console picks a *vendor*, not a
+ * key. A database column holding somebody's API key is a different and much worse feature: it would
+ * put live credentials in every backup, in the operator console's responses, and in the blast radius
+ * of any read-only SQL access.
+ */
+
+/** The vendors a workspace can be pinned to. Must match `enum LlmVendor` in the schema. */
+export const LLM_VENDORS = ['OPENAI', 'GROQ'] as const;
+export type LlmVendorKey = (typeof LLM_VENDORS)[number];
+
+export interface VendorSettings {
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  structuredMode: 'json_schema' | 'json_object';
+  timeoutMs: number;
+  extraBody: Record<string, unknown>;
+}
+
+/**
+ * One vendor's settings, read from its own prefix only.
+ *
+ * Same two lookup shapes as `llmSetting` — `GROQ_LLM_API_KEY` then `GROQ_API_KEY` — and the same
+ * refusal to borrow across vendors. Deliberately no unprefixed fallback here either: the point of
+ * naming a vendor is that its settings are its own.
+ *
+ * `OPENAI` is the one exception worth stating, and it is not a cross-vendor fallback: the plain
+ * `OPENAI_API_KEY` / `OPENAI_MODEL` names *are* OpenAI's own, and they predate the prefixed
+ * convention, so they are read as that vendor's second shape rather than as a generic default.
+ */
+const vendorSettings = (vendor: LlmVendorKey): VendorSettings | null => {
+  const read = (suffix: string): string | undefined => {
+    const value = process.env[`${vendor}_LLM_${suffix}`] || process.env[`${vendor}_${suffix}`];
+    return value?.trim() ? value : undefined;
+  };
+
+  const apiKey = read('API_KEY');
+  // No key, no vendor. A block with a model and no credential cannot answer anything, and
+  // reporting it as available would let the console offer a workspace a model it cannot reach.
+  if (!apiKey) return null;
+
+  const defaults: Record<LlmVendorKey, { model: string; baseUrl: string }> = {
+    OPENAI: { model: 'gpt-4o-mini', baseUrl: '' },
+    // Groq has no default endpoint to fall back on, so its base URL is required in the same sense
+    // its key is — but a missing one is a misconfiguration worth surfacing rather than guessing at.
+    GROQ: { model: 'llama-3.3-70b-versatile', baseUrl: 'https://api.groq.com/openai/v1' },
+  };
+
+  let extraBody: Record<string, unknown> = {};
+  const rawExtra = read('EXTRA_BODY');
+  if (rawExtra?.trim()) {
+    try {
+      extraBody = JSON.parse(rawExtra) as Record<string, unknown>;
+    } catch {
+      // Loudly, at boot, for the same reason the unprefixed one does: a knob that quietly does
+      // nothing is worse than one that is missing.
+      throw new Error(`${vendor}_LLM_EXTRA_BODY is not valid JSON`);
+    }
+  }
+
+  return {
+    apiKey,
+    model: read('MODEL') || defaults[vendor].model,
+    baseUrl: read('BASE_URL') || defaults[vendor].baseUrl,
+    /*
+     * Groq defaults to `json_object`, OpenAI to `json_schema`.
+     *
+     * Not a preference — `json_schema` is OpenAI's strict constrained decoding and support
+     * elsewhere is model-dependent. Getting this wrong for Groq does not error, it degrades: the
+     * router asks for a schema nobody enforces and treats the malformed reply as no-match. Set
+     * explicitly per vendor so nobody inherits the other one's assumption.
+     */
+    structuredMode: (read('STRUCTURED_MODE') ?? (vendor === 'GROQ' ? 'json_object' : 'json_schema')) === 'json_object'
+      ? 'json_object'
+      : 'json_schema',
+    timeoutMs: Number(read('TIMEOUT_MS')) || 8000,
+    extraBody,
+  };
+};
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isTest: process.env.NODE_ENV === 'test',
@@ -301,6 +389,21 @@ export const env = {
         throw new Error('LLM_EXTRA_BODY is not valid JSON');
       }
     })(),
+
+    /**
+     * Each vendor, resolved independently — for when a workspace is pinned to one.
+     *
+     * Everything above describes **the platform default**, chosen by `LLM_VENDOR`, and it stays the
+     * answer for every workspace nobody has pinned. This is beside it rather than replacing it:
+     * one process now serves several vendors, and a workspace pinned to Groq must not silently get
+     * OpenAI because that is what the box happens to default to.
+     *
+     * `null` for a vendor with no key on this box. The console reads that and refuses to pin a
+     * workspace to it, so the unreachable state cannot be created from the UI.
+     */
+    byVendor: Object.fromEntries(
+      LLM_VENDORS.map((vendor) => [vendor, vendorSettings(vendor)]),
+    ) as Record<LlmVendorKey, VendorSettings | null>,
   },
 
   // ── Conversation engine (Module 12) ────────────────────────────────────────

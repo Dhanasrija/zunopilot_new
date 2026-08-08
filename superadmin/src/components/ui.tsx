@@ -106,10 +106,50 @@ export function Input({
   );
 }
 
+/**
+ * Multi-line text, styled to match `Input`.
+ *
+ * Added for the assistant copy an operator writes per category — a persona is a paragraph and a
+ * topic list is one item per line, neither of which fits a single-line field. `rows` rather than
+ * auto-growing: these sit in a table row that must not resize as somebody types.
+ */
+export function Textarea({
+  value, onChange, placeholder, rows = 4, className, id,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  className?: string;
+  id?: string;
+}) {
+  return (
+    <textarea
+      id={id}
+      value={value}
+      rows={rows}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      className={cn(
+        'w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none placeholder:text-slate-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100',
+        className,
+      )}
+    />
+  );
+}
+
 export function Select({ value, onChange, options, className }: {
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ value: string; label: string }>;
+  /**
+   * `disabled` marks an option that exists but cannot be chosen.
+   *
+   * Added for the model selector, where a vendor with no API key on the server has to be *shown* —
+   * an operator who cannot find Groq would conclude the feature is missing rather than that one
+   * variable is unset — but must not be selectable. Without this the prop was accepted by the caller
+   * and dropped here, which renders an unpickable option as pickable.
+   */
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
   className?: string;
 }) {
   return (
@@ -122,7 +162,9 @@ export function Select({ value, onChange, options, className }: {
       )}
     >
       {options.map((option) => (
-        <option key={option.value} value={option.value}>{option.label}</option>
+        <option key={option.value} value={option.value} disabled={option.disabled}>
+          {option.label}
+        </option>
       ))}
     </select>
   );

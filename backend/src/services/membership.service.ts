@@ -55,12 +55,21 @@ export const requireActiveMember = async (
   userId: string,
   client: Client = prisma,
 ): Promise<{ id: string; fullName: string }> => {
-  const member = await client.user.findFirst({
-    where: { id: userId, tenantId, isActive: true },
-    select: { id: true, fullName: true },
+  /*
+   * Asked of `Membership`, not `User`.
+   *
+   * Both conditions have to hold: an **active membership in this workspace**, and a login that has
+   * not been switched off globally. They are different switches — `Membership.isActive` means "out
+   * of this workspace", `User.isActive` is the operator's kill switch — and checking only one would
+   * either let a suspended login be handed work, or let somebody removed from this workspace keep
+   * receiving it.
+   */
+  const membership = await client.membership.findFirst({
+    where: { userId, tenantId, isActive: true, user: { isActive: true } },
+    select: { user: { select: { id: true, fullName: true } } },
   });
-  if (!member) throw ApiError.badRequest(NOT_A_MEMBER);
-  return member;
+  if (!membership) throw ApiError.badRequest(NOT_A_MEMBER);
+  return membership.user;
 };
 
 /**
@@ -96,12 +105,13 @@ export const activeAdminCount = async (
   const adminRoleIds = await adminRoleIdsOf(tenantId, client);
   if (adminRoleIds.length === 0) return 0;
 
-  return client.user.count({
+  return client.membership.count({
     where: {
       tenantId,
       isActive: true,
+      user: { isActive: true },
       roleId: { in: adminRoleIds },
-      ...(excludingUserId ? { id: { not: excludingUserId } } : {}),
+      ...(excludingUserId ? { userId: { not: excludingUserId } } : {}),
     },
   });
 };
@@ -121,7 +131,15 @@ export const NO_ADMIN_LEFT = 'That would leave nobody able to manage the team. G
  * inviting does.
  */
 export const countSeats = (tenantId: string, client: Client = prisma): Promise<number> =>
-  client.user.count({ where: { tenantId, isActive: true } });
+  /*
+   * Memberships, not users.
+   *
+   * A person in two workspaces consumes **one seat in each**, which is the honest answer: each
+   * workspace gets a seat's worth of use out of them, and neither should be billed for the other's
+   * team. `user: { isActive: true }` too, so a globally suspended login stops consuming a seat
+   * anywhere rather than being billed in workspaces it cannot reach.
+   */
+  client.membership.count({ where: { tenantId, isActive: true, user: { isActive: true } } });
 
 // ── Keeping `Membership` in step with `User` ──────────────────────────────────
 //
@@ -225,4 +243,71 @@ export const syncMembershipsForTenant = async (
     await syncMembership(user.id, { client });
   }
   return users.length;
+};
+
+/**
+ * Take somebody out of one workspace, and tidy up after them.
+ *
+ * **One definition, because there are now two doors out.** An admin removing a colleague and a
+ * person leaving on their own end in exactly the same state, and the cleanup below is the part that
+ * is easy to get half-right: written out twice, one of the two doors eventually forgets a line and
+ * a workspace keeps handing reminders to somebody who cannot open it.
+ *
+ * What it does **not** do is touch `User.isActive`. That is the operator's global kill switch;
+ * leaving one workspace is not leaving the product.
+ *
+ * Runs in a transaction because the four writes describe a single fact. A half-applied revoke is
+ * how the two unread counters drifted apart in the notifications module.
+ */
+export const revokeMembership = (
+  tenantId: string,
+  userId: string,
+  client: Client = prisma,
+): Promise<void> => {
+  const run = async (tx: Client) => {
+    await tx.membership.update({
+      where: { userId_tenantId: { userId, tenantId } },
+      data: {
+        isActive: false,
+        revokedAt: new Date(),
+        /*
+         * Forget that they were last here.
+         *
+         * `lastSelectedAt` decides where a fresh login lands, and the row survives being revoked so
+         * that rejoining is a reactivation rather than a new membership. Left set, somebody who left a
+         * workspace and was later added back would **land in the one they walked out of** — and so
+         * would anybody removed and reinstated. The workspace they actually work in is the one they
+         * chose most recently and still belong to.
+         */
+        lastSelectedAt: null,
+      },
+    });
+
+    // Their open conversations go back to the shared pool rather than sitting with a name that can
+    // no longer answer them.
+    await tx.conversation.updateMany({
+      where: { tenantId, assignedAgentId: userId, status: { in: ['OPEN', 'HUMAN_TAKEOVER'] } },
+      data: { assignedAgentId: null },
+    });
+
+    /*
+     * The cascade that no longer fires.
+     *
+     * `Reminder.assigneeId` and `Notification.userId` are the only `onDelete: Cascade` user foreign
+     * keys, and they were correct while removing somebody meant flipping `User.isActive` and never
+     * deleting the row. Leaving a workspace is not a login delete, so without these two lines a
+     * revoked person keeps reminders and an unread badge for a workspace they can no longer open.
+     *
+     * Deliberately not touched: `Lead.ownerId` and `Ticket.assigneeId` stay assigned, exactly as
+     * they did before memberships existed. Reassigning somebody's pipeline is a decision for the
+     * workspace, not a side effect of their departure.
+     */
+    await tx.reminder.deleteMany({ where: { tenantId, assigneeId: userId } });
+    await tx.notification.deleteMany({ where: { tenantId, userId } });
+  };
+
+  // Already inside one? Join it. `$transaction` exists only on the top-level client, and calling it
+  // on a transaction client is a runtime error rather than a type error — hence the check.
+  const top = client as Partial<PrismaClient>;
+  return typeof top.$transaction === 'function' ? top.$transaction(run) : run(client);
 };

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireSuperAdmin } from './auth.js';
 import * as sa from './super-admin.controller.js';
+import { listSignups } from './signups.js';
 
 // Super admin routes.
 //
@@ -35,6 +36,14 @@ superAdminRoutes.use(requireSuperAdmin);
 superAdminRoutes.get('/auth/me', sa.me);
 superAdminRoutes.get('/overview', sa.overview);
 
+/*
+ * The signup funnel: who asked for a code, who verified, who finished.
+ *
+ * Its own module because it is a read across three tables that belong to different features — the OTP
+ * service, tenants and users — and none of them is the natural owner.
+ */
+superAdminRoutes.get('/signups', listSignups);
+
 superAdminRoutes.get('/tenants', sa.listTenants);
 superAdminRoutes.get('/tenants/:tenantId', sa.getTenant);
 superAdminRoutes.get('/tenants/:tenantId/activity', sa.getTenantActivity);
@@ -42,6 +51,13 @@ superAdminRoutes.patch('/tenants/:tenantId/active', sa.setTenantActive);
 superAdminRoutes.post('/tenants/:tenantId/plan', sa.assignTenantPlan);
 superAdminRoutes.get('/tenants/:tenantId/modules', sa.getTenantModules);
 superAdminRoutes.patch('/tenants/:tenantId/modules', sa.setTenantModule);
+/*
+ * Which model answers this workspace's customers.
+ *
+ * Beside the module toggles because it is the same kind of decision — ours about cost and latency
+ * rather than the workspace's about behaviour — and audited the same way.
+ */
+superAdminRoutes.patch('/tenants/:tenantId/llm-vendor', sa.setTenantLlmVendor);
 
 superAdminRoutes.patch('/users/:userId', sa.updateUser);
 

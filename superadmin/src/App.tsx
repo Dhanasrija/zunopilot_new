@@ -3,7 +3,8 @@ import {
   Link, Navigate, Route, Routes, useLocation,
 } from 'react-router-dom';
 import {
-  Building2, ClipboardList, Inbox, LayoutDashboard, LogOut, PlugZap, ReceiptIndianRupee, ShieldCheck, Tags,
+  Building2, ClipboardList, Inbox, LayoutDashboard, LogOut, PlugZap, ReceiptIndianRupee,
+  ShieldCheck, Tags, UserPlus,
 } from 'lucide-react';
 import { sa, tokenStore } from './lib/api';
 import { cn } from './components/ui';
@@ -15,6 +16,7 @@ import Plans from './pages/Plans';
 import Categories from './pages/Categories';
 import ConnectorTypes from './pages/ConnectorTypes';
 import Enquiries from './pages/Enquiries';
+import Signups from './pages/Signups';
 import Audit from './pages/Audit';
 
 // The console shell.
@@ -27,6 +29,9 @@ import Audit from './pages/Audit';
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
   { to: '/tenants', label: 'Workspaces', icon: Building2 },
+  // Beside Workspaces, because it answers the question that list raises: the unnamed rows in it are
+  // people who verified a code and stopped.
+  { to: '/signups', label: 'Signups', icon: UserPlus },
   { to: '/plans', label: 'Plans', icon: ReceiptIndianRupee },
   { to: '/enquiries', label: 'Enquiries', icon: Inbox, badge: 'newEnquiries' as const },
   { to: '/categories', label: 'Categories', icon: Tags },
@@ -132,6 +137,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<RequireAuth><Overview /></RequireAuth>} />
       <Route path="/tenants" element={<RequireAuth><Tenants /></RequireAuth>} />
+      <Route path="/signups" element={<RequireAuth><Signups /></RequireAuth>} />
       <Route path="/tenants/:tenantId" element={<RequireAuth><TenantDetail /></RequireAuth>} />
       <Route path="/plans" element={<RequireAuth><Plans /></RequireAuth>} />
       <Route path="/enquiries" element={<RequireAuth><Enquiries /></RequireAuth>} />

@@ -149,3 +149,48 @@ export const notifyOrderCreated = async (input: OrderNotice): Promise<void> => {
 
   if (notification) await queuePush(notification.id);
 };
+
+/** Somebody was added to a workspace. */
+export interface AddedToWorkspaceNotice {
+  tenantId: string;
+  /** The person who was added. Always addressed to them, never to the workspace. */
+  userId: string;
+  businessName: string;
+  /** Who added them, for the record. */
+  addedByName: string;
+}
+
+/**
+ * Tell somebody they were added to a workspace.
+ *
+ * **The one notification addressed to a named person rather than to the workspace.** Every other
+ * kind here is workspace-wide, because a customer's message belongs to whoever picks it up. This is
+ * not about the business at all — it is about this person's access, and nobody else needs it in
+ * their bell.
+ *
+ * ── The limitation, stated rather than hidden ────────────────────────────────
+ *
+ * It is recorded **in the workspace they were added to**, and notifications are tenant-scoped by
+ * `visibleTo` — so it does not appear while they are working somewhere else. The signal that does
+ * cross workspaces is the new entry in their switcher. This is what tells them *who* put them there
+ * once they arrive, instead of leaving them to guess why a business they have never heard of is in
+ * their list.
+ *
+ * A genuinely cross-workspace alert needs either a notification with no tenant, or Web Push (which
+ * is per device and already reaches them anywhere). Both are real options and neither is this
+ * commit.
+ *
+ * No `dedupeKey`: this is caused by a person clicking Add, not by a webhook that might be retried,
+ * and re-adding somebody after they left is a real second event worth its own row.
+ */
+export const notifyAddedToWorkspace = async (input: AddedToWorkspaceNotice): Promise<void> => {
+  await notifyQuietly({
+    tenantId: input.tenantId,
+    userId: input.userId,
+    kind: 'ADDED_TO_WORKSPACE',
+    title: `You were added to ${input.businessName}`,
+    body: `${input.addedByName} gave you access to this workspace.`,
+    // Where to go to do something about it. The switcher lives in the account menu.
+    link: '/settings?tab=profile',
+  });
+};

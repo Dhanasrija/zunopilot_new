@@ -11,7 +11,9 @@ import {
   countryFromPhone, normalisePhone, requestOtp, verifyOtp,
 } from '../services/otp.service.js';
 import { ownerRoleFor } from '../services/role.service.js';
-import { syncMembership } from '../services/membership.service.js';
+import {
+  NO_ADMIN_LEFT, activeAdminCount, revokeMembership, syncMembership,
+} from '../services/membership.service.js';
 
 // Customer authentication: phone plus a one-time code, and nothing else.
 //
@@ -497,17 +499,8 @@ export const switchWorkspace = asyncHandler(async (req, res) => {
   const body = switchSchema.parse(req.body);
   const actor = userOf(req);
 
-  /*
-   * A support session may never hop.
-   *
-   * The workspace consented to one operator viewing *one* workspace, for a bounded window. Letting
-   * that token reach a second one would make the consent model decoration. There is deliberately no
-   * flag to opt into this, the same way there is no writable variant of a support session.
-   */
-  if (req.impersonation) {
-    throw ApiError.forbidden('A support session cannot change workspace.');
-  }
-
+  // A support session may never hop, and is refused in `requireSession` — the check used to live
+  // here, reading `req.impersonation`, which this middleware never sets.
   const membership = await prisma.membership.findUnique({
     where: { userId_tenantId: { userId: actor.id, tenantId: body.tenantId } },
     include: { tenant: true },
@@ -544,5 +537,89 @@ export const switchWorkspace = asyncHandler(async (req, res) => {
       // wholesale rather than merging two shapes.
       ...await sessionView(await sessionFor(membership.id)),
     },
+  });
+});
+
+const leaveSchema = z.object({ tenantId: z.string().min(1) });
+
+/**
+ * Leave a workspace.
+ *
+ * **The exit that had to exist once an invite stopped needing acceptance.** Being added is immediate
+ * and by decision — which means somebody can be given access to a business they have never heard of
+ * without being asked. Accepting that trade is only defensible if the door opens from the inside
+ * too; otherwise the only way out is a request to the very people who put you there.
+ *
+ * On `requireSession`, for the same reason the switcher is: the workspace being left may be the one
+ * that is suspended, and `requireAuth` would refuse before this ever ran.
+ */
+export const leaveWorkspace = asyncHandler(async (req, res) => {
+  const body = leaveSchema.parse({ tenantId: req.params.tenantId });
+  const actor = userOf(req);
+
+  const membership = await prisma.membership.findUnique({
+    where: { userId_tenantId: { userId: actor.id, tenantId: body.tenantId } },
+    include: {
+      tenant: { select: { businessName: true } },
+      assignedRole: { select: { isOwner: true, permissions: true } },
+    },
+  });
+
+  // 404 rather than 403 on a workspace they are not in, so this cannot be used to test whether a
+  // given id is a real workspace. The same rule as the switcher.
+  if (!membership || !membership.isActive) throw ApiError.notFound('Workspace not found');
+
+  /*
+   * **Not your last one.**
+   *
+   * A login with no memberships cannot sign in anywhere: `requireAuth` answers `WORKSPACE_REQUIRED`
+   * and the switcher offers an empty list. That is not leaving a workspace, it is deleting the
+   * account through a door not built for it — and it is unrecoverable without support. Somebody who
+   * genuinely wants to be gone entirely is asking for account deletion, which is a different
+   * feature with different consequences.
+   */
+  const remaining = await prisma.membership.count({
+    where: { userId: actor.id, isActive: true, tenantId: { not: body.tenantId } },
+  });
+  if (remaining === 0) {
+    throw ApiError.badRequest(
+      'This is your only workspace, so you cannot leave it. Contact support to close your account.',
+    );
+  }
+
+  /*
+   * The same guard the Team screen has, from the same function — and asked the same way.
+   *
+   * An owner walking out of their own workspace would leave it with nobody who can invite, change a
+   * role or pay the bill: a workspace nobody can administer, holding live customer conversations.
+   *
+   * **Only when this person is one of the administrators**, which is the part that is easy to get
+   * wrong. `activeAdminCount` returns 0 both for "you were the last one" and for "there were never
+   * any" — the second is the ordinary state of a workspace whose only member is a plain agent, and
+   * reading it as the first would trap that person in a workspace they never administered.
+   */
+  const administers = membership.assignedRole?.isOwner
+    || membership.assignedRole?.permissions.includes('team:manage')
+    || false;
+  if (administers && await activeAdminCount(body.tenantId, { excludingUserId: actor.id }) === 0) {
+    throw ApiError.badRequest(NO_ADMIN_LEFT);
+  }
+
+  await revokeMembership(body.tenantId, actor.id);
+
+  logger.info('Left a workspace', { userId: actor.id, tenantId: body.tenantId });
+
+  /*
+   * The workspaces that are left, so the client can re-home without a second round trip.
+   *
+   * Deliberately **no new token**: the one they hold may still name the workspace they just left,
+   * and that is safe — `requireAuth` selects the membership by the claim and now finds nothing
+   * active, so it refuses. The client's move is to switch, which is a real request they must make.
+   * Minting a token here would be picking their next workspace for them.
+   */
+  res.json({
+    success: true,
+    message: `You have left ${membership.tenant.businessName || 'the workspace'}.`,
+    data: { workspaces: await workspacesFor(actor.id, req.claimedTenantId ?? '') },
   });
 });

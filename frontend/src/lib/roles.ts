@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Permission } from '@/lib/permissions';
+import { useAuthStore } from '@/stores/auth.store';
 
 // The workspace's own roles.
 //
@@ -41,12 +42,22 @@ export interface RolesResponse {
   grantable: Permission[];
 }
 
-export const useRoles = () => useQuery({
-  queryKey: ['roles'],
-  queryFn: () => api.get<{ data: RoleRow[]; meta: { groups: PermissionGroup[]; grantable: Permission[] } }>('/roles')
-    .then((r): RolesResponse => ({
-      roles: r.data.data,
-      groups: r.data.meta.groups,
-      grantable: r.data.meta.grantable,
-    })),
-});
+/*
+ * Keyed by workspace, like `['me','permissions']` and unlike everything else — see the note there.
+ *
+ * A role belongs to one workspace, and the Team screen puts these `roleId`s straight into a `Select`
+ * whose value it then sends back. Another workspace's ids there would be a form that cannot be
+ * submitted, or worse a role assignment refused with a message about a role the person can see.
+ */
+export const useRoles = () => {
+  const tenantId = useAuthStore((s) => s.tenant?.id);
+  return useQuery({
+    queryKey: ['roles', tenantId],
+    queryFn: () => api.get<{ data: RoleRow[]; meta: { groups: PermissionGroup[]; grantable: Permission[] } }>('/roles')
+      .then((r): RolesResponse => ({
+        roles: r.data.data,
+        groups: r.data.meta.groups,
+        grantable: r.data.meta.grantable,
+      })),
+  });
+};

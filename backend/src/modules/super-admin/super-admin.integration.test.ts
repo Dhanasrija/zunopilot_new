@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMemberships } from '../../test-support/members.js';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
@@ -552,6 +552,383 @@ describe('the connector type catalog', () => {
     const tenantToken = signToken({ userId: ownerId });
     await request(app).get('/sa/connector-types').set(asAdmin(tenantToken)).expect(401);
     await request(app).get('/sa/connector-types').expect(401);
+  });
+});
+
+describe('what a workspace is listed as', () => {
+  /*
+   * The console showed `Tenant.category`, the enum that predates the categories table — which reads
+   * `RESTAURANT` for every workspace on the platform because nothing has written it since. So every
+   * customer looked like a restaurant, including the IT consultancies.
+   *
+   * The fixture's workspaces have the enum set and **no category row**, which is what makes the
+   * assertion decisive: the label must be null rather than "restaurant".
+   */
+  it('**reports the category the workspace chose, not the legacy enum**', async () => {
+    const token = await login();
+    const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+    // No category row on this fixture, so there is nothing to report — and "not set" is the truth.
+    expect(row.category).toBeNull();
+    // The enum is still carried, under a name that says what it is.
+    expect(row.legacyCategory).toBe('RESTAURANT');
+  });
+
+  it('reports the label once a category is chosen', async () => {
+    const token = await login();
+    const category = await prisma.businessCategory.create({
+      data: { key: `SA_TEST_LABEL_${Date.now()}`, label: 'Test Trade' },
+    });
+    try {
+      await prisma.tenant.update({
+        where: { id: TENANT_A }, data: { businessCategoryId: category.id },
+      });
+
+      const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+      const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+      expect(row.category).toBe('Test Trade');
+    } finally {
+      await prisma.tenant.update({ where: { id: TENANT_A }, data: { businessCategoryId: null } });
+      await prisma.businessCategory.delete({ where: { id: category.id } });
+    }
+  });
+
+  it('**flags a workspace that verified a code and never finished setup**', async () => {
+    // The unnamed rows in the workspace list. Without this the console gives an operator no way to
+    // tell an abandoned signup from a real workspace whose owner has not named it yet.
+    const token = await login();
+    const res = await request(app).get('/sa/tenants?take=50').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.find((r: { id: string }) => r.id === TENANT_A);
+    // The fixture never completes onboarding, so this is the flag's true state here.
+    expect(row.onboardingCompletedAt).toBeNull();
+  });
+});
+
+describe('the signup funnel', () => {
+  /*
+   * The two lists worth getting right are the ones that could mislead:
+   *
+   *   • Somebody who mistyped a code, let it expire and then got in **must not** appear as an
+   *     abandonment — their first challenge is still sitting there unconsumed, and counting it would
+   *     put live customers on a chase list.
+   *   • "Left at the code" covers 24 hours because the sweep deletes older rows. The window is
+   *     asserted in the query rather than assumed, so a box whose sweep is behind still reports the
+   *     period the page claims.
+   */
+  const PHONE_GAVE_UP = '15550007001';
+  const PHONE_TRIED_THEN_SUCCEEDED = '15550007002';
+
+  afterEach(async () => {
+    await prisma.otpChallenge.deleteMany({
+      where: { phone: { in: [PHONE_GAVE_UP, PHONE_TRIED_THEN_SUCCEEDED] } },
+    });
+  });
+
+  /** An expired, unconsumed challenge — somebody who asked for a code and never used it. */
+  const expiredUnused = (phone: string, minutesAgo: number, attempts = 0) =>
+    prisma.otpChallenge.create({
+      data: {
+        phone,
+        codeHash: 'not-a-real-hash',
+        attempts,
+        createdAt: new Date(Date.now() - minutesAgo * 60_000),
+        expiresAt: new Date(Date.now() - (minutesAgo - 10) * 60_000),
+      },
+    });
+
+  it('**lists a number that asked for a code and never entered it**', async () => {
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 60, 2);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    const row = res.body.data.abandonedAtCode.find((r: { phone: string }) => r.phone === PHONE_GAVE_UP);
+    expect(row).toBeDefined();
+    // Wrong entries carried separately: somebody who tried and failed is a delivery or usability
+    // problem, and somebody who never opened the SMS is not the same person.
+    expect(row.wrongCodeAttempts).toBe(2);
+    expect(res.body.data.abandonedWindowHours).toBe(24);
+  });
+
+  it('**does not list somebody who failed once and then got in**', async () => {
+    const token = await login();
+    await expiredUnused(PHONE_TRIED_THEN_SUCCEEDED, 30);
+    // …and then asked again and verified.
+    await prisma.otpChallenge.create({
+      data: {
+        phone: PHONE_TRIED_THEN_SUCCEEDED,
+        codeHash: 'not-a-real-hash',
+        expiresAt: new Date(Date.now() + 600_000),
+        consumedAt: new Date(),
+      },
+    });
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    expect(res.body.data.abandonedAtCode.map((r: { phone: string }) => r.phone))
+      .not.toContain(PHONE_TRIED_THEN_SUCCEEDED);
+  });
+
+  it('**counts one person per number, not one per code they asked for**', async () => {
+    // The resend cooldown means a determined person generates several challenges. Three rows is one
+    // person who did not sign up.
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 90);
+    await expiredUnused(PHONE_GAVE_UP, 70);
+    await expiredUnused(PHONE_GAVE_UP, 50);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    const rows = res.body.data.abandonedAtCode
+      .filter((r: { phone: string }) => r.phone === PHONE_GAVE_UP);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].requests).toBe(3);
+  });
+
+  it('ignores a request older than the retention window', async () => {
+    // Asserted in the query, not left to the sweep — which is a scheduled job that can be behind.
+    const token = await login();
+    await expiredUnused(PHONE_GAVE_UP, 60 * 30);
+
+    const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+    expect(res.body.data.abandonedAtCode.map((r: { phone: string }) => r.phone))
+      .not.toContain(PHONE_GAVE_UP);
+  });
+
+  it('**separates workspaces that verified but never finished the profile**', async () => {
+    const token = await login();
+
+    // TENANT_A is onboarded by the fixture; make a half-finished one beside it.
+    const stuck = await prisma.tenant.create({
+      data: {
+        businessName: '',
+        category: 'RESTAURANT',
+        users: { create: [{ phone: '15550007003', fullName: '', role: 'OWNER' }] },
+      },
+    });
+    await seedMemberships();
+
+    try {
+      const res = await request(app).get('/sa/signups').set(asAdmin(token)).expect(200);
+
+      const row = res.body.data.abandonedAtProfile
+        .find((r: { tenantId: string }) => r.tenantId === stuck.id);
+      expect(row).toBeDefined();
+      // The number is the point: it is the only way to follow one of these up.
+      expect(row.owner.phone).toBe('15550007003');
+      // And it is not counted as a completed signup.
+      expect(res.body.data.completed.map((r: { tenantId: string }) => r.tenantId))
+        .not.toContain(stuck.id);
+    } finally {
+      await prisma.tenant.delete({ where: { id: stuck.id } });
+    }
+  });
+
+  it('needs an operator token', async () => {
+    await request(app).get('/sa/signups').expect(401);
+    await request(app).get('/sa/signups')
+      .set(asAdmin(signToken({ userId: ownerId, tenantId: TENANT_A }))).expect(401);
+  });
+});
+
+describe('which model answers a workspace', () => {
+  /*
+   * An operator's choice, and the reason it is one: it decides who we pay per message and how long a
+   * customer waits. A workspace has no route to it at all.
+   *
+   * The property worth protecting is the refusal. Pinning a workspace to a vendor with no key on this
+   * server produces a workspace whose every message quietly falls back — working, on the wrong model,
+   * with the console displaying the one it is not using.
+   */
+  it('**pins a workspace to a vendor, and un-pins it**', async () => {
+    const token = await login();
+
+    // OPENAI is configured in the test environment; GROQ's availability depends on the box, so this
+    // asserts on the one that is always there.
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: 'OPENAI', note: 'cost test' }).expect(200);
+
+    expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
+      .toBe('OPENAI');
+
+    // Null is a real choice — it is how an operator hands a workspace back to the platform default,
+    // so that changing `LLM_VENDOR` later reaches it again.
+    const back = await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: null }).expect(200);
+
+    expect(back.body.data.pinned).toBeNull();
+    expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor).toBeNull();
+  });
+
+  it('**refuses a vendor with no API key on this server**', async () => {
+    const token = await login();
+
+    // Blanked for this request only. A stored choice nothing can serve would make every message fall
+    // back to the platform default while the console showed the pinned vendor — worse than refusing.
+    const saved = process.env.GROQ_LLM_API_KEY;
+    process.env.GROQ_LLM_API_KEY = '';
+    vi.resetModules();
+    try {
+      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
+      const fresh = buildSuperAdminApp();
+      const res = await request(fresh).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+        .set(asAdmin(token)).send({ vendor: 'GROQ' }).expect(400);
+
+      expect(res.body.message).toContain('GROQ_LLM_API_KEY');
+      expect((await prisma.tenant.findUniqueOrThrow({ where: { id: TENANT_A } })).llmVendor)
+        .toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
+      else process.env.GROQ_LLM_API_KEY = saved;
+      vi.resetModules();
+    }
+  });
+
+  it('records who changed it, and to what', async () => {
+    // This changes which vendor is billed for a workspace's traffic. Six months later the question is
+    // "who moved this workspace and why", and only the audit trail can answer it.
+    const token = await login();
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`).set(asAdmin(token))
+      .send({ vendor: 'OPENAI', note: 'latency complaint' }).expect(200);
+
+    const event = await prisma.auditEvent.findFirstOrThrow({
+      where: { tenantId: TENANT_A, action: 'tenant.llm_vendor_changed' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(event.superAdminId).toBe(adminId);
+    expect(JSON.stringify(event.metadata)).toContain('latency complaint');
+  });
+
+  it('**tells the console what each option resolves to, and which are unavailable**', async () => {
+    const token = await login();
+    const res = await request(app).get(`/sa/tenants/${TENANT_A}`).set(asAdmin(token)).expect(200);
+
+    const { llm } = res.body.data;
+    expect(llm.vendors.map((v: { vendor: string }) => v.vendor)).toEqual(['OPENAI', 'GROQ']);
+    // A model name per option, so the selector offers a model rather than a brand.
+    const openai = llm.vendors.find((v: { vendor: string }) => v.vendor === 'OPENAI');
+    expect(openai.available).toBe(true);
+    expect(openai.model).toBeTruthy();
+    // And that generation is pinned, so nobody wonders why a Groq workspace's drafts name a GPT model.
+    expect(llm.authoringVendor).toBe('OPENAI');
+  });
+
+  it('**reports a vendor with no key here as unavailable**', async () => {
+    /*
+     * Asserted against a *blanked* key rather than against whatever this box happens to have.
+     *
+     * The first version checked `available === true` for OpenAI, which is true on any developer
+     * machine whether the field is computed or hardcoded — so hardcoding it would have gone
+     * unnoticed, and the console would have offered a model the server cannot reach.
+     */
+    const token = await login();
+    const saved = process.env.GROQ_LLM_API_KEY;
+    process.env.GROQ_LLM_API_KEY = '';
+    vi.resetModules();
+    try {
+      const { buildSuperAdminApp } = await import('../../superadmin-server.js');
+      const res = await request(buildSuperAdminApp()).get(`/sa/tenants/${TENANT_A}`)
+        .set(asAdmin(token)).expect(200);
+
+      const groq = res.body.data.llm.vendors.find((v: { vendor: string }) => v.vendor === 'GROQ');
+      expect(groq.available).toBe(false);
+      // And no model claimed for it, so the option cannot read "GROQ — llama-…" while unusable.
+      expect(groq.model).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.GROQ_LLM_API_KEY;
+      else process.env.GROQ_LLM_API_KEY = saved;
+      vi.resetModules();
+    }
+  });
+
+  it('needs an operator token — a customer token is not enough', async () => {
+    const tenantToken = signToken({ userId: ownerId, tenantId: TENANT_A });
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+      .set(asAdmin(tenantToken)).send({ vendor: 'OPENAI' }).expect(401);
+    await request(app).patch(`/sa/tenants/${TENANT_A}/llm-vendor`)
+      .send({ vendor: 'OPENAI' }).expect(401);
+  });
+});
+
+describe('the starting copy for a kind of business', () => {
+  /*
+   * Two fields on a category that **change live behaviour for every workspace on it** which has not
+   * written its own — how its assistant sounds, and what it declines. That is the point of them
+   * living here rather than being copied into each workspace at signup, and it is why an operator
+   * editing them is audited like everything else on this console.
+   */
+  // SCREAMING_SNAKE — the schema refuses anything else, because templates match on it.
+  const KEY = `SA_TEST_CAT_${Date.now()}`;
+  let categoryId: string;
+
+  afterEach(async () => {
+    await prisma.auditEvent.deleteMany({ where: { targetType: 'BusinessCategory', targetId: categoryId } });
+    await prisma.businessCategory.deleteMany({ where: { key: KEY } });
+  });
+
+  it('**is set on the category and read back**', async () => {
+    const token = await login();
+
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token)).send({
+      key: KEY,
+      label: 'Test Trade',
+      defaultPersona: 'Plain and specific, no marketing language.',
+      defaultOutOfScopeTopics: 'recruitment enquiries\ninternships',
+    }).expect(201);
+    categoryId = created.body.data.id;
+
+    const list = await request(app).get('/sa/business-categories').set(asAdmin(token)).expect(200);
+    const row = list.body.data.find((c: { id: string }) => c.id === categoryId);
+    expect(row.defaultPersona).toBe('Plain and specific, no marketing language.');
+    expect(row.defaultOutOfScopeTopics).toContain('internships');
+  });
+
+  it('**can be cleared back to the house default**', async () => {
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token)).send({
+      key: KEY, label: 'Test Trade', defaultPersona: 'Mine.',
+    }).expect(201);
+    categoryId = created.body.data.id;
+
+    // What the console's blank field sends. Null, not an empty string: workspaces on this category
+    // go back to inheriting the house text rather than to having no persona at all.
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultPersona: null }).expect(200);
+
+    const after = await prisma.businessCategory.findUniqueOrThrow({ where: { id: categoryId } });
+    expect(after.defaultPersona).toBeNull();
+  });
+
+  it('refuses a persona long enough to be a second prompt', async () => {
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token))
+      .send({ key: KEY, label: 'Test Trade' }).expect(201);
+    categoryId = created.body.data.id;
+
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultPersona: 'x'.repeat(5000) }).expect(400);
+  });
+
+  it('records who changed it', async () => {
+    // These fields reach customers of every workspace on the category, so "who wrote this" has to be
+    // answerable months later.
+    const token = await login();
+    const created = await request(app).post('/sa/business-categories').set(asAdmin(token))
+      .send({ key: KEY, label: 'Test Trade' }).expect(201);
+    categoryId = created.body.data.id;
+
+    await request(app).patch(`/sa/business-categories/${categoryId}`).set(asAdmin(token))
+      .send({ defaultOutOfScopeTopics: 'nutrition advice' }).expect(200);
+
+    const events = await prisma.auditEvent.findMany({
+      where: { targetType: 'BusinessCategory', targetId: categoryId },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(events.map((e) => e.action)).toEqual(['category.created', 'category.updated']);
+    expect(events[1]!.superAdminId).toBe(adminId);
   });
 });
 

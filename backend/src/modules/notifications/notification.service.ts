@@ -209,6 +209,15 @@ const KIND_FLAG: Record<NotificationKind, keyof NotificationPreference> = {
   MESSAGE_RECEIVED: 'messageReceived',
   HANDOFF_REQUESTED: 'handoffRequested',
   ORDER_CREATED: 'orderCreated',
+  /*
+   * **Deliberately not opt-out.** Mapped onto `inApp`, which is the channel switch rather than a
+   * per-kind preference, so there is no setting that turns this one off.
+   *
+   * Being added to a workspace is not news about the business — it is news about *you*, and the
+   * only record of who did it. A preference that could suppress it would let somebody be given
+   * access to a stranger's workspace with nothing anywhere saying so.
+   */
+  ADDED_TO_WORKSPACE: 'inApp',
 };
 
 /** Does this person want to be told about this kind, on this channel? */
@@ -239,9 +248,17 @@ export const updatePreferences = (
  */
 export const recipientsOf = async (notification: Notification): Promise<string[]> => {
   if (notification.userId) return [notification.userId];
-  const users = await prisma.user.findMany({
-    where: { tenantId: notification.tenantId, isActive: true },
-    select: { id: true },
+  /*
+   * Everybody who can reach this workspace — memberships, not logins rooted here.
+   *
+   * `user.findMany({ where: { tenantId } })` would miss a colleague who joined from another
+   * workspace, so they would never be told about an inbound message while being fully able to
+   * answer it. And it would reach somebody whose login was created here but who has since been
+   * removed.
+   */
+  const memberships = await prisma.membership.findMany({
+    where: { tenantId: notification.tenantId, isActive: true, user: { isActive: true } },
+    select: { userId: true },
   });
-  return users.map((u) => u.id);
+  return memberships.map((membership) => membership.userId);
 };

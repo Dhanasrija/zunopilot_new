@@ -45,8 +45,23 @@ interface MyPermissions {
 }
 
 export const usePermissions = () => {
+  /*
+   * The active workspace is part of the key.
+   *
+   * **Only for the two queries that carry authorisation** — this one and `['roles']`. It is not the
+   * start of a sweep: the other 179 query keys are deliberately tenant-free, because a workspace
+   * switch is a full page load with an emptied cache, and threading a tenant id through all of them
+   * is one omission away from showing one workspace's data under another's name.
+   *
+   * These two are different because the answer decides what somebody is *allowed* to see. `can()`
+   * falls back to this query whenever the store's permissions are empty, which is every session
+   * persisted before capabilities existed — so a cached answer from another workspace would not merely
+   * look stale, it would grant.
+   */
+  const tenantId = useAuthStore((s) => s.tenant?.id);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['me', 'permissions'],
+    queryKey: ['me', 'permissions', tenantId],
     queryFn: () => api.get<{ data: MyPermissions }>('/team/me/permissions').then((r) => r.data.data),
     // Rarely changes, and every screen asks. A role change takes effect on the
     // next load, which is the same moment the server starts refusing anyway.

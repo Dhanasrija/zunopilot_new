@@ -76,6 +76,34 @@ export interface RoutingRule {
   enabled: boolean;
 }
 
+/** Where a resolved piece of assistant copy came from. */
+export type CopySource = 'tenant' | 'category' | 'house';
+
+/**
+ * What the assistant actually says, after inheritance.
+ *
+ * Five of these fields fall back to the workspace's business category and then to a house default,
+ * so a screen showing only the raw values would render empty boxes for an assistant that has a whole
+ * persona. `sources` is what lets it say "inherited from Restaurant" without re-implementing the
+ * precedence in the browser.
+ */
+export interface ResolvedAssistantCopy {
+  persona: string;
+  outOfScopeTopics: string;
+  unknownAnswerReply: string;
+  outOfScopeReply: string;
+  replyWordLimit: number;
+  replyLanguage: string | null;
+  sources: {
+    persona: CopySource;
+    outOfScopeTopics: CopySource;
+    unknownAnswerReply: CopySource;
+    outOfScopeReply: CopySource;
+    replyWordLimit: CopySource;
+    replyLanguage: CopySource;
+  };
+}
+
 export interface RoutingConfig {
   assistant: {
     id: string;
@@ -83,7 +111,33 @@ export interface RoutingConfig {
     status: AssistantStatus;
     channel: { displayPhone: string | null; phoneNumberId: string };
     generalResponseEnabled: boolean;
+
+    /*
+     * **Raw, and null means inherit.** What this workspace has actually set. The form binds to these
+     * so a Reset can send `null` and mean it — binding to `resolvedCopy` instead would make every
+     * save adopt the category's text, and the workspace would silently stop inheriting improvements
+     * it never opted out of.
+     */
     generalSystemPrompt: string | null;
+    outOfScopeTopics: string | null;
+    unknownAnswerReply: string | null;
+    outOfScopeReply: string | null;
+    replyWordLimit: number | null;
+    replyLanguage: string | null;
+
+    /** What the assistant is really running with, and where each piece came from. */
+    resolvedCopy: ResolvedAssistantCopy;
+    /** For "Inherited from Restaurant" — the label, never the key. */
+    categoryLabel: string | null;
+    /** The server's caps, so a counter here cannot promise what a save then refuses. */
+    copyLimits: {
+      personaChars: number;
+      topicLines: number;
+      topicLineChars: number;
+      replyChars: number;
+      wordLimitMin: number;
+      wordLimitMax: number;
+    };
     highConfidenceThreshold: number;
     mediumConfidenceThreshold: number;
     maxRecentMessages: number;

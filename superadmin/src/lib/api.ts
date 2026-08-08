@@ -102,7 +102,16 @@ export interface Enquiry {
 export interface TenantRow {
   id: string;
   businessName: string;
-  category: string;
+  /**
+   * The category the workspace picked, or null when it has not picked one.
+   *
+   * Was the legacy enum, which reads `RESTAURANT` for every workspace on the platform — so this
+   * column made eleven workspaces look like eleven restaurants. Null renders as "not set", which is
+   * both true and a useful signal: a workspace with no category never finished signing up.
+   */
+  category: string | null;
+  /** Null means they verified a code and never completed the profile form. */
+  onboardingCompletedAt: string | null;
   isActive: boolean;
   createdAt: string;
   gstin: string | null;
@@ -116,11 +125,77 @@ export interface TenantRow {
   orders: number;
 }
 
+/** The vendors a workspace can be pinned to. Mirrors `enum LlmVendor` in the schema. */
+export type LlmVendor = 'OPENAI' | 'GROQ';
+
+/**
+ * A workspace's model choice, and what the server can actually serve.
+ *
+ * `available: false` means this box has no key for that vendor — the selector disables it, because
+ * pinning a workspace to a model the server cannot reach would make every message fall back with a
+ * warning in a log nobody is reading.
+ */
+export interface LlmChoices {
+  pinned: LlmVendor | null;
+  /** What "platform default" resolves to today, so the option can name a model. */
+  platform: { vendor: string | null; model: string | null };
+  vendors: Array<{
+    vendor: LlmVendor;
+    available: boolean;
+    model: string | null;
+    baseUrl: string | null;
+    structuredMode: 'json_schema' | 'json_object' | null;
+  }>;
+  /** Workflow generation is pinned to this whatever the workspace uses for chat. */
+  authoringVendor: LlmVendor;
+}
+
+/**
+ * The signup funnel.
+ *
+ * `abandonedAtCode` is a **24-hour window**, because one-time codes are deleted a day after they
+ * expire — `abandonedWindowHours` carries the real number so the page's wording follows the server
+ * rather than a constant somebody has to remember to update. The other two lists are permanent.
+ */
+export interface Signups {
+  abandonedAtCode: Array<{
+    phone: string;
+    lastRequestedAt: string;
+    requests: number;
+    /** Codes typed in wrongly — a different person from one who never opened the SMS. */
+    wrongCodeAttempts: number;
+    ip: string | null;
+  }>;
+  abandonedWindowHours: number;
+  abandonedAtProfile: Array<{
+    tenantId: string;
+    businessName: string;
+    isActive: boolean;
+    verifiedAt: string;
+    owner: {
+      phone: string | null; email: string | null; fullName: string;
+      country: string | null; createdAt: string;
+    } | null;
+  }>;
+  completed: Array<{
+    tenantId: string;
+    businessName: string;
+    category: string | null;
+    verifiedAt: string;
+    completedAt: string | null;
+  }>;
+  counts: { abandonedAtCode: number; abandonedAtProfile: number; completed: number };
+}
+
 export interface TenantDetail {
   tenant: {
-    id: string; businessName: string; category: string; contactNumber: string | null;
+    id: string; businessName: string; category: string | null; contactNumber: string | null;
+    businessCategory: { id: string; key: string; label: string } | null;
+    onboardingCompletedAt: string | null;
     address: string | null; website: string | null; isActive: boolean;
     createdAt: string; gstin: string | null; gstStateCode: string | null;
+    /** Which vendor answers this workspace's customers. Null = the platform default. */
+    llmVendor: LlmVendor | null;
     users: Array<{
       id: string; email: string; fullName: string; role: string;
       isActive: boolean; emailVerified: boolean; createdAt: string;
@@ -133,6 +208,8 @@ export interface TenantDetail {
     _count: Record<string, number>;
   };
   entitlements: Record<string, unknown>;
+  /** Which model answers this workspace, what it resolves to, and the options this box supports. */
+  llm: LlmChoices;
   /** Mirrors `UsageSnapshot` in the backend's billing service. */
   usage: {
     used: number;
@@ -217,6 +294,15 @@ export interface CategoryRow {
   /** What this kind of business calls its catalogue, and one thing in it. Null = generic. */
   catalogueNoun: string | null;
   catalogueItemNoun: string | null;
+  /**
+   * Where a workspace on this category starts: how its assistant sounds, and what it declines.
+   *
+   * **Editing these changes live behaviour** for every workspace on the category that has not
+   * written its own — which is the point, and the reason it is audited. Null means those workspaces
+   * fall back to house text that is bland but never wrong.
+   */
+  defaultPersona: string | null;
+  defaultOutOfScopeTopics: string | null;
   sortOrder: number;
   isActive: boolean;
   workspaces: number;
@@ -291,6 +377,7 @@ export const sa = {
 
   overview: () => unwrap<Overview>(api.get('/overview')),
 
+  signups: () => unwrap<Signups>(api.get('/signups')),
   tenants: (params: Record<string, string | number | undefined>) =>
     api.get<{ data: TenantRow[]; meta: { total: number } }>('/tenants', { params })
       .then((r) => ({ rows: r.data.data, total: r.data.meta.total })),
@@ -320,6 +407,8 @@ export const sa = {
   tenantModules: (id: string) =>
     unwrap<ModuleSetting[]>(api.get(`/tenants/${id}/modules`)),
 
+  setTenantLlmVendor: (id: string, body: { vendor: LlmVendor | null; note?: string }) =>
+    unwrap<LlmChoices>(api.patch(`/tenants/${id}/llm-vendor`, body)),
   setTenantModule: (id: string, body: { module: ModuleKey; enabled: boolean; note?: string }) =>
     unwrap<ModuleSetting>(api.patch(`/tenants/${id}/modules`, body)),
 
@@ -354,6 +443,8 @@ export const sa = {
       key: string; label: string; description?: string; sortOrder?: number;
       /** Omit either to leave it generic — the app reads "Catalogue" / "Item". */
       catalogueNoun?: string; catalogueItemNoun?: string;
+      /** Omit to leave a category on the house persona and the house topic floor. */
+      defaultPersona?: string; defaultOutOfScopeTopics?: string;
     }) => unwrap<CategoryRow>(api.post('/business-categories', body)),
     update: (id: string, body: Record<string, unknown>) =>
       unwrap<CategoryRow>(api.patch(`/business-categories/${id}`, body)),

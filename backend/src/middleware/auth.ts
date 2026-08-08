@@ -103,6 +103,25 @@ export const requireSession = async (req: Request, _res: Response, next: NextFun
     // being revoked. Both refuse; this one refuses everywhere at once.
     if (!user || !user.isActive) throw ApiError.unauthorized('User not active');
 
+    /*
+     * A support token cannot reach the switcher at all.
+     *
+     * **This is the guard, and it has to be here.** `requireSession` resolves no membership, so it
+     * never runs the impersonation block below — which means `req.impersonation` is `undefined` on
+     * every route mounted on it, and a `if (req.impersonation)` check in one of those handlers is
+     * dead code that reads like a control. Switching and leaving a workspace were both guarded that
+     * way, and neither guard could fire.
+     *
+     * Refused outright rather than limited to safe methods, because listing is the leak: a grant is
+     * consent from **one** workspace, and answering `GET /auth/workspaces` would tell the operator
+     * which *other* businesses this person belongs to. No workspace agreed to that.
+     */
+    if ((decoded as { imp?: unknown }).imp === true) {
+      throw ApiError.forbidden(
+        'Support access is limited to the workspace it was approved for.',
+      );
+    }
+
     req.user = user;
     /*
      * The workspace this token *names*, carried unvalidated.

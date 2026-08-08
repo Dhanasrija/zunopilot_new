@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { capabilityContractSchema } from '../domain/capability.js';
 import { workflowDefinitionSchema } from '../domain/definition.js';
 import { ROUTER_DECISIONS } from '../routing/contract.js';
+import { COPY_LIMITS } from '../routing/assistant-copy.js';
 
 // Request schemas for the conversation-engine API.
 //
@@ -20,12 +21,54 @@ export const instanceIdParam = z.object({ instanceId: z.uuid('Not a valid instan
 
 // ── Assistants ────────────────────────────────────────────────────────────────
 
+/*
+ * The assistant's own voice and scope.
+ *
+ * ── Every one of these is `nullish` on purpose ──────────────────────────────
+ *
+ * `null` is a meaningful value here, not an absence: it means *inherit* — the workspace's business
+ * category, then a house default. That is what the Reset control in the UI sends, and it is why
+ * these are not plain `.optional()`.
+ *
+ * ── Why they are capped this short ─────────────────────────────────────────
+ *
+ * Everything below is spliced into the prompt above the rules that keep the assistant safe. A
+ * field long enough to hold prose is a field long enough to hold a competing set of instructions —
+ * "ignore the rules below" is only dangerous if there is room to write it. Two hundred characters
+ * is a sentence in the business's voice; ten lines of eighty is a list of topics. Neither is a
+ * second prompt.
+ */
+const topicList = z.string()
+  .trim()
+  .max(COPY_LIMITS.topicLines * (COPY_LIMITS.topicLineChars + 1))
+  .refine(
+    (value) => value.split('\n').filter((line) => line.trim()).length <= COPY_LIMITS.topicLines,
+    { message: `At most ${COPY_LIMITS.topicLines} topics, one per line` },
+  )
+  .refine(
+    (value) => value.split('\n').every((line) => line.trim().length <= COPY_LIMITS.topicLineChars),
+    { message: `Each topic must be under ${COPY_LIMITS.topicLineChars} characters` },
+  );
+
 export const updateAssistantSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(1000).nullish(),
-  generalSystemPrompt: z.string().trim().max(4000).nullish(),
+  generalSystemPrompt: z.string().trim().max(COPY_LIMITS.personaChars).nullish(),
   generalResponseEnabled: z.boolean().optional(),
   status: z.enum(['DRAFT', 'ACTIVE', 'PAUSED']).optional(),
+
+  outOfScopeTopics: topicList.nullish(),
+  unknownAnswerReply: z.string().trim().max(COPY_LIMITS.replyChars).nullish(),
+  outOfScopeReply: z.string().trim().max(COPY_LIMITS.replyChars).nullish(),
+  replyWordLimit: z.number().int()
+    .min(COPY_LIMITS.wordLimitMin)
+    .max(COPY_LIMITS.wordLimitMax)
+    .nullish(),
+  /*
+   * A language name, not a code. It is interpolated into an English instruction the model reads
+   * ("Always reply in Telugu"), so "te-IN" would be a worse thing to write there than the word.
+   */
+  replyLanguage: z.string().trim().min(2).max(40).nullish(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' });
 
 export const updateRoutingConfigSchema = z.object({

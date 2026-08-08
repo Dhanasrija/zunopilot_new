@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, Ban, KeyRound, Plug, RotateCcw, ShieldCheck,
+  ArrowLeft, Ban, Cpu, KeyRound, Plug, RotateCcw, ShieldCheck,
 } from 'lucide-react';
 import {
-  sa, rupees, when, day, type ActivityEntry, type ModuleKey,
+  sa, rupees, when, day,
+  type ActivityEntry, type LlmChoices, type LlmVendor, type ModuleKey,
 } from '../lib/api';
 import {
   Badge, Button, Card, CardHeader, Empty, Input, Select, Stat, Td, Th, cn,
@@ -191,6 +192,100 @@ const MODULE_COPY: Record<ModuleKey, { label: string; blurb: string }> = {
 };
 
 /**
+ * Which model answers this workspace's customers.
+ *
+ * An operator's choice rather than the workspace's, for the same reason the modules below are ours:
+ * it decides who we pay per message and how long a customer waits, which is our cost and our latency
+ * budget. A workspace has no route to this at all.
+ *
+ * ── What the options actually mean ──────────────────────────────────────────
+ *
+ * **Platform default** is what every workspace gets unless somebody pins it, and it follows
+ * `LLM_VENDOR` on the server — so it changes for everyone at once when that changes, which is the
+ * point of leaving a workspace on it.
+ *
+ * A vendor with no API key on this server is **disabled, not hidden**: an operator looking for Groq
+ * and not finding it would reasonably conclude the feature is missing, when the answer is that one
+ * environment variable is unset.
+ *
+ * Generation is not affected. Writing a workflow from a prompt always uses OpenAI — a large node
+ * graph against a strict schema is a different job from a two-line reply — and the note below says so
+ * rather than leaving somebody to wonder why a Groq workspace's drafts came from a GPT model.
+ */
+function ModelChoice({ tenantId, llm }: { tenantId: string; llm: LlmChoices }) {
+  const qc = useQueryClient();
+  const [note, setNote] = useState('');
+
+  const set = useMutation({
+    mutationFn: (vendor: LlmVendor | null) =>
+      sa.setTenantLlmVendor(tenantId, { vendor, note: note.trim() || undefined }),
+    onSuccess: (choices) => {
+      toast.success(choices.pinned
+        ? `Now answering with ${choices.pinned}. Takes effect on the next message.`
+        : 'Back on the platform default model.');
+      setNote('');
+      qc.invalidateQueries({ queryKey: ['tenant', tenantId] });
+      qc.invalidateQueries({ queryKey: ['activity', tenantId] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const platformLabel = llm.platform.model
+    ? `Platform default — ${llm.platform.model}`
+    : 'Platform default';
+
+  return (
+    <Card>
+      <CardHeader
+        title={<span className="inline-flex items-center gap-2"><Cpu className="h-4 w-4 text-slate-400" />Model</span>}
+        hint="Who serves the model for this workspace's replies. Takes effect on the next message."
+      />
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            className="w-72"
+            value={llm.pinned ?? ''}
+            onChange={(v) => set.mutate(v === '' ? null : (v as LlmVendor))}
+            options={[
+              { value: '', label: platformLabel },
+              ...llm.vendors.map((v) => ({
+                value: v.vendor,
+                // The model, so the choice is a model and not a brand — and why it is unavailable
+                // where it is, because "Groq (no API key on this server)" is a fixable sentence.
+                label: v.available
+                  ? `${v.vendor} — ${v.model}`
+                  : `${v.vendor} (no API key on this server)`,
+                disabled: !v.available,
+              })),
+            ]}
+          />
+          {set.isPending && <span className="text-[11px] text-slate-500">Saving…</span>}
+        </div>
+
+        <ul className="space-y-1 text-[11px] leading-snug text-slate-500">
+          {llm.vendors.filter((v) => v.available && v.structuredMode === 'json_object').map((v) => (
+            <li key={v.vendor}>
+              <strong>{v.vendor}</strong> asks for JSON rather than having it enforced, so the router
+              is a little duller on it — a malformed reply is treated as no match, not as an error.
+            </li>
+          ))}
+          <li>
+            Writing a workflow from a prompt always uses <strong>{llm.authoringVendor}</strong>,
+            whatever is chosen here.
+          </li>
+        </ul>
+
+        <Input
+          value={note}
+          onChange={setNote}
+          placeholder="Why (optional) — goes on the audit record"
+        />
+      </div>
+    </Card>
+  );
+}
+
+/**
  * Which modules this workspace has.
  *
  * The only place any of them can be changed — there is no customer-facing
@@ -335,7 +430,7 @@ export default function TenantDetail() {
 
   if (isLoading || !data) return <p className="text-sm text-slate-500">Loading…</p>;
 
-  const { tenant, entitlements, invoices, payments, connectors, pricing } = data;
+  const { tenant, entitlements, invoices, payments, connectors, pricing, llm } = data;
   const counts = tenant._count;
   const { usage } = data;
 
@@ -348,11 +443,14 @@ export default function TenantDetail() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-            {tenant.businessName}
+            {tenant.businessName || <span className="italic text-slate-400">unnamed workspace</span>}
             {tenant.isActive ? <Badge tone="green">active</Badge> : <Badge tone="red">suspended</Badge>}
+            {/* Verified a code, never filled in the profile. The most useful thing to know first. */}
+            {!tenant.onboardingCompletedAt && <Badge tone="amber">setup unfinished</Badge>}
           </h1>
           <p className="mt-0.5 text-xs text-slate-500">
-            {tenant.category.replace(/_/g, ' ').toLowerCase()} · joined {day(tenant.createdAt)} ·{' '}
+            {/* The label they chose, never the legacy enum — which says RESTAURANT for everybody. */}
+            {tenant.businessCategory?.label ?? 'category not set'} · joined {day(tenant.createdAt)} ·{' '}
             <span className="font-mono">{tenant.id}</span>
           </p>
         </div>
@@ -582,6 +680,8 @@ export default function TenantDetail() {
 
       {tab === 'Setup' && (
         <div className="space-y-4">
+          <ModelChoice tenantId={tenantId} llm={llm} />
+
           <Modules tenantId={tenantId} />
 
           <Card className="overflow-hidden">

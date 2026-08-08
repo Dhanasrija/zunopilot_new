@@ -4,6 +4,7 @@ import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { ApiError } from '../../../utils/ApiError.js';
 import { tenantIdOf } from '../../../middleware/auth.js';
 import { candidateWorkflows } from '../routing/ai-router.js';
+import { COPY_LIMITS, resolveAssistantCopy } from '../routing/assistant-copy.js';
 
 // Assistant + routing configuration.
 //
@@ -56,6 +57,24 @@ export const updateAssistant = asyncHandler(async (req: Request, res: Response) 
 export const getRoutingConfig = asyncHandler(async (req: Request, res: Response) => {
   const assistant = await requireAssistant(req);
 
+  /*
+   * The workspace's category, so the screen can show what the assistant is *actually* saying rather
+   * than only what this workspace has typed.
+   *
+   * Five of the fields below inherit — the category first, then a house default — and a settings page
+   * that rendered only the raw nulls would show five empty boxes for an assistant with a whole
+   * persona. The resolved values and their sources come back together for that reason.
+   */
+  const tenant = await prisma.tenant.findUniqueOrThrow({
+    where: { id: assistant.tenantId },
+    select: {
+      businessCategory: {
+        select: { label: true, defaultPersona: true, defaultOutOfScopeTopics: true },
+      },
+    },
+  });
+  const copy = resolveAssistantCopy(assistant, tenant.businessCategory);
+
   const [workflows, rules] = await Promise.all([
     prisma.workflow.findMany({
       where: { assistantId: assistant.id, status: { not: 'ARCHIVED' } },
@@ -83,7 +102,26 @@ export const getRoutingConfig = asyncHandler(async (req: Request, res: Response)
           phoneNumberId: assistant.whatsappChannel.phoneNumberId,
         },
         generalResponseEnabled: assistant.generalResponseEnabled,
+
+        /*
+         * Raw first: what this workspace has actually set, `null` where it has not. The form binds to
+         * these, so Reset can send `null` and mean it — binding to the resolved value instead would
+         * turn every save into an adoption of the category's text, and the workspace would silently
+         * stop inheriting improvements it never opted out of.
+         */
         generalSystemPrompt: assistant.generalSystemPrompt,
+        outOfScopeTopics: assistant.outOfScopeTopics,
+        unknownAnswerReply: assistant.unknownAnswerReply,
+        outOfScopeReply: assistant.outOfScopeReply,
+        replyWordLimit: assistant.replyWordLimit,
+        replyLanguage: assistant.replyLanguage,
+
+        /** What the assistant is really running with, and where each piece came from. */
+        resolvedCopy: copy,
+        /** For "Inherited from Restaurant" — the label, not the key. */
+        categoryLabel: tenant.businessCategory?.label ?? null,
+        /** The caps, so the form's counters and the server cannot disagree. */
+        copyLimits: COPY_LIMITS,
         highConfidenceThreshold: assistant.highConfidenceThreshold,
         mediumConfidenceThreshold: assistant.mediumConfidenceThreshold,
         maxRecentMessages: assistant.maxRecentMessages,

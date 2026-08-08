@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
-import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/auth.store';
+import {
+  useAuthStore, type AuthTenant, type AuthUser, type AuthWorkspace,
+} from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneField } from '@/components/ui/phone-field';
@@ -36,6 +38,14 @@ interface VerifyResult {
   tenant: AuthTenant;
   profileComplete: boolean;
   isNew: boolean;
+  /**
+   * Every workspace this number can reach.
+   *
+   * Declared here so it reaches the store: `setSession` keeps the *previous* list when a payload
+   * omits the field — right for a response that predates it, wrong for a fresh sign-in, which would
+   * otherwise leave one person looking at the workspaces of whoever used this browser last.
+   */
+  workspaces: AuthWorkspace[];
 }
 
 export default function Login() {

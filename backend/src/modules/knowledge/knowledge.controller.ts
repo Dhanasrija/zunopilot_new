@@ -4,7 +4,7 @@ import { prisma } from '../../config/prisma.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { tenantIdOf, userOf } from '../../middleware/auth.js';
-import { llmProvider } from '../conversation-engine/providers/llm.js';
+import { providerForVendor } from '../conversation-engine/providers/llm.js';
 import { buildSystemPrompt } from '../conversation-engine/routing/general-response.js';
 import { aiAgentGate } from '../modules/module.service.js';
 import { moduleEnabled } from '../modules/module.service.js';
@@ -167,10 +167,29 @@ export const tryKnowledge = asyncHandler(async (req: Request, res: Response) => 
    */
   const assistant = await prisma.assistant.findFirst({
     where: { tenantId },
-    select: { generalSystemPrompt: true },
+    select: {
+      generalSystemPrompt: true,
+      outOfScopeTopics: true,
+      unknownAnswerReply: true,
+      outOfScopeReply: true,
+      replyWordLimit: true,
+      replyLanguage: true,
+    },
   });
 
-  const [knowledge, faqs, menuCount] = await Promise.all([
+  /*
+   * The same category the live path resolves from, so the preview inherits exactly what a real
+   * message would. Getting this wrong in either direction makes the preview a liar: omit it and the
+   * try-it box answers in house voice while customers hear the category's.
+   */
+  const category = tenant.businessCategoryId
+    ? await prisma.businessCategory.findUnique({
+      where: { id: tenant.businessCategoryId },
+      select: { label: true, defaultPersona: true, defaultOutOfScopeTopics: true },
+    })
+    : null;
+
+  const [knowledge, faqs, menuCount, supportEnabled] = await Promise.all([
     knowledgeFor(tenantId),
     await moduleEnabled(tenantId, 'KEYWORD_RULES')
       ? prisma.keywordRule.findMany({
@@ -181,16 +200,23 @@ export const tryKnowledge = asyncHandler(async (req: Request, res: Response) => 
       })
       : [],
     prisma.menuItem.count({ where: { tenantId, inStock: true } }),
+    moduleEnabled(tenantId, 'SUPPORT'),
   ]);
 
   const started = Date.now();
-  const completion = await llmProvider().complete({
+  // The workspace's own vendor, so a preview is answered by the model that will answer its
+  // customers. Previewing on a different model is a preview of something else.
+  const completion = await providerForVendor(tenant.llmVendor).complete({
     systemPrompt: buildSystemPrompt({
       tenant,
-      assistant: assistant ?? { generalSystemPrompt: null },
+      // Null rather than a stub: a workspace with no channel has no assistant, and `null` is what
+      // the resolver reads as "nothing set here, inherit".
+      assistant,
+      category,
       faqs,
       knowledge: knowledgeAsPrompt(knowledge.entries),
       hasMenu: menuCount > 0,
+      hasSupport: supportEnabled,
     }),
     // No history: there is no conversation, and a fabricated one would make the preview depend
     // on messages that were never sent.

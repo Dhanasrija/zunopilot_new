@@ -2,7 +2,7 @@ import type { Assistant, Conversation, Customer, Tenant } from '@prisma/client';
 import { prisma } from '../../../config/prisma.js';
 import { withContext } from '../../../config/logger.js';
 import { toRouterView, type RouterCapabilityView } from '../domain/capability.js';
-import { llmProvider } from '../providers/llm.js';
+import { providerForVendor } from '../providers/llm.js';
 import {
   routerJsonSchema, validateRouterOutput, type ValidatedRouterOutput,
 } from './contract.js';
@@ -154,7 +154,14 @@ export const routeWithAi = async ({
     workflows: candidates,
   });
 
-  const provider = llmProvider();
+  /*
+   * The vendor this workspace is pinned to, or the platform default.
+   *
+   * Read from the tenant row the caller already has, so this costs no query — and it is the router
+   * rather than only the general answer because the router is the hot call: it runs on every message
+   * and it is what a vendor is usually chosen for, latency being its whole cost.
+   */
+  const provider = providerForVendor(tenant.llmVendor);
   const slugs = candidates.map((c) => c.workflowId);
 
   try {

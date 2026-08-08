@@ -115,6 +115,23 @@ model Tenant {
   /// Turning it off does not silence the bot. Carts, keyword rules and published workflows keep
   /// running; only the model is skipped. See `degradeToNonAi` in conversation-engine/routing.
   aiAgentEnabled Boolean  @default(true)
+
+  /// Which vendor answers this workspace's customers, or null for the platform default.
+  ///
+  /// **An operator's choice, not the workspace's** — it is set in the super admin console beside the
+  /// module toggles, for the same reason those live there: it decides who we pay per message and how
+  /// fast the reply arrives, which is our cost and our latency budget, not theirs.
+  ///
+  /// **Null is the ordinary state and means "whatever `LLM_VENDOR` says".** Writing today's default
+  /// into every row instead would freeze it: changing the platform's vendor would then reach only
+  /// workspaces created afterwards, and nothing would distinguish "an operator chose OpenAI for this
+  /// one" from "OpenAI was the default the day they signed up".
+  ///
+  /// Credentials are **not** per workspace. This names a vendor whose key lives in the environment;
+  /// a column holding somebody's API key would put live credentials in every backup and in the
+  /// console's own responses. A workspace pinned to a vendor with no key on the box falls back to the
+  /// platform default and logs it — see `providerForVendor`.
+  llmVendor LlmVendor?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -1127,6 +1144,49 @@ model Assistant {
   /// so a tenant cannot talk the router into selecting a workflow.
   generalSystemPrompt    String?
   generalResponseEnabled Boolean @default(true)
+
+  /// What this assistant declines, beyond the topics no assistant here answers.
+  ///
+  /// One topic per line. **Additional to a house floor, never instead of it**: the rule that a
+  /// message about nothing to do with the business gets a short "I only help with X" applies
+  /// whether or not this is set, because clearing this field must not restore the behaviour it
+  /// was added to fix.
+  outOfScopeTopics String?
+
+  /// How to say "that's about us, but I don't know" — the escalation.
+  ///
+  /// Distinct from `outOfScopeReply` on purpose. These were one sentence, and the result was that
+  /// a customer saying they could not sleep was told the team could help with it. One is "I will
+  /// find out"; the other is "that is not something we do".
+  unknownAnswerReply String?
+
+  /// How to say "that isn't what I'm here for". Carries no offer to fetch anyone.
+  outOfScopeReply String?
+
+  /// Roughly how long a reply may be, in words.
+  ///
+  /// Sixty was hardcoded and is a good default for a restaurant; it is not one for a question
+  /// about SAML. Bounded 20–150 at the API — long enough to answer, short enough to still be a
+  /// WhatsApp message.
+  replyWordLimit Int?
+
+  /// The language to answer in, or null to mirror whatever the customer wrote.
+  ///
+  /// Mirroring is the right default and the wrong policy for some businesses: one that publishes
+  /// only in English would rather answer in English than attempt a language nobody there can
+  /// follow up in.
+  replyLanguage String?
+
+  /// ── All five above are nullable, and null means *inherit* ───────────────────
+  ///
+  /// Unset falls back to this workspace's business category, and then to a house default. Copying
+  /// the category's text into these columns at signup would freeze it: improving the default for
+  /// restaurants next month would reach only new signups, and nothing would distinguish "they
+  /// chose this sentence" from "we wrote it for them". Resolved at read time by
+  /// `resolveAssistantCopy` instead.
+  ///
+  /// An **empty string** is therefore different from null: it means "deliberately none", which is
+  /// how a workspace turns a piece of copy off rather than back to the default.
 
   defaultFallbackWorkflowId String?
   defaultFallbackWorkflow   Workflow? @relation("AssistantFallback", fields: [defaultFallbackWorkflowId], references: [id], onDelete: SetNull)
@@ -2350,6 +2410,19 @@ model BusinessCategory {
   catalogueNoun     String?
   catalogueItemNoun String?
 
+  /// Where a kind of business starts, before it has opinions.
+  ///
+  /// The assistant's persona and the topics it declines are the two things that really are
+  /// category-shaped: a clinic's assistant should not open with a restaurant's warmth, and an IT
+  /// consultancy declines recruitment enquiries rather than table bookings. Every workspace on a
+  /// category inherits these until it edits its own, so improving one here improves every
+  /// workspace that never did — the same reason `catalogueNoun` lives on this table.
+  ///
+  /// The other three assistant fields (the two deflection wordings, the length cap) have house
+  /// defaults in code and no category dimension worth having, so they are deliberately absent.
+  defaultPersona          String?
+  defaultOutOfScopeTopics String?
+
   /// Where it appears in the picker. Lower first.
   sortOrder Int @default(100)
 
@@ -2453,6 +2526,16 @@ model Role {
 /// A string-keyed table rather than a set of boolean columns on `Tenant`,
 /// because adding the fourth module should not be a schema change to the table
 /// every request already loads.
+/// Who serves the model for a workspace. Must match `LLM_VENDORS` in `config/env.ts`.
+///
+/// Deliberately a short list rather than a free-text vendor name: each one needs its own settings
+/// block in the environment and its own structured-output mode, so a value nothing can resolve is
+/// not a configuration, it is a typo that stops the assistant answering.
+enum LlmVendor {
+  OPENAI
+  GROQ
+}
+
 enum ModuleKey {
   MARKETING
   LEADS
@@ -3185,6 +3268,14 @@ enum NotificationKind {
   HANDOFF_REQUESTED
   /// An order was placed over WhatsApp.
   ORDER_CREATED
+  /// Somebody added this person to a workspace.
+  ///
+  /// **Recorded in the workspace they were added to, which is a real limitation.** Notifications are
+  /// tenant-scoped by `visibleTo`, so this does not appear in the bell while they are working in a
+  /// different workspace — the discoverable signal there is the new entry in their switcher. This
+  /// exists so that when they do arrive, the bell says who put them there and when, rather than
+  /// leaving them to guess.
+  ADDED_TO_WORKSPACE
 }
 
 /// What a person wants to be told, and how.

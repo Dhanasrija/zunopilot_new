@@ -59,6 +59,25 @@ export interface AuthTenant {
   aiAgentEnabled?: boolean;
 }
 
+/**
+ * One workspace this login can reach.
+ *
+ * The server's own noun, kept: `sessionView` returns `workspaces`, and renaming it here would mean a
+ * translation layer whose only job is to disagree with the payload.
+ */
+export interface AuthWorkspace {
+  id: string;
+  businessName: string;
+  logoUrl: string | null;
+  /** The workspace's own name for the role — "Owner", "Shift lead" — never the legacy enum. */
+  roleName: string | null;
+  isOwner: boolean;
+  joinedAt: string;
+  /** Shown rather than hidden: a business vanishing from the list explains nothing. */
+  isSuspended: boolean;
+  isCurrent: boolean;
+}
+
 /** A permission key from the server's `config/permissions.ts`. */
 export type Permission = string;
 
@@ -93,9 +112,17 @@ interface AuthState {
    */
   permissions: Permission[];
   modules: ModuleKey[];
+  /**
+   * Every workspace this login can reach, the active one included.
+   *
+   * **No `activeTenantId` beside it.** The active workspace *is* `tenant.id`; a second field naming
+   * it is a second thing that can be wrong, and this store already carries the token twice — once
+   * here and once in `localStorage` — which is documented as a mistake rather than a pattern.
+   */
+  workspaces: AuthWorkspace[];
   setSession: (data: {
     token: string; user: AuthUser; tenant: AuthTenant; profileComplete?: boolean;
-    permissions?: Permission[]; modules?: ModuleKey[];
+    permissions?: Permission[]; modules?: ModuleKey[]; workspaces?: AuthWorkspace[];
   }) => void;
   clear: () => void;
 }
@@ -109,22 +136,36 @@ export const useAuthStore = create<AuthState>()(
       profileComplete: false,
       permissions: [],
       modules: [],
-      setSession: ({ token, user, tenant, profileComplete, permissions, modules }) => {
+      workspaces: [],
+      setSession: ({ token, user, tenant, profileComplete, permissions, modules, workspaces }) => {
         localStorage.setItem('token', token);
-        set({
+        set((state) => ({
           token,
           user,
           tenant,
           profileComplete: profileComplete ?? true,
+          /*
+           * **The two merge rules differ on purpose.**
+           *
+           * `permissions` and `modules` are per *workspace*, so a payload that omits them is a
+           * payload that did not say — and the safe reading of silence is "nothing", which hides nav
+           * items until the next `/auth/me`. Failing closed.
+           *
+           * `workspaces` is per *login*. Omission is not evidence that somebody's other businesses
+           * stopped existing; it means the response predates the field. Keeping what we had is the
+           * honest reading, and it is what lets a session persisted before this shipped keep working
+           * — the initial `[]` then means "one workspace", and the switcher does not render.
+           */
           permissions: permissions ?? [],
           modules: modules ?? [],
-        });
+          workspaces: workspaces ?? state.workspaces,
+        }));
       },
       clear: () => {
         localStorage.removeItem('token');
         set({
           token: null, user: null, tenant: null, profileComplete: false,
-          permissions: [], modules: [],
+          permissions: [], modules: [], workspaces: [],
         });
       },
     }),

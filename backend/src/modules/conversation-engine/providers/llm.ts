@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
-import { env } from '../../../config/env.js';
+import {
+  LLM_VENDORS as LLM_VENDOR_KEYS, env, type LlmVendorKey, type VendorSettings,
+} from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import type { LlmCompleter } from '../engine/types.js';
 
@@ -79,6 +81,22 @@ const providerNameFor = (baseUrl: string): string => {
   }
 };
 
+/**
+ * The box's own settings, as a `VendorSettings`.
+ *
+ * `env.llm` is the platform default — the vendor `LLM_VENDOR` names, or the unprefixed pair when it
+ * names none — and this is that same block in the shape a provider instance takes. Kept as the
+ * default constructor argument so every existing `new OpenAIProvider()` means exactly what it did.
+ */
+const platformSettings = (): VendorSettings => ({
+  apiKey: env.llm.apiKey,
+  model: env.llm.model,
+  baseUrl: env.llm.baseUrl,
+  structuredMode: env.llm.structuredMode,
+  timeoutMs: env.llm.timeoutMs,
+  extraBody: env.llm.extraBody,
+});
+
 export class OpenAIProvider implements LLMProvider {
   readonly name: string;
   private readonly client: OpenAI;
@@ -89,17 +107,30 @@ export class OpenAIProvider implements LLMProvider {
    * Groq and Google both offer one, so switching vendor is `LLM_BASE_URL` plus `LLM_MODEL` and
    * no new adapter. The SDK has always supported `baseURL` — this code simply never passed it.
    */
-  constructor(apiKey: string = env.llm.apiKey) {
-    this.name = providerNameFor(env.llm.baseUrl);
+  /**
+   * The settings this instance answers with.
+   *
+   * **Held rather than read from `env` per call**, which is the change that made a per-workspace
+   * vendor possible at all: two instances now coexist in one process, one per vendor, and a method
+   * reaching for `env.llm.model` would give both of them whichever model the *box* defaults to.
+   */
+  private readonly settings: VendorSettings;
+
+  constructor(settings: VendorSettings = platformSettings()) {
+    this.settings = settings;
+    this.name = providerNameFor(settings.baseUrl);
     this.client = new OpenAI({
-      apiKey,
-      ...(env.llm.baseUrl ? { baseURL: env.llm.baseUrl } : {}),
+      apiKey: settings.apiKey,
+      ...(settings.baseUrl ? { baseURL: settings.baseUrl } : {}),
       // A customer is waiting on WhatsApp. Fail fast and let the caller fall
       // back rather than leaving them staring at a delivered tick.
-      timeout: env.llm.timeoutMs,
+      timeout: settings.timeoutMs,
       maxRetries: 1,
     });
   }
+
+  /** The model this instance uses, for logs and for `RoutingDecision.model`. */
+  get model(): string { return this.settings.model; }
 
   async complete({ systemPrompt, userPrompt, maxTokens, temperature }: {
     systemPrompt: string;
@@ -108,14 +139,14 @@ export class OpenAIProvider implements LLMProvider {
     temperature?: number;
   }) {
     const completion = await this.client.chat.completions.create({
-      model: env.llm.model,
+      model: this.settings.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       ...(temperature !== undefined ? { temperature } : {}),
-      ...env.llm.extraBody,
+      ...this.settings.extraBody,
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
     return {
@@ -131,7 +162,7 @@ export class OpenAIProvider implements LLMProvider {
 
   async completeStructured(request: StructuredRequest): Promise<StructuredResponse> {
     const startedAt = Date.now();
-    const strict = env.llm.structuredMode === 'json_schema';
+    const strict = this.settings.structuredMode === 'json_schema';
 
     /*
      * Two ways to ask for JSON, because only one of them is portable.
@@ -160,7 +191,7 @@ export class OpenAIProvider implements LLMProvider {
         + `${JSON.stringify(request.jsonSchema)}`;
 
     const completion = await this.client.chat.completions.create({
-      model: env.llm.model,
+      model: this.settings.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: request.userPrompt },
@@ -176,7 +207,7 @@ export class OpenAIProvider implements LLMProvider {
       temperature: request.temperature ?? 0,
       ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
       // Vendor knobs; see `env.llm.extraBody`. Last, so they can override anything above.
-      ...env.llm.extraBody,
+      ...this.settings.extraBody,
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
     request.timeoutMs ? { timeout: request.timeoutMs } : undefined);
 
@@ -363,10 +394,31 @@ export class MockLLMProvider implements LLMProvider {
 }
 
 // ── Selection ─────────────────────────────────────────────────────────────────
+//
+// One provider per vendor, not one per process.
+//
+// This was a single `cached` instance, which was right while a box served one model. A workspace can
+// now be pinned to a vendor in the operator console, so several coexist — and the cache is per vendor
+// because an `OpenAI` client holds a connection pool worth reusing across the thousands of messages a
+// busy workspace sends, but must not be shared between two different endpoints.
 
+/** The platform default, i.e. what a workspace with no vendor pinned gets. */
 let cached: LLMProvider | null = null;
 
+/** Providers for workspaces pinned to a named vendor. */
+const byVendor = new Map<LlmVendorKey, LLMProvider>();
+
+/**
+ * A test double that stands in for **every** vendor.
+ *
+ * Set by `setLlmProvider`. It has to win over per-vendor resolution or a suite that injects a mock
+ * would still make live billable calls for any workspace that happens to be pinned — which is the
+ * kind of thing you discover on an invoice.
+ */
+let override: LLMProvider | null = null;
+
 export const llmProvider = (): LLMProvider => {
+  if (override) return override;
   if (cached) return cached;
 
   const kind = env.engine.llmProvider;
@@ -400,8 +452,89 @@ export const llmProvider = (): LLMProvider => {
     model: cached.name === 'mock' ? null : env.llm.model,
     baseUrl: cached.name === 'mock' ? null : (env.llm.baseUrl || 'https://api.openai.com/v1'),
     structuredMode: cached.name === 'mock' ? null : env.llm.structuredMode,
+    // Which other vendors this box *could* serve, so the console's options and the server's
+    // capabilities can be compared without reading the environment by hand.
+    alsoConfigured: LLM_VENDOR_KEYS.filter((v) => env.llm.byVendor[v] !== null).join(', ') || 'none',
   });
   return cached;
 };
 
-export const setLlmProvider = (provider: LLMProvider | null): void => { cached = provider; };
+/**
+ * The provider for a workspace, given the vendor an operator pinned it to.
+ *
+ * `null` — the ordinary case — is the platform default.
+ *
+ * ── What happens when the pinned vendor has no key here ─────────────────────
+ *
+ * It falls back to the platform default and logs a warning. Three options were available and this is
+ * the least bad:
+ *
+ *   • **The mock** would send "This is a mock assistant reply." to a paying customer. Never.
+ *   • **Refusing** would leave the customer with the workspace's fallback text for a configuration
+ *     mistake nobody in that workspace made or can fix.
+ *   • **The platform default** answers the customer properly, and gets the vendor wrong in a way the
+ *     log names explicitly.
+ *
+ * The console refuses to pin a workspace to an unconfigured vendor in the first place, so reaching
+ * this branch means the key was removed after the choice was made — or the choice was made on another
+ * box. Either way it is worth a line in the log rather than silence.
+ */
+export const providerForVendor = (vendor: LlmVendorKey | null | undefined): LLMProvider => {
+  if (override) return override;
+  if (!vendor) return llmProvider();
+
+  const existing = byVendor.get(vendor);
+  if (existing) return existing;
+
+  const settings = env.llm.byVendor[vendor];
+  if (!settings) {
+    logger.warn('A workspace is pinned to a vendor with no key on this box — using the platform default', {
+      pinnedVendor: vendor,
+      missingVariable: `${vendor}_LLM_API_KEY`,
+      platformVendor: env.llm.vendor || '(unprefixed LLM_*/OPENAI_*)',
+    });
+    return llmProvider();
+  }
+
+  const provider = new OpenAIProvider(settings);
+  byVendor.set(vendor, provider);
+  logger.info('LLM provider built for a pinned vendor', {
+    vendor, provider: provider.name, model: settings.model, structuredMode: settings.structuredMode,
+  });
+  return provider;
+};
+
+/**
+ * The provider that writes workflows, which is **always OpenAI** whatever a workspace is pinned to.
+ *
+ * ── Why authoring does not follow the workspace's vendor ─────────────────────
+ *
+ * A per-workspace vendor is about answering customers: short replies, on the hot path, where latency
+ * is the cost being managed. Generating a workflow is a different job with different requirements —
+ * a large node graph that has to satisfy a strict JSON Schema first time, from a long instruction.
+ *
+ * That is exactly where `json_schema` strict constrained decoding earns its keep, and it is the one
+ * genuinely non-portable thing in this file: Groq is configured `json_object`, where the model is
+ * merely *asked* for the shape. A router can absorb that — a malformed reply is treated as no-match
+ * and the customer gets the fallback. A generator cannot: the failure is a draft that fails
+ * validation, and the person who clicked the button waits for it twice.
+ *
+ * So generation is pinned, and the pin lives here rather than as a bare `'OPENAI'` at the call site,
+ * because this is where the reason for it belongs.
+ */
+export const authoringProvider = (): LLMProvider => providerForVendor('OPENAI');
+
+/**
+ * Replace every provider with one instance, or clear the replacement.
+ *
+ * For tests and the bench script. It overrides the pinned-vendor path too — see `override`.
+ */
+export const setLlmProvider = (provider: LLMProvider | null): void => {
+  override = provider;
+  if (provider === null) {
+    // Also drop what was built from a previous environment, so a suite that changes `LLM_*` and
+    // clears the override does not keep answering from a client built against the old settings.
+    cached = null;
+    byVendor.clear();
+  }
+};

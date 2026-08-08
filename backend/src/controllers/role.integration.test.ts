@@ -192,7 +192,18 @@ describe('a workspace cannot lock itself out', () => {
       name: 'Admin', permissions: ['team:manage', 'roles:manage', 'inbox:read'],
     }).expect(201);
 
-    await prisma.user.update({ where: { id: owner.id }, data: { roleId: admin.body.data.id } });
+    /*
+     * The **membership's** role, not the user's.
+     *
+     * `activeAdminCount` reads memberships now, so writing `User.roleId` here left this person
+     * still holding the owner role in this workspace — the owner role covered for the mistake and
+     * the lockout guard correctly did not fire. Which workspace somebody administers is a fact
+     * about their membership.
+     */
+    await prisma.membership.update({
+      where: { userId_tenantId: { userId: owner.id, tenantId: TENANT } },
+      data: { roleId: admin.body.data.id },
+    });
 
     // Narrowing to a subset they already hold, so the escalation guard is not what
     // refuses this — the lockout guard is.

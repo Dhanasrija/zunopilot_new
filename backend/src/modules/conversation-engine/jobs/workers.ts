@@ -3,7 +3,8 @@ import { logger } from '../../../config/logger.js';
 import { env } from '../../../config/env.js';
 import { channelForTenant } from '../../../services/whatsapp-account.service.js';
 import { whatsappProviderFor } from '../providers/whatsapp.js';
-import { MOCK_INTEGRATIONS, MockHttpCaller, MockLlmProvider } from '../providers/mock.js';
+import { MOCK_INTEGRATIONS, MockHttpCaller } from '../providers/mock.js';
+import { providerForVendor } from '../providers/llm.js';
 import { dueInstances, expireStaleInstances } from '../engine/instance-manager.js';
 import { sweepDueReminders } from '../../leads/lead.service.js';
 import { sendCampaignBatch, sendingCampaignIds } from '../../marketing/campaign.service.js';
@@ -71,7 +72,19 @@ const loadWalkDeps = async (instanceId: string): Promise<{
       assistantId: conversation.assistantId,
       services: {
         whatsapp: whatsappProviderFor(channel),
-        llm: new MockLlmProvider(),
+        /*
+         * A real model, at last — and the workspace's own.
+         *
+         * This was `new MockLlmProvider()`, at runtime, in the live worker. So an `AI_AGENT` node in a
+         * published workflow answered a paying customer with "This is a mock assistant reply." The
+         * gate above it was checked, the module was consulted, and then a placeholder was sent.
+         *
+         * Nothing in this database uses that node type yet, which is the only reason this is a
+         * one-line fix rather than an incident. It is fixed here rather than filed because this commit
+         * is the one that claims the operator's vendor choice reaches every model call — and a call
+         * site wired to a mock would make that claim false.
+         */
+        llm: providerForVendor(tenant.llmVendor),
         http: new MockHttpCaller(),
         integrations: MOCK_INTEGRATIONS,
       },

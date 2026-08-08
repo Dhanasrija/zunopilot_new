@@ -4,6 +4,7 @@ import {
   completeProfile, listBusinessCategories, me, requestLoginCode, verifyEmail, verifyLoginCode,
   listWorkspaces,
   switchWorkspace,
+  leaveWorkspace,
 } from '../controllers/auth.controller.js';
 import { verifyEmailValidator } from '../validators/auth.validator.js';
 import { validate } from '../middleware/validate.js';
@@ -78,6 +79,17 @@ router.put('/profile', requireAuth, completeProfile);
  */
 router.get('/workspaces', requireSession, listWorkspaces);
 router.post('/workspaces/switch', switchLimiter, requireSession, switchWorkspace);
+
+/*
+ * Leaving, also on `requireSession`.
+ *
+ * The workspace somebody most wants out of is the one that has been suspended, or the stranger's
+ * workspace they were added to without being asked. `requireAuth` refuses both before the handler
+ * runs, so behind it this route would be unreachable exactly when it is needed.
+ *
+ * `:tenantId` in the path rather than a body, because it is a `DELETE` of one named membership.
+ */
+router.delete('/workspaces/:tenantId', requireSession, leaveWorkspace);
 
 router.post('/verify-email', verifyEmailValidator, validate, verifyEmail);
 
