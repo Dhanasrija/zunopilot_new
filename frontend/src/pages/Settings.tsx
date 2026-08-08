@@ -16,10 +16,19 @@ import LeaveWorkspace from '@/components/settings/LeaveWorkspace';
 import { toast } from 'sonner';
 import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
 
-const CATEGORIES = [
-  { value: 'RESTAURANT', label: 'Restaurant' },
-  { value: 'ECOMMERCE_GROCERY', label: 'E-commerce (Grocery)' },
-];
+/*
+ * The categories come from the server.
+ *
+ * This was a hardcoded pair, `RESTAURANT` and `ECOMMERCE_GROCERY`, which were the values the legacy
+ * enum had before categories became rows an operator manages. Two consequences, both visible: a
+ * workspace could not pick IT Services from this page even though it exists, and the value it did
+ * pick was written to a column nothing reads any more — so this page showed "Restaurant" to an IT
+ * consultancy while the rest of the product knew better.
+ *
+ * `GET /auth/business-categories` is the same endpoint the onboarding form has always used, and it
+ * returns only active ones, in the operator's chosen order.
+ */
+interface BusinessCategory { id: string; key: string; label: string; description: string | null }
 
 /**
  * The tabs this page has, for validating `?tab=`.
@@ -52,13 +61,24 @@ export default function Settings() {
     queryFn: async () => (await api.get('/tenant/me')).data.data,
   });
 
+  const { data: categories } = useQuery({
+    queryKey: ['business-categories'],
+    queryFn: async () => (
+      await api.get<{ data: BusinessCategory[] }>('/auth/business-categories')
+    ).data.data,
+    // Operator-managed and changed about once a quarter; every screen that needs them can share one
+    // answer for the session rather than asking on each visit.
+    staleTime: 10 * 60_000,
+  });
+
   const [form, setForm] = useState<any>({});
   useEffect(() => { if (data) setForm(data); }, [data]);
 
   const save = useMutation({
     mutationFn: async () => api.patch('/tenant/me', {
       businessName: form.businessName,
-      category: form.category,
+      // The category's id, not the legacy enum — see the note at the top of this file.
+      businessCategoryId: form.businessCategoryId || null,
       contactNumber: form.contactNumber,
       address: form.address,
       website: form.website,
@@ -105,12 +125,31 @@ export default function Settings() {
                   </div>
                   <div className="space-y-1">
                     <Label>Category <span className="text-danger">*</span></Label>
-                    <Select value={form.category || ''} onValueChange={(v) => setForm({ ...form, category: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Select
+                      value={form.businessCategoryId || ''}
+                      onValueChange={(v) => setForm({ ...form, businessCategoryId: v })}
+                    >
+                      {/*
+                        A placeholder, because a workspace that has never chosen has an empty value
+                        here — five of them in this database — and an unlabelled empty control reads
+                        as a broken page rather than as an unanswered question.
+                      */}
+                      <SelectTrigger><SelectValue placeholder="Choose a category" /></SelectTrigger>
                       <SelectContent>
-                        {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                        {(categories ?? []).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    <p className="text-caption text-muted-foreground">
+                      {/*
+                        Says what it changes, because it is not cosmetic: the category decides the
+                        word for the catalogue in the sidebar, which workflow templates are offered,
+                        and where the assistant's persona comes from.
+                      */}
+                      Sets what your catalogue is called, which workflow templates you are offered,
+                      and how your assistant sounds.
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <Label>Contact Number <span className="text-danger">*</span></Label>
