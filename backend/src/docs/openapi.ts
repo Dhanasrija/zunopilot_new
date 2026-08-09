@@ -33,6 +33,7 @@ export const MOBILE_SURFACE = [
   '/api/customers',
   '/api/orders',
   '/api/catalogue',
+  '/api/media',
   '/api/notifications',
   '/api/tickets',
   '/api/leads',
@@ -144,6 +145,20 @@ export const openapi = {
       '  cannot probe for features it was never sold.',
       '- **422** — WhatsApp refused something, and `message` carries their own words.',
       '',
+      '### Media',
+      '**`mediaUrl` on a message is a relative API path, not a public link.** It reads',
+      '`/api/media/<id>/file`, and fetching it needs the same `Authorization` header as',
+      'everything else — an image widget pointed straight at it with no header gets a 401. Both',
+      'directions use that one path: a photograph the customer sent, and a file the business sent',
+      'back.',
+      '',
+      'Sending a file is two calls, never one. `POST /media` with `multipart/form-data` returns an',
+      'id; `POST /inbox/conversations/{id}/media` sends that id. Uploading and sending are separate',
+      'because the same upload can be sent more than once and reused as a campaign header.',
+      '',
+      'Ask `GET /media/rules` for what may be uploaded rather than hardcoding it — the limits are',
+      "WhatsApp's and they change.",
+      '',
       '### Push notifications',
       'Two transports, and a client uses exactly one of them.',
       '',
@@ -174,6 +189,7 @@ export const openapi = {
     { name: 'Customers', description: 'The people who have messaged the business' },
     { name: 'Orders', description: 'Requires the ECOMMERCE module' },
     { name: 'Catalogue', description: 'Products or menu items. Requires the ECOMMERCE module' },
+    { name: 'Media', description: 'Files, in both directions' },
     { name: 'Notifications', description: 'The bell, its unread count, and delivery preferences' },
     { name: 'Support', description: 'Tickets. Requires the SUPPORT module' },
     { name: 'Leads', description: 'The sales pipeline. Requires the LEADS module' },
@@ -912,6 +928,120 @@ export const openapi = {
       },
     },
 
+    // ── Media ─────────────────────────────────────────────────────────────────
+    '/media': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'The workspace\'s uploaded files',
+        description: [
+          'Needs `campaigns:read`. **Uploads only** — files customers sent are not listed here, and',
+          '`GET /media/{id}/file` is the only way to reach one. The two are deliberately separate:',
+          'a library an operator browses and a customer\'s private photograph are not the same thing.',
+        ].join(' '),
+        parameters: [
+          { name: 'kind', in: 'query', schema: { type: 'string', enum: ['IMAGE', 'VIDEO', 'DOCUMENT'] } },
+        ],
+        responses: { 200: ok('Files', arrayOf('MediaAsset')), ...errors },
+      },
+      post: {
+        tags: ['Media'], security: auth, summary: 'Upload a file',
+        description: [
+          'Needs `campaigns:write`. `multipart/form-data` with one part named `file`.',
+          '',
+          '**The kind is decided from the bytes, not from anything you send.** A caller claiming',
+          'IMAGE for an MP4 would produce a send WhatsApp refuses, and the file is the only honest',
+          'source. A type WhatsApp does not accept is a 400 naming what it does — as is a file over',
+          'the limit for its kind, with both sizes in the message.',
+        ].join('\n'),
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: { file: { type: 'string', format: 'binary' } },
+                required: ['file'],
+              },
+            },
+          },
+        },
+        responses: { 201: ok('The stored file', ref('MediaAsset')), ...errors },
+      },
+    },
+    '/media/rules': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'What may be uploaded',
+        description: [
+          'Needs `campaigns:read`. Read this instead of hardcoding the limits — they are',
+          "WhatsApp's, and `label` is written to be shown to a person as it stands.",
+          '',
+          '`publicUrlReachable` is false when this server\'s `APP_URL` cannot be fetched from the',
+          'internet, which is normal in development. Campaign header media will not work while it',
+          'is false, because Meta fetches the file itself; conversation media is unaffected.',
+        ].join('\n'),
+        responses: {
+          200: ok('The rules', {
+            type: 'object',
+            properties: {
+              kinds: {
+                type: 'object',
+                description: 'Keyed by IMAGE, VIDEO and DOCUMENT.',
+                additionalProperties: {
+                  type: 'object',
+                  properties: {
+                    mimeTypes: { type: 'array', items: { type: 'string' } },
+                    maxBytes: { type: 'integer', example: 5242880 },
+                    label: { type: 'string', example: 'JPEG or PNG, up to 5 MB' },
+                  },
+                },
+              },
+              publicUrlReachable: { type: 'boolean' },
+            },
+          }),
+          ...errors,
+        },
+      },
+    },
+    '/media/{id}': {
+      delete: {
+        tags: ['Media'], security: auth, summary: 'Remove an uploaded file',
+        description:
+          'Needs `campaigns:write`. Removes the row and the bytes. A message already sent with it'
+          + ' keeps its `mediaUrl`, which will then 404 — the customer\'s copy is unaffected either'
+          + ' way, since WhatsApp delivered its own.',
+        parameters: [pathParam('id', 'Media id')],
+        responses: { 200: ok('Removed', { type: 'object' }), ...errors },
+      },
+    },
+    '/media/{id}/file': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'The bytes',
+        description: [
+          'Needs `inbox:read`. **This is what `mediaUrl` on a message points at**, in both',
+          'directions — what the customer sent and what the business sent back.',
+          '',
+          'Authenticated and scoped to the workspace, so send the bearer token. In Flutter that',
+          'means `Image.network(url, headers: {...})` or fetching the bytes yourself; a plain',
+          '`<img src>`-style load with no header gets a 401 and renders as a broken image.',
+          '',
+          'Streamed through the API rather than redirecting to a presigned URL, deliberately: the',
+          'URL stops working the moment the session does, instead of remaining usable by anyone',
+          'holding it until it expires. Answers `Cache-Control: private, max-age=3600`, so caching',
+          'the bytes on the device for an hour is safe and re-fetching on every scroll is not',
+          'necessary.',
+        ].join('\n'),
+        parameters: [pathParam('id', 'Media id')],
+        responses: {
+          200: {
+            description: 'The file. `Content-Type` is the stored MIME type.',
+            content: { '*/*': { schema: { type: 'string', format: 'binary' } } },
+          },
+          401: errors[401],
+          403: errors[403],
+          404: errors[404],
+        },
+      },
+    },
+
     // ── Support ───────────────────────────────────────────────────────────────
     '/tickets': {
       get: {
@@ -1321,7 +1451,16 @@ export const openapi = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           direction: { type: 'string', enum: ['INBOUND', 'OUTBOUND'] },
-          type: { type: 'string', example: 'TEXT' },
+          type: {
+            type: 'string',
+            enum: ['TEXT', 'IMAGE', 'DOCUMENT', 'AUDIO', 'VIDEO', 'LOCATION', 'INTERACTIVE',
+              'TEMPLATE', 'SYSTEM'],
+            example: 'TEXT',
+            description:
+              'Anything but `TEXT` normally carries a `mediaUrl`. `body` is still set on a media'
+              + ' message — the caption if there was one, otherwise a short description such as'
+              + ' "Sent a photo", so a list preview has something to show.',
+          },
           status: {
             type: 'string',
             enum: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'RECEIVED'],
@@ -1360,11 +1499,41 @@ export const openapi = {
             example: '131030: Add recipient phone number to recipient list',
           },
           body: { type: 'string', nullable: true },
-          mediaUrl: { type: 'string', nullable: true },
+          mediaUrl: {
+            type: 'string', nullable: true,
+            example: '/api/media/6c3acaa4-2284-4e45-8d65-e17fc45d8fd8/file',
+            description:
+              '**A relative path on this API, not a public URL.** Prefix it with the API base and'
+              + ' send the bearer token; without the header it is a 401. Null on a text message,'
+              + ' and null on a media message whose file could not be captured from Meta — the'
+              + ' message still exists and `body` says what kind of thing it was.',
+          },
           waMessageId: { type: 'string', nullable: true },
           sentByUserId: {
             type: 'string', format: 'uuid', nullable: true,
             description: 'Null on an OUTBOUND message means the bot sent it, not a person.',
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      MediaAsset: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          kind: { type: 'string', enum: ['IMAGE', 'VIDEO', 'DOCUMENT'] },
+          mimeType: { type: 'string', example: 'image/jpeg' },
+          sizeBytes: { type: 'integer' },
+          originalName: {
+            type: 'string',
+            description: 'As the uploader named it. Display only — never used to build a path.',
+          },
+          url: {
+            type: 'string',
+            description:
+              'The **public** link, for a campaign template header, which Meta fetches itself.'
+              + ' Not the route a signed-in client should use for a conversation file: that is'
+              + ' `/api/media/{id}/file`, and it is the one that keeps working when an asset is'
+              + ' private.',
           },
           createdAt: { type: 'string', format: 'date-time' },
         },

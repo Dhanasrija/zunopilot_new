@@ -137,7 +137,55 @@ Persist the cursors, so relaunching after two days is one small request rather t
 
 ---
 
-## 4. What is still missing, and it matters
+## 4. Media
+
+**`mediaUrl` on a message is a relative API path, not a public link.** It reads
+`/api/media/<id>/file`, and it needs the same `Authorization` header as everything else. Both
+directions use it: the photograph a customer sent, and the file the business sent back.
+
+In Flutter that means the header has to come along:
+
+```dart
+Image.network('$apiBase/media/$id/file', headers: {'Authorization': 'Bearer $token'})
+```
+
+A widget pointed at the path with no header gets a 401 and renders as a broken image. That is the
+one mistake worth anticipating here, because it looks like a missing file rather than a missing
+header.
+
+The route answers `Cache-Control: private, max-age=3600`, so caching bytes on the device for an hour
+is fine and re-fetching on every scroll is not necessary. It streams through the API rather than
+redirecting to a presigned URL, deliberately: the URL stops working when the session does, instead
+of staying usable by anyone holding it.
+
+### Sending a file — two calls, never one
+
+```
+POST /api/media                              multipart/form-data, one part named "file"  → { id }
+POST /api/inbox/conversations/:id/media      { mediaId, caption? }                       → Message
+```
+
+They are separate because the same upload can be sent more than once and reused as a campaign
+header. Two things the server decides for you:
+
+- **The kind comes from the bytes**, not from anything the app sends. A type WhatsApp will not
+  accept is a 400 naming what it does accept; a file over its kind's limit is a 400 with both sizes
+  in the message, written to be shown as it stands.
+- **The 24-hour window still applies.** Outside it WhatsApp takes templates only, and the send is a
+  400 saying so. A file the customer sent cannot be forwarded back — upload your own copy.
+
+Ask `GET /api/media/rules` for the limits rather than hardcoding them; they are WhatsApp's and they
+change. It also reports `publicUrlReachable`, which is about campaign headers only — conversation
+media works either way.
+
+`type` on a message tells you what to render: `TEXT`, `IMAGE`, `DOCUMENT`, `AUDIO`, `VIDEO`,
+`LOCATION`, `INTERACTIVE`, `TEMPLATE`, `SYSTEM`. `body` is set even on a media message — the caption
+if there was one, otherwise a short description like "Sent a photo", so a conversation-list preview
+always has something to show.
+
+---
+
+## 5. What is still missing, and it matters
 
 **The token lasts 24 hours and there is no refresh endpoint** (`JWT_EXPIRES_IN=1d`). As it stands the
 app will demand a new OTP every day. This needs deciding before the app ships; it is not a mobile-only
@@ -148,7 +196,7 @@ if the app wants one.
 
 ---
 
-## 5. What the server needs, on the box
+## 6. What the server needs, on the box
 
 Set in the backend's environment, and read directly from it at the point of use — never from a
 snapshot, so rotating a key takes effect without a mystery.
