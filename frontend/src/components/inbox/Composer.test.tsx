@@ -34,6 +34,30 @@ describe('when a reply can be sent', () => {
   });
 });
 
+/*
+ * The field holds line breaks, which for most of this product's life it could not.
+ *
+ * An `<input>`'s value cannot contain CR or LF — the browser strips them with no error — so a reply
+ * with a blank line between two paragraphs was impossible to type, and the Settings editor could
+ * already save a multi-line saved reply that the composer would have flattened on its way in.
+ */
+describe('a reply with more than one line', () => {
+  it('**keeps the line breaks it was given**', () => {
+    setup({ value: 'We are open:\n11am–11pm, every day.' });
+
+    expect(screen.getByRole('textbox', { name: /reply/i }))
+      .toHaveValue('We are open:\n11am–11pm, every day.');
+  });
+
+  it('**Shift+Enter adds a line instead of sending**', async () => {
+    const { onSend } = setup({ value: 'First line' });
+
+    await userEvent.type(screen.getByRole('textbox', { name: /reply/i }), '{Shift>}{Enter}{/Shift}');
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
 describe('when it cannot', () => {
   it('**refuses an empty draft, and one that is only whitespace**', () => {
     // Whitespace matters: a customer receiving a blank WhatsApp message is worse than no reply,

@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Bot, CornerUpLeft, ListChecks, Paperclip, SendHorizonal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -21,6 +21,21 @@ import { handoverButtons, type QuickReply } from '@/lib/quick-replies';
 // One file at a time, and the reply field becomes its caption. WhatsApp carries a single
 // caption per file, so a picker that took several would have to invent a rule about which
 // text belonged to which — and the agent would find out what it chose only after sending.
+//
+// **The field is a textarea, not an input, and that is not cosmetic.** An `<input>`'s value cannot
+// hold a line break — the browser strips CR and LF silently — so a reply with a blank line between
+// two paragraphs was impossible to type and a saved multi-line reply would have been flattened on
+// its way in. Enter still sends, because that is what every chat app does; Shift+Enter is the
+// newline.
+
+/**
+ * How tall the reply field may grow before it scrolls instead.
+ *
+ * Roughly six lines. Beyond that the thread above is being squeezed out of view, and an agent
+ * writing an essay into a chat composer is better served by scrolling than by losing the
+ * conversation they are answering.
+ */
+const MAX_FIELD_PX = 160;
 
 export function Composer({
   value, onChange, onSend, sending,
@@ -73,7 +88,25 @@ export function Composer({
    */
   const [quickReplyId, setQuickReplyId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const busy = sending || attaching || askingWithButtons;
+
+  /*
+   * Grow with the text, up to a ceiling.
+   *
+   * `useLayoutEffect` rather than `useEffect`: it runs before paint, so a field that opens holding a
+   * long saved reply is never drawn one line tall and then jumped. Reset to `auto` first or
+   * `scrollHeight` reports the height it already has and the field can only ever grow.
+   *
+   * The cap is in the element, not in a class, because the height is set here — a `max-h-*` class
+   * would be fighting an inline style.
+   */
+  useLayoutEffect(() => {
+    const node = field.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${Math.min(node.scrollHeight, MAX_FIELD_PX)}px`;
+  }, [value]);
 
   const sets = quickReplies ?? [];
   const staged = sets.find((set) => set.id === quickReplyId) ?? null;
@@ -189,7 +222,7 @@ export function Composer({
       */}
       {staged && (
         <div className="mb-2 rounded-md border border-ink-300 bg-surface-2 px-3 py-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-end gap-2">
             <ListChecks aria-hidden className="h-4 w-4 shrink-0 text-ink-500" />
             <span className="min-w-0 flex-1 truncate text-caption font-medium text-ink-700">
               {staged.name}
@@ -240,7 +273,7 @@ export function Composer({
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-end gap-2">
         {onSendQuickReply && sets.length > 0 && (
           <Select
             value={quickReplyId ?? ''}
@@ -312,14 +345,29 @@ export function Composer({
           </>
         )}
 
-        <Input
+        <Textarea
+          ref={field}
+          grows
+          rows={1}
           aria-label={fieldLabel}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={
             staged ? 'Ask a question…' : (file ? 'Add a caption (optional)…' : 'Type a reply…')
           }
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          /*
+           * Enter sends; Shift+Enter is a newline.
+           *
+           * The `preventDefault` is what stops Enter also inserting the line break it would
+           * normally mean in a textarea — without it every send would leave a trailing newline in
+           * the field and, on a slow send, in the message.
+           */
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
         />
 
         {/* Icon plus word: the icon alone reads as "send" to anyone who has used a chat app,
