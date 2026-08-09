@@ -1099,6 +1099,10 @@ export const openapi = {
       post: {
         tags: ['Quick replies'], security: auth, summary: 'Save a set',
         description: [
+          '**Omit `buttons`, or send `[]`, to save a plain text reply** — an agent then inserts it into',
+          'the reply field and sends it through the messages endpoint, not the buttons one. One to three',
+          'answers make it a question instead.',
+          '',
           'Needs `automation:write` — **not** `inbox:reply`. A button can be bound to a workflow, and',
           'deciding what a customer\'s tap starts is configuring the automation rather than answering',
           'a message.',
@@ -1127,6 +1131,9 @@ export const openapi = {
         description: [
           'Needs `automation:write`. Send `isActive: false` to retire a set — it stops being offered',
           'to agents and stays in this list.',
+          '',
+          'Sending `buttons: []` turns a question into a plain text reply, which retires its answers —',
+          'see below.',
           '',
           '**Sending `buttons` replaces them all, with new ids.** A button\'s id is its identity on',
           'WhatsApp, so relabelling in place would change what a tap on an already-sent question',
@@ -1662,11 +1669,19 @@ export const openapi = {
         type: 'object',
         properties: {
           name: { type: 'string', maxLength: 80 },
-          body: { type: 'string', maxLength: 1024 },
+          body: {
+            type: 'string',
+            maxLength: 4000,
+            description:
+              'Up to 4000 characters — the same limit a text reply has — **while the set has no'
+              + ' answers**. Once it carries any, WhatsApp caps an interactive message at 1024 and'
+              + ' a longer body is refused, including when the answers are added by a later PATCH.',
+          },
           isActive: { type: 'boolean', description: 'PATCH only.' },
           buttons: {
             type: 'array',
-            minItems: 1,
+            // No floor: an empty array, or the field omitted, saves a **plain text reply**.
+            minItems: 0,
             maxItems: 3,
             items: {
               type: 'object',
@@ -1681,7 +1696,7 @@ export const openapi = {
             },
           },
         },
-        required: ['name', 'body', 'buttons'],
+        required: ['name', 'body'],
       },
       MediaAsset: {
         type: 'object',

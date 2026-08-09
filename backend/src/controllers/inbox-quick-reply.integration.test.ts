@@ -282,10 +282,37 @@ describe('when it will not send', () => {
     expect(res.body.message).toMatch(/retired/i);
   });
 
-  it('refuses a set with no answers left on it', async () => {
+  it('**refuses a plain reply here rather than sending a question with no answers**', async () => {
+    /*
+     * A set with no answers is a plain-text frequent reply, and this route is the buttons route.
+     * Refused rather than quietly downgraded: WhatsApp has no interactive message with zero buttons,
+     * so sending it as text would hand the caller a different message type than the one they asked
+     * for, from an endpoint whose whole job is buttons.
+     */
     await prisma.quickReplyButton.deleteMany({ where: { quickReplyId: setId } });
 
-    await send(ownerToken, { quickReplyId: setId }).expect(400);
+    const res = await send(ownerToken, { quickReplyId: setId }).expect(400);
+    // Names the route that does want it. The client is one endpoint away from what it meant.
+    expect(res.body.message).toMatch(/messages/);
+    expect(mockProviderFor(channelId).sent).toHaveLength(0);
+  });
+
+  it('**names the right problem even outside the 24-hour window**', async () => {
+    /*
+     * Pins the ordering. With the window checked first, a plain reply posted here outside it was
+     * refused with "WhatsApp only allows buttons within 24 hours…" — an error about a problem the
+     * caller does not have, which sends whoever wrote the client hunting a timing bug that is not
+     * there. What is wrong is the set, and that is knowable without looking at the clock.
+     */
+    await prisma.quickReplyButton.deleteMany({ where: { quickReplyId: setId } });
+    await prisma.message.updateMany({
+      where: { conversationId, direction: 'INBOUND' },
+      data: { createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    });
+
+    const res = await send(ownerToken, { quickReplyId: setId }).expect(400);
+    expect(res.body.message).toMatch(/no answers/i);
+    expect(res.body.message).not.toMatch(/24 hours/);
   });
 
   it('**refuses another workspace’s set**', async () => {

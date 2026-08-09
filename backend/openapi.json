@@ -4596,7 +4596,7 @@
           }
         ],
         "summary": "Save a set",
-        "description": "Needs `automation:write` — **not** `inbox:reply`. A button can be bound to a workflow, and\ndeciding what a customer's tap starts is configuring the automation rather than answering\na message.\n\nMeta's limits are enforced here rather than discovered at send time: at most three\nbuttons, 20 characters a label (past which Meta truncates silently), 1024 characters of\nbody. Two answers may not read the same. A bound workflow must be published and belong to\nthis workspace.\n\n**Buttons carry no id.** They are minted from the row, and supplying one is a 400 rather\nthan a silent drop — an id a client chooses is an id that can collide with the ordering\nflow's own.",
+        "description": "**Omit `buttons`, or send `[]`, to save a plain text reply** — an agent then inserts it into\nthe reply field and sends it through the messages endpoint, not the buttons one. One to three\nanswers make it a question instead.\n\nNeeds `automation:write` — **not** `inbox:reply`. A button can be bound to a workflow, and\ndeciding what a customer's tap starts is configuring the automation rather than answering\na message.\n\nMeta's limits are enforced here rather than discovered at send time: at most three\nbuttons, 20 characters a label (past which Meta truncates silently), 1024 characters of\nbody. Two answers may not read the same. A bound workflow must be published and belong to\nthis workspace.\n\n**Buttons carry no id.** They are minted from the row, and supplying one is a 400 rather\nthan a silent drop — an id a client chooses is an id that can collide with the ordering\nflow's own.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4717,7 +4717,7 @@
           }
         ],
         "summary": "Edit a set",
-        "description": "Needs `automation:write`. Send `isActive: false` to retire a set — it stops being offered\nto agents and stays in this list.\n\n**Sending `buttons` replaces them all, with new ids.** A button's id is its identity on\nWhatsApp, so relabelling in place would change what a tap on an already-sent question\nmeans. Omit `buttons` to leave the outstanding ones working.",
+        "description": "Needs `automation:write`. Send `isActive: false` to retire a set — it stops being offered\nto agents and stays in this list.\n\nSending `buttons: []` turns a question into a plain text reply, which retires its answers —\nsee below.\n\n**Sending `buttons` replaces them all, with new ids.** A button's id is its identity on\nWhatsApp, so relabelling in place would change what a tap on an already-sent question\nmeans. Omit `buttons` to leave the outstanding ones working.",
         "parameters": [
           {
             "name": "id",
@@ -6885,7 +6885,8 @@
           },
           "body": {
             "type": "string",
-            "maxLength": 1024
+            "maxLength": 4000,
+            "description": "Up to 4000 characters — the same limit a text reply has — **while the set has no answers**. Once it carries any, WhatsApp caps an interactive message at 1024 and a longer body is refused, including when the answers are added by a later PATCH."
           },
           "isActive": {
             "type": "boolean",
@@ -6893,7 +6894,7 @@
           },
           "buttons": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 0,
             "maxItems": 3,
             "items": {
               "type": "object",
@@ -6917,8 +6918,7 @@
         },
         "required": [
           "name",
-          "body",
-          "buttons"
+          "body"
         ]
       },
       "MediaAsset": {

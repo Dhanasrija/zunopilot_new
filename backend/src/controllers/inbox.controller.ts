@@ -680,6 +680,39 @@ export const sendAgentQuickReply = asyncHandler(async (req, res) => {
   });
   if (!conversation) throw ApiError.notFound('Conversation not found');
 
+  /*
+   * The set is loaded and judged **before** the window, and that order is the fix for a misleading
+   * error rather than a preference.
+   *
+   * With the window first, a plain-text set posted here outside the window was refused with "WhatsApp
+   * only allows buttons within 24 hours…" — an error about a problem the caller does not have, which
+   * sends whoever wrote the client hunting a timing bug that does not exist. What is wrong with the
+   * request is the set, and that is knowable without looking at the clock.
+   */
+  const set = await prisma.quickReply.findFirst({
+    where: { id: quickReplyId, tenantId: tenantIdOf(req) },
+    include: { buttons: { orderBy: { position: 'asc' } } },
+  });
+  if (!set) throw ApiError.notFound('That set of replies does not exist');
+  // A retired set is still readable by whoever manages them, and must not be sendable — otherwise
+  // retiring one does nothing for the agents who already had it in a dropdown.
+  if (!set.isActive) throw ApiError.badRequest('That set of replies has been retired');
+
+  /*
+   * A set with no answers is a plain-text reply, and this route is the buttons route.
+   *
+   * **Refused rather than quietly downgraded.** WhatsApp has no interactive message with zero
+   * buttons, so "send this as text instead" would hand the caller a different message type than the
+   * one they asked for, recorded as TEXT, from an endpoint whose whole job is buttons. Name the
+   * alternative instead — the client is one route away from what it wants.
+   */
+  if (!set.buttons.length) {
+    throw ApiError.badRequest(
+      'That set has no answers, so it is a plain text reply — send it with '
+      + 'POST /inbox/conversations/:id/messages.',
+    );
+  }
+
   const window = await windowStateFor(tenantIdOf(req), conversation.id);
   if (!window.open) {
     throw ApiError.badRequest(
@@ -690,16 +723,6 @@ export const sendAgentQuickReply = asyncHandler(async (req, res) => {
           + 'That window has closed — send a template, or wait for them to write again.',
     );
   }
-
-  const set = await prisma.quickReply.findFirst({
-    where: { id: quickReplyId, tenantId: tenantIdOf(req) },
-    include: { buttons: { orderBy: { position: 'asc' } } },
-  });
-  if (!set) throw ApiError.notFound('That set of replies does not exist');
-  // A retired set is still readable by whoever manages them, and must not be sendable — otherwise
-  // retiring one does nothing for the agents who already had it in a dropdown.
-  if (!set.isActive) throw ApiError.badRequest('That set of replies has been retired');
-  if (!set.buttons.length) throw ApiError.badRequest('That set has no answers to offer');
 
   const wa = await channelForTenant(conversation.tenantId);
   if (!wa) throw ApiError.badRequest('WhatsApp not connected');

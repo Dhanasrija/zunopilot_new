@@ -24,6 +24,16 @@ import { seedDefaultRoles } from '../../services/role.service.js';
  * patching them**, because a button's row id is its identity on WhatsApp. Editing a label in place
  * would change what a tap on an already-sent question means — the customer sees "Delivery", taps
  * it, and the row now says "Pickup".
+ *
+ * ── And a fourth, since a set may now have no answers at all ──────────────────
+ *
+ * A set with no answers is a **plain-text frequent reply**. The floor on `buttons` was the only thing
+ * that ever made one impossible, so its absence is load-bearing rather than an oversight.
+ *
+ * The consequence is that **the body limit is a function of the kind**, not a constant: 4000 for a
+ * plain reply — the same 4000 a text message allows, so nothing saveable is unsendable — and 1024 the
+ * moment it carries answers. That rule cannot live in the validator, because on a PATCH the two
+ * halves can arrive from different places, and the cases below are the ones that proves.
  */
 
 const app = buildApp();
@@ -339,5 +349,105 @@ describe('deleting a set', () => {
     });
     expect(still.buttons).toHaveLength(1);
     expect(still.buttons[0]!.workflowId).toBeNull();
+  });
+});
+
+describe('a set with no answers, which is a plain text reply', () => {
+  it('**saves with no answers at all**', async () => {
+    // Not even the key. The floor on `buttons` was the only thing forbidding this.
+    const res = await as(adminToken).post({
+      name: 'Opening hours', body: 'We are open 11am–11pm, every day.',
+    }).expect(201);
+
+    expect(res.body.data.buttons).toEqual([]);
+    expect(res.body.data.body).toBe('We are open 11am–11pm, every day.');
+  });
+
+  it('accepts an explicit empty list too, which is what the editor sends', async () => {
+    await as(adminToken).post({ name: 'Refunds', body: 'Within 14 days.', buttons: [] }).expect(201);
+  });
+
+  it('**keeps its line breaks, which is most of the point**', async () => {
+    /*
+     * A frequent reply is opening hours or a policy, and those have lines. Worth pinning here as
+     * well as in the composer, because the composer's field only recently became able to hold one.
+     */
+    const body = 'We are open:\n\nMon–Fri 11am–11pm\nSat–Sun 10am–midnight';
+    const res = await as(adminToken).post({ name: 'Hours', body }).expect(201);
+
+    expect(res.body.data.body).toBe(body);
+  });
+
+  it('**runs to the 4000 a text message allows**', async () => {
+    // The same 4000 `sendMessageValidator` accepts, deliberately: a saved reply that cannot be sent
+    // would be worse than one that cannot be saved.
+    await as(adminToken).post({ name: 'Long', body: 'x'.repeat(4000) }).expect(201);
+    await as(adminToken).post({ name: 'Longer', body: 'x'.repeat(4001) }).expect(400);
+  });
+
+  it('**refuses answers added to a message too long to carry them**', async () => {
+    /*
+     * The case nobody thinks of, and the reason this rule lives in the service rather than the
+     * validator: the PATCH carries answers and no body, so nothing in the request says how long the
+     * message is. Only the row does.
+     */
+    const created = await as(adminToken).post({ name: 'Policy', body: 'x'.repeat(2000) }).expect(201);
+
+    const res = await as(adminToken)
+      .patch(created.body.data.id, { buttons: [{ label: 'Got it' }] })
+      .expect(400);
+
+    // Names the length, not the answer — the length is what has to change.
+    expect(res.body.message).toMatch(/2,000 characters/);
+    expect(res.body.message).toMatch(/1024/);
+  });
+
+  it('**refuses a longer body on a set that already has answers**', async () => {
+    // The mirror image: the body is in the request and the answers are only on the row.
+    const created = await as(adminToken).post(A_SET).expect(201);
+
+    await as(adminToken).patch(created.body.data.id, { body: 'x'.repeat(1025) }).expect(400);
+  });
+
+  it('**turns a question into a plain reply, retiring its answers as it goes**', async () => {
+    /*
+     * `buttons: []` has to reach `writeButtons` — an empty array is truthy, and the tidier-looking
+     * `input.buttons?.length` would make this a silent no-op. The retirement is the honest cost:
+     * taps on questions already sent stop resolving.
+     */
+    const created = await as(adminToken).post(A_SET).expect(201);
+    const before = created.body.data.buttons.map((b: { id: string }) => b.id);
+
+    const updated = await as(adminToken).patch(created.body.data.id, { buttons: [] }).expect(200);
+
+    expect(updated.body.data.buttons).toEqual([]);
+    expect(await prisma.quickReplyButton.count({ where: { id: { in: before } } })).toBe(0);
+  });
+
+  it('turns a plain reply back into a question', async () => {
+    const created = await as(adminToken).post({ name: 'Hours', body: 'Open 11–11.' }).expect(201);
+
+    const updated = await as(adminToken)
+      .patch(created.body.data.id, { buttons: [{ label: 'Thanks' }, { label: 'Call me' }] })
+      .expect(200);
+
+    expect(updated.body.data.buttons.map((b: { label: string }) => b.label))
+      .toEqual(['Thanks', 'Call me']);
+  });
+
+  it('still refuses a fourth answer and two that read the same', async () => {
+    // The ceiling and the dedupe survived removing the floor.
+    await as(adminToken).post({
+      name: 'Four', body: 'Pick', buttons: [{ label: 'a' }, { label: 'b' }, { label: 'c' }, { label: 'd' }],
+    }).expect(400);
+    await as(adminToken).post({
+      name: 'Same', body: 'Pick', buttons: [{ label: 'Yes' }, { label: 'yes' }],
+    }).expect(400);
+  });
+
+  it('**is still configuration an agent may not write**', async () => {
+    // The permission split is about who decides what the team sends, and that is unchanged by a set
+    // having no answers.
+    await as(agentToken).post({ name: 'Mine', body: 'Hello' }).expect(403);
   });
 });

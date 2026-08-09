@@ -3406,7 +3406,22 @@ model PushSubscription {
   @@index([userId])
 }
 
-/// A saved question with up to three tappable answers, for an agent to send from the Inbox.
+/// A reply an agent sends often, saved once and reused.
+///
+/// ── Two kinds, and the distinction is simply whether there are answers ───────
+///
+/// **No answers: a plain-text frequent reply.** Opening hours, the refund policy. The composer
+/// inserts `body` into the reply field, the agent edits it if they want, and it goes out through the
+/// ordinary text route — up to the 4000 characters a text message allows.
+///
+/// **One to three answers: a question with tappable buttons.** `body` is the question, `buttons` are
+/// what the customer taps, and the send goes through the interactive route where Meta's limit is
+/// 1024. Only this kind can hand a conversation back to a workflow.
+///
+/// The row is identical either way, which is the point: an operator turns one into the other by
+/// adding or removing answers, and there is one screen, one API and one composer control rather than
+/// two of each. Nothing enforces a floor on `buttons` — a floor was the only thing that ever made a
+/// plain reply impossible.
 ///
 /// ── Why these are saved rather than typed into the composer ──────────────────
 ///

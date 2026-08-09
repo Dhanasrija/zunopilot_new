@@ -2,14 +2,17 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/ApiError.js';
 
-// Saved reply-button sets: the data half.
+// Saved replies: the data half.
 //
-// Two rules live here rather than in the controller, because both are about the database and both
+// Three rules live here rather than in the controller, because each is about the database and each
 // would be easy to leave out of one of the two write paths:
 //
 //   • **A workflow may only be bound if it is published and belongs to this workspace.** Checked
 //     against the table, not taken on trust — a workflow id is a uuid an agent could paste.
 //   • **Buttons are replaced wholesale on an update, never patched.** See `writeButtons`.
+//   • **A body over 1024 characters cannot carry answers.** See `assertBodyFitsButtons` — and note
+//     that this one *cannot* live in the validator, because on a PATCH the answers may come from the
+//     row rather than the request.
 
 /** What the composer and the editor both read. Buttons in the order they will be shown. */
 const SET_SHAPE = {
@@ -32,6 +35,29 @@ export interface ButtonInput {
   label: string;
   workflowId?: string | null;
 }
+
+/** What an interactive message's body may be, against the 4000 a plain text reply allows. */
+const INTERACTIVE_BODY_MAX = 1024;
+
+/**
+ * Refuse a body too long for the answers it is being given.
+ *
+ * **The rule the validator cannot express.** A saved reply may run to 4000 characters — the same
+ * 4000 a text message allows — but the moment it carries answers it becomes an interactive message
+ * and Meta's limit drops to 1024. On a PATCH the two halves can arrive from different places:
+ * `PATCH { buttons: [...] }` against a 2000-character plain reply is the case nobody thinks of, and
+ * the validator cannot see that body because it was never in the request.
+ *
+ * So it is checked against the *effective* values, before the write, and it names the length rather
+ * than the answer — the length is what has to change.
+ */
+const assertBodyFitsButtons = (body: string, buttons: ButtonInput[]): void => {
+  if (!buttons.length || body.length <= INTERACTIVE_BODY_MAX) return;
+  throw ApiError.badRequest(
+    `That message is ${body.length.toLocaleString()} characters. A question with tappable answers `
+    + `allows ${INTERACTIVE_BODY_MAX} — shorten it, or remove the answers.`,
+  );
+};
 
 /**
  * Refuse a workflow this workspace may not bind to.
@@ -109,6 +135,7 @@ export const quickReplyOf = async (tenantId: string, id: string) => {
 export const createQuickReply = async (tenantId: string, input: {
   name: string; body: string; buttons: ButtonInput[];
 }) => {
+  assertBodyFitsButtons(input.body, input.buttons);
   await assertBindable(tenantId, input.buttons);
 
   try {
@@ -138,8 +165,23 @@ export const createQuickReply = async (tenantId: string, input: {
 export const updateQuickReply = async (tenantId: string, id: string, input: {
   name?: string; body?: string; isActive?: boolean; buttons?: ButtonInput[];
 }) => {
-  // Scoped read first: a uuid from a request is not proof of ownership.
-  await quickReplyOf(tenantId, id);
+  // Scoped read first: a uuid from a request is not proof of ownership — and the row is what makes
+  // the effective-value check below possible.
+  const existing = await quickReplyOf(tenantId, id);
+
+  /*
+   * The effective values, not the submitted ones.
+   *
+   * Either half may be absent from the request and present on the row, so both cases have to be
+   * caught: answers added to a body already too long, and a body lengthened on a set that already
+   * has answers.
+   */
+  assertBodyFitsButtons(
+    input.body ?? existing.body,
+    input.buttons ?? existing.buttons.map((button) => ({
+      label: button.label, workflowId: button.workflowId,
+    })),
+  );
   if (input.buttons) await assertBindable(tenantId, input.buttons);
 
   try {
@@ -152,6 +194,13 @@ export const updateQuickReply = async (tenantId: string, id: string, input: {
           ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
         },
       });
+      /*
+       * `if (input.buttons)`, not `input.buttons?.length`.
+       *
+       * An empty array is truthy, and that is exactly what has to run: `writeButtons` clears the
+       * rows, which is how a question becomes a plain reply. The tidier-looking `?.length` would
+       * silently make that a no-op.
+       */
       if (input.buttons) await writeButtons(tx, id, input.buttons);
 
       return tx.quickReply.findUniqueOrThrow({ where: { id }, include: SET_SHAPE });

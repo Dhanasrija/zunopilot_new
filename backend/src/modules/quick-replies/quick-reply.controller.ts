@@ -8,12 +8,19 @@ import {
   updateQuickReply,
 } from './quick-reply.service.js';
 
-// Saved reply-button sets: the HTTP half.
+// Saved replies: the HTTP half.
+//
+// **A set with no answers is a plain-text frequent reply; one with answers is a question.** Same row,
+// same route, and the presence of `buttons` is the whole distinction — see the model comment.
 //
 // The validation here is Meta's, not ours, and getting it wrong is not a validation error — it is a
 // send that WhatsApp silently mangles or refuses. Three buttons maximum; twenty characters a label,
-// past which Meta truncates without telling anybody; and 1024 characters of body, which is the
-// interactive limit and **not** the 4000 a plain text reply allows.
+// past which Meta truncates without telling anybody.
+//
+// **The body limit depends on the kind**, so only its outer bound lives here: 4000, the same 4000
+// `sendMessageValidator` accepts for a text reply, deliberately, so nothing saveable is unsendable.
+// The 1024 an interactive message allows is enforced in the service, because on a PATCH the kind can
+// come from the row rather than the request and a validator cannot see the row.
 
 const idParam = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const requireId = (value: string | undefined): string => {
@@ -34,8 +41,15 @@ const buttonSchema = z.object({
   workflowId: z.string().uuid().nullable().optional(),
 }).strict();
 
+/**
+ * The answers, of which there may be none.
+ *
+ * **There is no floor, and that absence is the feature.** The floor was the only thing that made a
+ * plain-text frequent reply impossible — the database has always permitted zero buttons, and the
+ * composer has always loaded a saved body into the reply field. Re-adding a `.min(1)` here removes
+ * plain replies from the product.
+ */
 const buttonsSchema = z.array(buttonSchema)
-  .min(1, 'A set needs at least one answer')
   .max(3, 'WhatsApp allows at most three reply buttons')
   .refine(
     (buttons) => new Set(buttons.map((b) => b.label.toLowerCase())).size === buttons.length,
@@ -45,13 +59,15 @@ const buttonsSchema = z.array(buttonSchema)
   );
 
 const nameSchema = z.string().trim().min(1, 'A set needs a name').max(80);
-const bodySchema = z.string().trim().min(1, 'A question cannot be empty')
-  .max(1024, 'WhatsApp allows 1024 characters in a question with buttons');
+const bodySchema = z.string().trim().min(1, 'A saved reply cannot be empty')
+  .max(4000, 'WhatsApp allows 4000 characters in a text message');
 
 const createSchema = z.object({
   name: nameSchema,
   body: bodySchema,
-  buttons: buttonsSchema,
+  // Absent means none, so `{ name, body }` saves a plain reply — the common case, and the one an
+  // operator reaches for most.
+  buttons: buttonsSchema.default([]),
 }).strict();
 
 const updateSchema = z.object({
