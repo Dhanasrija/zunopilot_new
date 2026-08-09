@@ -199,6 +199,9 @@ model Tenant {
 
   // Module 23: notifications
   notifications Notification[]
+
+  // Module 26: saved reply-button sets an agent can send from the Inbox
+  quickReplies QuickReply[]
 }
 
 /// A file uploaded to fill a template's media header.
@@ -1117,6 +1120,8 @@ model Workflow {
   routingRules          RoutingRule[]
   routingDecisions      RoutingDecision[]
   routingTestCases      RoutingTestCase[]
+  /// Buttons an agent can send that start this workflow when tapped.
+  quickReplyButtons     QuickReplyButton[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, status])
@@ -3399,4 +3404,70 @@ model PushSubscription {
 
   @@unique([userId, deviceId])
   @@index([userId])
+}
+
+/// A saved question with up to three tappable answers, for an agent to send from the Inbox.
+///
+/// ── Why these are saved rather than typed into the composer ──────────────────
+///
+/// Because a button can **start a workflow**, and that makes it configuration rather than
+/// conversation. Configuration gets a name, a place it can be reviewed, and a permission
+/// (`automation:write`) that not every agent holds — none of which a free-text field in a chat box
+/// can offer. Being reusable is the smaller half of the reason.
+///
+/// The larger half is safety. A WhatsApp reply id comes straight back to us when the customer taps,
+/// and three other mechanisms already claim id shapes: the ordering state machine's seven prefixes,
+/// a workflow node's own offered ids, and the literals an operator typed into a BUTTON_PAYLOAD rule.
+/// An id an agent could type is an id that can collide with any of them — and the collision is not
+/// an error, it is the wrong mechanism answering. See `agent-reply-id.ts`.
+model QuickReply {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// What the agent picks it by in the composer. Never sent to the customer.
+  name String
+  /// The question itself, and the default — an agent may edit it for one send without changing
+  /// what everybody else sees, so this is a starting point rather than the message.
+  body String
+
+  /// Retired rather than deleted, so a set that has been sent for months stops being offered
+  /// without breaking the taps still arriving for its buttons.
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  buttons QuickReplyButton[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder])
+}
+
+/// One answer.
+///
+/// **This row's `id` is the button's identity on WhatsApp** — `zp:qr:<id>` is what goes on the wire
+/// and what comes back on a tap. That is the load-bearing decision of the whole feature: the id is
+/// stable across every send, so a customer who scrolls back and taps last week's question still
+/// resolves to this row, and no registry or per-send token is needed to know what they meant.
+model QuickReplyButton {
+  id           String     @id @default(uuid())
+  quickReplyId String
+  quickReply   QuickReply @relation(fields: [quickReplyId], references: [id], onDelete: Cascade)
+
+  /// What the customer reads on the button. **Max 20 characters** — Meta's limit, and it truncates
+  /// silently past it, so the API refuses instead of shipping a clipped word.
+  label    String
+  position Int
+
+  /// What tapping it starts, or null for "just record their answer and leave it to the agent".
+  ///
+  /// `SetNull`, not `Cascade`: deleting a workflow must turn its buttons back into plain answers,
+  /// not delete the sets an agent uses every day.
+  workflow   Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  workflowId String?
+
+  @@index([quickReplyId, position])
+  @@index([workflowId])
 }
