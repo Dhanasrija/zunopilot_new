@@ -112,6 +112,33 @@ describe('a completed Flow', () => {
     expect(message.text).toBe('name: Asha, size: Large');
   });
 
+  /*
+   * The three real submissions, read out of production.
+   *
+   * Every one of them is a lead capture — a name and an email address — and every one showed the
+   * agent `[INTERACTIVE]`. This is the byte-for-byte payload with the customers' own name and
+   * address replaced, kept as a fixture because **the keys are the part nobody would have guessed**:
+   * Meta's Flow builder generates `screen_<n>_<Label>_<n>`, and `body` is the useless word "Sent".
+   */
+  it('**reads the shape production actually sends, labels and all**', () => {
+    const message = first(envelope(flow({
+      name: 'flow',
+      body: 'Sent',
+      response_json: '{"screen_0_Name_0":"Asha","screen_0_Email_1":"asha\\u0040example.com",'
+        + '"flow_token":"070227e1-cab4-4570-b5fb-403d3bc9de15"}',
+    })));
+
+    expect(message.text).toBe('Name: Asha, Email: asha@example.com');
+  });
+
+  it('leaves a key its author wrote by hand alone, rather than guessing at it', () => {
+    const message = first(envelope(flow({
+      response_json: JSON.stringify({ order_ref: 'A-91', screen_0_Full_Name_2: 'Asha Rao' }),
+    })));
+
+    expect(message.text).toBe('order_ref: A-91, Full Name: Asha Rao');
+  });
+
   it('**drops the flow token, which is Meta\'s id and not something anyone typed**', () => {
     const message = first(envelope(flow({
       response_json: JSON.stringify({ flow_token: 'unsubscribe_me', answer: 'Yes' }),

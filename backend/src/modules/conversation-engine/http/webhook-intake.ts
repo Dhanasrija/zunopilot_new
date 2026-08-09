@@ -140,6 +140,28 @@ export const verifySignature = (req: Request): boolean => {
  */
 const FLOW_SUMMARY_MAX = 300;
 
+/**
+ * A Flow field's key, as a person would read it.
+ *
+ * **Meta's Flow JSON Builder generates the keys, and they are not written for a human.** The three
+ * submissions found in production all look like this:
+ *
+ *     screen_0_Name_0, screen_0_Email_1
+ *
+ * — `screen_<screen index>_<the label the author typed>_<field index>`. Rendered verbatim into a
+ * transcript that agents read all day, that is a debug dump. Stripped, it is `Name` and `Email`,
+ * which is what the author called the field in the first place.
+ *
+ * **Only when the whole pattern matches.** A key a Flow author wrote by hand — `order_ref`, `qty2` —
+ * has no screen prefix and is left exactly as it is, because guessing at those would corrupt a name
+ * somebody chose deliberately. Two fields on different screens can humanise to the same word; that
+ * is fine, this is a sentence to read and not a record to key on.
+ */
+const humanFieldName = (key: string): string => {
+  const match = /^screen_\d+_(.+)_\d+$/.exec(key);
+  return match ? match[1].replace(/_/g, ' ') : key;
+};
+
 const flowReplyText = (nfm: Record<string, any>): string => {
   let answers: unknown;
   try {
@@ -157,7 +179,7 @@ const flowReplyText = (nfm: Record<string, any>): string => {
         && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
         && String(value).trim() !== ''
       ))
-      .map(([key, value]) => `${key}: ${String(value).trim()}`);
+      .map(([key, value]) => `${humanFieldName(key)}: ${String(value).trim()}`);
 
     if (parts.length) {
       const summary = parts.join(', ');
