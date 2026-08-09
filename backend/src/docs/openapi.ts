@@ -526,6 +526,43 @@ export const openapi = {
         },
       },
     },
+    '/inbox/conversations/{id}/quick-reply': {
+      post: {
+        tags: ['Inbox'], security: auth, summary: 'Ask a question with tappable answers',
+        description: [
+          'Needs `inbox:reply`. Sends one of the workspace\'s saved sets — see `/quick-replies` for',
+          'the list. `body` overrides the set\'s saved question for this conversation only, within',
+          "Meta's 1024 characters.",
+          '',
+          '**Only within 24 hours of the customer\'s last message**, like any non-template send;',
+          'outside it this is a 400 that says so.',
+          '',
+          'The reply ids are minted from the button rows and are not yours to choose. When the',
+          'customer taps one, it arrives as an ordinary inbound `INTERACTIVE` message whose `body` is',
+          'the label — **and if that button is bound to a workflow, tapping it starts the workflow and',
+          'ends any human takeover on the conversation.** Nothing happens on send; the handover is the',
+          'tap.',
+        ].join('\n'),
+        parameters: [pathParam('id', 'Conversation id')],
+        requestBody: jsonBody({
+          type: 'object',
+          properties: {
+            quickReplyId: { type: 'string', format: 'uuid', description: 'From `GET /quick-replies`' },
+            body: {
+              type: 'string', maxLength: 1024, nullable: true,
+              description: 'Override the saved question for this send. The set is not changed.',
+            },
+          },
+          required: ['quickReplyId'],
+        }),
+        responses: {
+          201: ok('The message that was sent', ref('Message')),
+          422: { $ref: '#/components/responses/WhatsappRefused' },
+          424: { $ref: '#/components/responses/WhatsappDisconnected' },
+          ...errors,
+        },
+      },
+    },
     '/inbox/conversations/{id}/media': {
       post: {
         tags: ['Inbox'], security: auth, summary: 'Send a customer a file',

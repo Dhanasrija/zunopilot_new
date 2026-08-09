@@ -1270,6 +1270,101 @@
         }
       }
     },
+    "/inbox/conversations/{id}/quick-reply": {
+      "post": {
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ask a question with tappable answers",
+        "description": "Needs `inbox:reply`. Sends one of the workspace's saved sets — see `/quick-replies` for\nthe list. `body` overrides the set's saved question for this conversation only, within\nMeta's 1024 characters.\n\n**Only within 24 hours of the customer's last message**, like any non-template send;\noutside it this is a 400 that says so.\n\nThe reply ids are minted from the button rows and are not yours to choose. When the\ncustomer taps one, it arrives as an ordinary inbound `INTERACTIVE` message whose `body` is\nthe label — **and if that button is bound to a workflow, tapping it starts the workflow and\nends any human takeover on the conversation.** Nothing happens on send; the handover is the\ntap.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quickReplyId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "From `GET /quick-replies`"
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "nullable": true,
+                    "description": "Override the saved question for this send. The set is not changed."
+                  }
+                },
+                "required": [
+                  "quickReplyId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The message that was sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/WhatsappRefused"
+          },
+          "424": {
+            "$ref": "#/components/responses/WhatsappDisconnected"
+          }
+        }
+      }
+    },
     "/inbox/conversations/{id}/media": {
       "post": {
         "tags": [

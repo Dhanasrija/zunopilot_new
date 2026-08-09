@@ -8,6 +8,7 @@ import {
   setAutomation,
   sendAgentMessage,
   sendAgentMedia,
+  sendAgentQuickReply,
   deleteMessage,
   deleteThread,
   addNote,
@@ -40,6 +41,18 @@ router.post('/conversations/:id/messages', requirePermission('inbox:reply'), sen
 // words can send a photograph. The file itself was uploaded through `POST /api/media`, which
 // has its own `media:write` gate.
 router.post('/conversations/:id/media', requirePermission('inbox:reply'), sendMediaValidator, validate, sendAgentMedia);
+
+/*
+ * Ask a question with tappable answers.
+ *
+ * `inbox:reply` and nothing more — sending one is replying. **Choosing what a tap starts is a
+ * different permission** (`automation:write`, on `/api/quick-replies`), because binding a button to
+ * a workflow is configuring the automation rather than answering a message.
+ *
+ * No validator middleware: the body is two fields and both are checked in the handler against the
+ * saved set, which is the only place that knows whether the override is within Meta's limit.
+ */
+router.post('/conversations/:id/quick-reply', requirePermission('inbox:reply'), sendAgentQuickReply);
 router.post('/conversations/:id/read', markRead);
 // `assign_self` is the floor; taking one off a colleague is checked in the
 // controller, which is the only place that knows who currently owns it.

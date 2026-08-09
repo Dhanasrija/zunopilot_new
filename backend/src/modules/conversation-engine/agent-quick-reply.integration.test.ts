@@ -7,6 +7,9 @@ import { buildApp } from '../../app.js';
 import type { WorkflowDefinition } from './domain/definition.js';
 import { mockProviderFor } from './providers/whatsapp.js';
 import { quickReplyButtonId } from './agent-reply-id.js';
+import { signToken } from '../../utils/jwt.js';
+import { seedMemberships } from '../../test-support/members.js';
+import { seedDefaultRoles } from '../../services/role.service.js';
 
 /*
  * A customer taps a button a human agent sent them.
@@ -84,6 +87,8 @@ let conversationId: string;
 /** The button that starts a workflow, and the one that does not. */
 let boundButtonId: string;
 let plainButtonId: string;
+/** For the round trip at the end, which sends through the real API before tapping. */
+let ownerToken: string;
 
 const wipe = async () => {
   await prisma.tenant.deleteMany({ where: { id: TENANT } });
@@ -152,6 +157,14 @@ const seed = async () => {
   });
   boundButtonId = set.buttons[0]!.id;
   plainButtonId = set.buttons[1]!.id;
+
+  await seedDefaultRoles(prisma, TENANT);
+  const ownerRole = await prisma.role.findFirstOrThrow({ where: { tenantId: TENANT, isOwner: true } });
+  const owner = await prisma.user.create({
+    data: { tenantId: TENANT, phone: '15558807001', fullName: 'Owner', role: 'OWNER', roleId: ownerRole.id },
+  });
+  await seedMemberships();
+  ownerToken = signToken({ userId: owner.id, tenantId: TENANT });
 
   const customer = await prisma.customer.create({
     data: { tenantId: TENANT, waId: CUSTOMER_WA_ID, name: 'Asha' },
@@ -515,5 +528,51 @@ describe('what the guard deliberately does not cover', () => {
 
     const customer = await prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
     expect(customer.optedOutAt).not.toBeNull();
+  });
+});
+
+describe('the whole round trip', () => {
+  it('**an agent sends a set through the API, and the tap on it starts the workflow**', async () => {
+    /*
+     * The two halves joined, because each is convincing on its own and neither proves they agree.
+     * Everything above hand-crafts the reply id from a row; this one takes the id **the send
+     * actually put on the wire** and feeds it back through a signed webhook.
+     *
+     * The failure it exists to catch is the quiet one: a send that mints its own ids, or a mirror
+     * that records different ones. The pills would still look right in the thread and every tap
+     * would stop resolving.
+     */
+    // The window has to be open, so the customer must have written first.
+    await prisma.message.create({
+      data: {
+        tenantId: TENANT,
+        conversationId,
+        customerId,
+        direction: 'INBOUND',
+        type: 'TEXT',
+        status: 'RECEIVED',
+        body: 'Hello',
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
+      },
+    });
+    const set = await prisma.quickReply.findFirstOrThrow({ where: { tenantId: TENANT } });
+
+    const sendRes = await request(app)
+      .post(`/api/inbox/conversations/${conversationId}/quick-reply`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ quickReplyId: set.id })
+      .expect(201);
+
+    // Read the id off what was recorded, not off the row — that is the point.
+    const offered = (sendRes.body.data.payload as {
+      outbound: { options: { id: string; title: string }[] };
+    }).outbound.options;
+    const yes = offered.find((o) => o.title === 'Yes, book')!;
+    expect(yes).toBeDefined();
+
+    await deliverAndRun(tapPayload('wamid.qr.20', yes.id, yes.title), 'wamid.qr.20');
+
+    expect(await instances()).toBe(1);
+    expect(sent().map((m) => m.body)).toContain('Which day suits you?');
   });
 });
