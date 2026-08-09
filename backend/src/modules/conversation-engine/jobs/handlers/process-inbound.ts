@@ -6,6 +6,7 @@ import { withContext } from '../../../../config/logger.js';
 import { withAdvisoryLock } from '../../../../utils/withAdvisoryLock.js';
 import type { NormalisedInboundMessage } from '../../http/webhook-intake.js';
 import { routeInboundMessage } from '../../routing/index.js';
+import { handleAgentQuickReply } from '../../routing/agent-quick-reply.js';
 import { whatsappProviderFor } from '../../providers/whatsapp.js';
 import { recordOutboundMessage } from '../../providers/mirror.js';
 import { enqueue, QUEUES, type ProcessInboundMessageJob } from '../queue.js';
@@ -412,6 +413,44 @@ const processEvent = async (eventId: string): Promise<void> => {
       return;
     }
 
+    /*
+     * A tap on a button a human agent sent.
+     *
+     * **Above the human-takeover check on purpose**, and it is the only thing that is. An agent who
+     * sends buttons is, almost by definition, in a thread they have taken over — so below that
+     * check a workflow-bound button could never fire in the one situation it exists for. Honouring
+     * it is carrying out the agent's own instruction, not overriding it: they offered the button
+     * and the customer accepted.
+     *
+     * Below the consent check, because STOP outranks an outstanding question.
+     *
+     * Returns `not-ours` for every id belonging to the ordering flow, a workflow node or an
+     * operator's payload rule, so nothing else changes shape. See `agent-quick-reply.ts` for what
+     * each of the chain's steps would otherwise do with one of these — two of them corrupt data
+     * rather than merely misfire.
+     */
+    const quickReply = await handleAgentQuickReply({
+      tenant: context.tenant,
+      channel: context.channel,
+      contact: context.contact,
+      conversation: context.conversation,
+      message: {
+        id: message.id,
+        body: message.body ?? '',
+        type: message.type,
+        payload: message.payload,
+        interactive: payload.message.interactive,
+      },
+    });
+    if (quickReply !== 'not-ours') {
+      logger.info('Handled a tap on an agent-sent button', { outcome: quickReply });
+      await prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: { processingStatus: 'PROCESSED', processedAt: new Date() },
+      });
+      return;
+    }
+
     // A conversation a human has taken over gets no automated reply at all —
     // checked before routing, not after, so no model is called and no workflow
     // starts for a thread an agent is handling.
@@ -442,6 +481,58 @@ const processEvent = async (eventId: string): Promise<void> => {
     if (MEDIA_MESSAGE_TYPES.has(message.type) && !payload.message.text.trim()) {
       await acknowledgeAttachment(context, message.type);
       logger.info('Acknowledged an attachment with no caption', { type: message.type });
+      await prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: { processingStatus: 'PROCESSED', processedAt: new Date() },
+      });
+      return;
+    }
+
+    /*
+     * A message with nothing in it we can act on is recorded and left alone.
+     *
+     * ── The bug this closes ──────────────────────────────────────────────────
+     *
+     * A WhatsApp Flow submission, a reaction, a native catalogue order: each arrives with no text
+     * our normaliser could read, and each was handed to the router as an empty string. The router
+     * has nothing to classify, so the model answered from the previous turn — and a live customer
+     * was told the same thing twice for something they never said. The Inbox drew `[INTERACTIVE]`
+     * beside it.
+     *
+     * ── Why the test is this narrow and not "any empty body" ─────────────────
+     *
+     * **A bare location pin has an empty body and must still route.** `textOf` builds its text from
+     * the pin's name and address, and a dropped pin has neither — but the ordering flow reads
+     * `payload.location` and treats it as the answer to "where do we deliver?". Swallowing that
+     * would break checkout.
+     *
+     * Media is excluded for the opposite reason: it has its own acknowledgement above, which sends
+     * something, because a photo with no caption is usually a question.
+     *
+     * So: no readable text, no reply id we could route on, and not a pin. Silence rather than an
+     * apology — the customer performed an action, not asked a question, and "I could not read that"
+     * would be wrong in every case where we simply have not taught the normaliser a shape yet.
+     */
+    const unreadable = !payload.message.text.trim()
+      && !payload.message.interactive?.replyId
+      && !payload.message.location;
+
+    if (unreadable) {
+      /*
+       * Logged at warn with the shape and no content.
+       *
+       * This is the line that turns "a customer noticed" into "the logs noticed". The keys are the
+       * useful part — `nfm_reply` versus something Meta has not documented yet — and none of them is
+       * the customer's data.
+       */
+      // `raw` is `unknown` on the normalised shape, deliberately — nothing downstream should be
+      // reading Meta's envelope by field. Narrowed here, for a log line, and nowhere else.
+      const raw = (payload.message.raw ?? {}) as { type?: string; interactive?: Record<string, unknown> };
+      logger.warn('An inbound message had nothing to route, so it was recorded only', {
+        type: message.type,
+        whatsappType: raw.type ?? null,
+        interactiveKeys: Object.keys(raw.interactive ?? {}),
+      });
       await prisma.webhookEvent.update({
         where: { id: eventId },
         data: { processingStatus: 'PROCESSED', processedAt: new Date() },

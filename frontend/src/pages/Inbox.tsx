@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
 import { rejectReason, useMediaRules } from '@/lib/media';
+import { fetchQuickReplies } from '@/lib/quick-replies';
 import { useAuthStore, useHasModule } from '@/stores/auth.store';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -296,6 +297,39 @@ export default function Inbox() {
     // it would re-run this on every render of the page.
   }, [selectedId, lastMessageId, messages.isSuccess, tabVisible]);
 
+  /**
+   * The workspace's saved questions.
+   *
+   * Five minutes stale is fine and deliberate: these change when somebody edits them in Settings,
+   * not while an agent is working, and this page already makes two requests a second.
+   */
+  const quickReplies = useQuery({
+    queryKey: ['quick-replies'],
+    queryFn: fetchQuickReplies,
+    staleTime: 5 * 60_000,
+    enabled: can('inbox:reply'),
+  });
+
+  /**
+   * Ask a question with tappable answers.
+   *
+   * The set supplies the answers and their ids; the field supplies the question, which may differ
+   * from the saved one for this conversation only.
+   */
+  const askWithButtons = useMutation({
+    mutationFn: async ({ quickReplyId, body }: { quickReplyId: string; body: string }) => {
+      await api.post(`/inbox/conversations/${selectedId}/quick-reply`, { quickReplyId, body });
+    },
+    onSuccess: () => {
+      setDraft('');
+      following.current = true;
+      qc.invalidateQueries({ queryKey: ['messages', selectedId] });
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+    // No onError toast, for the same reason as `sendFile`: the interceptor already shows the
+    // server's sentence, and the window refusal is worth reading verbatim.
+  });
+
   const send = useMutation({
     mutationFn: async () => {
       await api.post(`/inbox/conversations/${selectedId}/messages`, {
@@ -532,6 +566,9 @@ export default function Inbox() {
                 windowClosed={windowClosed}
                 replyingTo={replyingTo}
                 onCancelReply={() => setReplyToId(null)}
+                quickReplies={quickReplies.data}
+                onSendQuickReply={(quickReplyId, body) => askWithButtons.mutate({ quickReplyId, body })}
+                askingWithButtons={askWithButtons.isPending}
               />
             </>
           )}

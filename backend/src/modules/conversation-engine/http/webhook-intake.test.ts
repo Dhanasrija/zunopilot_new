@@ -85,6 +85,114 @@ describe('button replies', () => {
   });
 });
 
+/*
+ * A completed WhatsApp Flow.
+ *
+ * **Found in production, from a screenshot.** A Flow submission arrives as `interactive.nfm_reply`,
+ * which carries no `title` — so the body came out empty, the Inbox drew the literal `[INTERACTIVE]`,
+ * and the empty message went to the AI router, which answered from the previous turn. The customer
+ * was told the same thing twice for something they never said.
+ *
+ * The answers are a **string** of JSON whose shape belongs to whoever designed the Flow, so every
+ * case here is about reading it without trusting it.
+ */
+describe('a completed Flow', () => {
+  const flow = (nfm: Record<string, unknown>) => ({
+    type: 'interactive',
+    interactive: { type: 'nfm_reply', nfm_reply: nfm },
+  });
+
+  it('**puts the answers in the body, so the Inbox shows what was sent**', () => {
+    const message = first(envelope(flow({
+      name: 'flow',
+      body: 'Sent',
+      response_json: JSON.stringify({ flow_token: 'tok', name: 'Asha', size: 'Large' }),
+    })));
+
+    expect(message.text).toBe('name: Asha, size: Large');
+  });
+
+  /*
+   * The three real submissions, read out of production.
+   *
+   * Every one of them is a lead capture — a name and an email address — and every one showed the
+   * agent `[INTERACTIVE]`. This is the byte-for-byte payload with the customers' own name and
+   * address replaced, kept as a fixture because **the keys are the part nobody would have guessed**:
+   * Meta's Flow builder generates `screen_<n>_<Label>_<n>`, and `body` is the useless word "Sent".
+   */
+  it('**reads the shape production actually sends, labels and all**', () => {
+    const message = first(envelope(flow({
+      name: 'flow',
+      body: 'Sent',
+      response_json: '{"screen_0_Name_0":"Asha","screen_0_Email_1":"asha\\u0040example.com",'
+        + '"flow_token":"070227e1-cab4-4570-b5fb-403d3bc9de15"}',
+    })));
+
+    expect(message.text).toBe('Name: Asha, Email: asha@example.com');
+  });
+
+  it('leaves a key its author wrote by hand alone, rather than guessing at it', () => {
+    const message = first(envelope(flow({
+      response_json: JSON.stringify({ order_ref: 'A-91', screen_0_Full_Name_2: 'Asha Rao' }),
+    })));
+
+    expect(message.text).toBe('order_ref: A-91, Full Name: Asha Rao');
+  });
+
+  it('**drops the flow token, which is Meta\'s id and not something anyone typed**', () => {
+    const message = first(envelope(flow({
+      response_json: JSON.stringify({ flow_token: 'unsubscribe_me', answer: 'Yes' }),
+    })));
+
+    expect(message.text).toBe('answer: Yes');
+  });
+
+  it('keeps only scalars — a nested object in a message body is noise', () => {
+    const message = first(envelope(flow({
+      response_json: JSON.stringify({ pick: 'Delivery', meta: { nested: true }, list: [1, 2] }),
+    })));
+
+    expect(message.text).toBe('pick: Delivery');
+  });
+
+  it('**caps the summary, because this becomes text many people read**', () => {
+    const message = first(envelope(flow({
+      response_json: JSON.stringify({ note: 'x'.repeat(500) }),
+    })));
+
+    expect(message.text.length).toBeLessThanOrEqual(300);
+    expect(message.text.endsWith('…')).toBe(true);
+  });
+
+  it('falls back to Meta\'s own label when there are no answers to show', () => {
+    const message = first(envelope(flow({ body: 'Appointment booked', response_json: '{}' })));
+
+    expect(message.text).toBe('Appointment booked');
+  });
+
+  it('**survives a response_json that will not parse**', () => {
+    // A Flow whose payload is malformed is still a message that arrived. Losing the whole webhook
+    // over it would lose the customer.
+    const message = first(envelope(flow({ body: '', response_json: '{not json' })));
+
+    expect(message.text).toBe('Completed a form');
+  });
+
+  it('says something rather than nothing when Meta sends neither', () => {
+    expect(first(envelope(flow({}))).text).toBe('Completed a form');
+  });
+
+  it('is still an INTERACTIVE message with Meta\'s object kept in raw', () => {
+    // The FSM and the guard both read `raw`, so it has to survive intact.
+    const message = first(envelope(flow({ response_json: '{"a":"b"}' })));
+
+    expect((message.raw as { type: string }).type).toBe('interactive');
+    // No reply id: a Flow is not a tap on one of our buttons, and pretending otherwise would send
+    // it to the ordering flow's prefix matching.
+    expect(message.interactive).toBeNull();
+  });
+});
+
 describe('other message types', () => {
   it('reads plain text', () => {
     const message = first(envelope({ type: 'text', text: { body: 'I want to order' } }));
@@ -105,6 +213,18 @@ describe('other message types', () => {
     // Not "17.38,78.48" — a delivery address of raw coordinates is unreadable
     // in the inbox and on the order.
     expect(message.text).toBe('Swanlake, Tower 1');
+  });
+
+  it('**leaves an interactive shape it has never seen empty rather than guessing**', () => {
+    // The floor the worker depends on: no text and no reply id is what tells `process-inbound` to
+    // record the message and answer nothing, instead of handing an empty string to a model.
+    const message = first(envelope({
+      type: 'interactive',
+      interactive: { type: 'something_meta_added_later', something_meta_added_later: { x: 1 } },
+    }));
+
+    expect(message.text).toBe('');
+    expect(message.interactive).toBeNull();
   });
 
   it('does not invent text for media it cannot read', () => {

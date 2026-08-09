@@ -45,6 +45,27 @@ export const SelectContent = React.forwardRef<
 ));
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
+/**
+ * A heading over a `SelectGroup`.
+ *
+ * **Not selectable, and that is the reason to reach for it** rather than marking the kinds by
+ * suffixing each option's text: a suffix changes every option's accessible name, so anything that
+ * finds an option by what it says has to know about the marker too.
+ *
+ * `pl-8` lines the text up with the option labels, which are indented to leave room for their tick.
+ */
+export const SelectLabel = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.Label
+    ref={ref}
+    className={cn('py-2 pl-8 pr-2 text-caption font-medium text-ink-500', className)}
+    {...props}
+  />
+));
+SelectLabel.displayName = SelectPrimitive.Label.displayName;
+
 export const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>

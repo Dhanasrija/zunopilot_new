@@ -35,6 +35,7 @@ export const MOBILE_SURFACE = [
   '/api/catalogue',
   '/api/media',
   '/api/notifications',
+  '/api/quick-replies',
   '/api/tickets',
   '/api/leads',
 ] as const;
@@ -191,6 +192,7 @@ export const openapi = {
     { name: 'Catalogue', description: 'Products or menu items. Requires the ECOMMERCE module' },
     { name: 'Media', description: 'Files, in both directions' },
     { name: 'Notifications', description: 'The bell, its unread count, and delivery preferences' },
+    { name: 'Quick replies', description: 'Saved questions with tappable answers' },
     { name: 'Support', description: 'Tickets. Requires the SUPPORT module' },
     { name: 'Leads', description: 'The sales pipeline. Requires the LEADS module' },
   ],
@@ -515,6 +517,43 @@ export const openapi = {
             },
           },
           required: ['body'],
+        }),
+        responses: {
+          201: ok('The message that was sent', ref('Message')),
+          422: { $ref: '#/components/responses/WhatsappRefused' },
+          424: { $ref: '#/components/responses/WhatsappDisconnected' },
+          ...errors,
+        },
+      },
+    },
+    '/inbox/conversations/{id}/quick-reply': {
+      post: {
+        tags: ['Inbox'], security: auth, summary: 'Ask a question with tappable answers',
+        description: [
+          'Needs `inbox:reply`. Sends one of the workspace\'s saved sets — see `/quick-replies` for',
+          'the list. `body` overrides the set\'s saved question for this conversation only, within',
+          "Meta's 1024 characters.",
+          '',
+          '**Only within 24 hours of the customer\'s last message**, like any non-template send;',
+          'outside it this is a 400 that says so.',
+          '',
+          'The reply ids are minted from the button rows and are not yours to choose. When the',
+          'customer taps one, it arrives as an ordinary inbound `INTERACTIVE` message whose `body` is',
+          'the label — **and if that button is bound to a workflow, tapping it starts the workflow and',
+          'ends any human takeover on the conversation.** Nothing happens on send; the handover is the',
+          'tap.',
+        ].join('\n'),
+        parameters: [pathParam('id', 'Conversation id')],
+        requestBody: jsonBody({
+          type: 'object',
+          properties: {
+            quickReplyId: { type: 'string', format: 'uuid', description: 'From `GET /quick-replies`' },
+            body: {
+              type: 'string', maxLength: 1024, nullable: true,
+              description: 'Override the saved question for this send. The set is not changed.',
+            },
+          },
+          required: ['quickReplyId'],
         }),
         responses: {
           201: ok('The message that was sent', ref('Message')),
@@ -1042,6 +1081,79 @@ export const openapi = {
       },
     },
 
+    // ── Quick replies ─────────────────────────────────────────────────────────
+    '/quick-replies': {
+      get: {
+        tags: ['Quick replies'], security: auth, summary: 'The sets an agent can send',
+        description: [
+          'Needs `inbox:reply`. **What comes back depends on what the caller may do**: somebody who',
+          'can only send gets the active sets, which are the ones they can actually use; somebody',
+          'with `automation:write` gets all of them, retired included, because that is the list they',
+          'manage.',
+          '',
+          'Each button carries its `workflow` when one is bound. A button whose workflow is no longer',
+          '`PUBLISHED` will not start anything when tapped — show that, rather than promising it.',
+        ].join(' '),
+        responses: { 200: ok('Sets', arrayOf('QuickReply')), ...errors },
+      },
+      post: {
+        tags: ['Quick replies'], security: auth, summary: 'Save a set',
+        description: [
+          '**Omit `buttons`, or send `[]`, to save a plain text reply** — an agent then inserts it into',
+          'the reply field and sends it through the messages endpoint, not the buttons one. One to three',
+          'answers make it a question instead.',
+          '',
+          'Needs `automation:write` — **not** `inbox:reply`. A button can be bound to a workflow, and',
+          'deciding what a customer\'s tap starts is configuring the automation rather than answering',
+          'a message.',
+          '',
+          'Meta\'s limits are enforced here rather than discovered at send time: at most three',
+          'buttons, 20 characters a label (past which Meta truncates silently), 1024 characters of',
+          'body. Two answers may not read the same. A bound workflow must be published and belong to',
+          'this workspace.',
+          '',
+          '**Buttons carry no id.** They are minted from the row, and supplying one is a 400 rather',
+          'than a silent drop — an id a client chooses is an id that can collide with the ordering',
+          'flow\'s own.',
+        ].join('\n'),
+        requestBody: jsonBody(ref('QuickReplyInput')),
+        responses: { 201: ok('The set', ref('QuickReply')), ...errors },
+      },
+    },
+    '/quick-replies/{id}': {
+      get: {
+        tags: ['Quick replies'], security: auth, summary: 'One set',
+        parameters: [pathParam('id', 'Set id')],
+        responses: { 200: ok('The set', ref('QuickReply')), ...errors },
+      },
+      patch: {
+        tags: ['Quick replies'], security: auth, summary: 'Edit a set',
+        description: [
+          'Needs `automation:write`. Send `isActive: false` to retire a set — it stops being offered',
+          'to agents and stays in this list.',
+          '',
+          'Sending `buttons: []` turns a question into a plain text reply, which retires its answers —',
+          'see below.',
+          '',
+          '**Sending `buttons` replaces them all, with new ids.** A button\'s id is its identity on',
+          'WhatsApp, so relabelling in place would change what a tap on an already-sent question',
+          'means. Omit `buttons` to leave the outstanding ones working.',
+        ].join('\n'),
+        parameters: [pathParam('id', 'Set id')],
+        requestBody: jsonBody(ref('QuickReplyInput')),
+        responses: { 200: ok('The set', ref('QuickReply')), ...errors },
+      },
+      delete: {
+        tags: ['Quick replies'], security: auth, summary: 'Delete a set',
+        description:
+          'Needs `automation:write`. Prefer `isActive: false` — deleting means a tap on a question'
+          + ' already on a customer\'s phone resolves to nothing, and is recorded for the agent to'
+          + ' answer instead.',
+        parameters: [pathParam('id', 'Set id')],
+        responses: { 200: ok('Deleted', { type: 'object' }), ...errors },
+      },
+    },
+
     // ── Support ───────────────────────────────────────────────────────────────
     '/tickets': {
       get: {
@@ -1515,6 +1627,76 @@ export const openapi = {
           },
           createdAt: { type: 'string', format: 'date-time' },
         },
+      },
+      QuickReply: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string', description: 'How an agent picks it. Never sent to the customer.' },
+          body: {
+            type: 'string',
+            description:
+              'The question, and a default rather than a fixed message — the send may override it'
+              + ' for one conversation.',
+          },
+          isActive: { type: 'boolean', description: 'Retired sets are not offered to agents.' },
+          buttons: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                label: { type: 'string', maxLength: 20 },
+                position: { type: 'integer' },
+                workflowId: { type: 'string', format: 'uuid', nullable: true },
+                workflow: {
+                  type: 'object', nullable: true,
+                  description:
+                    'What tapping it starts. **A tap only starts it while `status` is `PUBLISHED`**,'
+                    + ' and it also hands the conversation back to the bot, ending any human takeover.',
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    name: { type: 'string' },
+                    status: { type: 'string', example: 'PUBLISHED' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      QuickReplyInput: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', maxLength: 80 },
+          body: {
+            type: 'string',
+            maxLength: 4000,
+            description:
+              'Up to 4000 characters — the same limit a text reply has — **while the set has no'
+              + ' answers**. Once it carries any, WhatsApp caps an interactive message at 1024 and'
+              + ' a longer body is refused, including when the answers are added by a later PATCH.',
+          },
+          isActive: { type: 'boolean', description: 'PATCH only.' },
+          buttons: {
+            type: 'array',
+            // No floor: an empty array, or the field omitted, saves a **plain text reply**.
+            minItems: 0,
+            maxItems: 3,
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string', maxLength: 20 },
+                workflowId: {
+                  type: 'string', format: 'uuid', nullable: true,
+                  description: 'A published workflow in this workspace, or null for a plain answer.',
+                },
+              },
+              required: ['label'],
+            },
+          },
+        },
+        required: ['name', 'body'],
       },
       MediaAsset: {
         type: 'object',

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { usePermissions } from '@/lib/permissions';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,9 +13,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import NotificationSettings from '@/components/settings/NotificationSettings';
 import AiAgent from '@/components/settings/AiAgent';
 import NumberMasking from '@/components/settings/NumberMasking';
+import QuickReplies from '@/components/settings/QuickReplies';
 import LeaveWorkspace from '@/components/settings/LeaveWorkspace';
 import { toast } from 'sonner';
-import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb } from 'lucide-react';
+import { User, Bell, CheckCircle2, ShieldCheck, Save, RotateCcw, Lock, Lightbulb, ListChecks } from 'lucide-react';
 
 /*
  * The categories come from the server.
@@ -42,6 +44,7 @@ const TABS = ['profile', 'notifications'];
 
 export default function Settings() {
   const qc = useQueryClient();
+  const { can } = usePermissions();
   const { user } = useAuthStore();
   const [searchParams] = useSearchParams();
 
@@ -102,6 +105,17 @@ export default function Settings() {
           <TabsTrigger value="notifications" className="">
             <Bell className="h-4 w-4" />Notifications
           </TabsTrigger>
+          {/*
+            Settings rather than the Auto-replies page, which sits behind the KEYWORD_RULES module
+            gate — asking a customer a question with two answers is not a product tier, and it must
+            not inherit that gate. Hidden entirely without `automation:write`, because binding an
+            answer to a workflow is what this screen is for.
+          */}
+          {can('automation:write') && (
+            <TabsTrigger value="quick-replies" className="">
+              <ListChecks className="h-4 w-4" />Quick replies
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Profile Tab */}
@@ -284,6 +298,12 @@ export default function Settings() {
         <TabsContent value="notifications" className="mt-3">
           <NotificationSettings />
         </TabsContent>
+
+        {can('automation:write') && (
+          <TabsContent value="quick-replies" className="mt-3">
+            <QuickReplies />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

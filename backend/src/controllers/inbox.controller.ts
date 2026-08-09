@@ -18,6 +18,7 @@ import { CUSTOMER_VIEW_SELECT } from '../utils/customer-view.js';
 import { maskContact } from '../utils/mask-number.js';
 import { maySeeFullNumbers } from '../utils/may-see-numbers.js';
 import { requireActiveMember } from '../services/membership.service.js';
+import { quickReplyButtonId } from '../modules/conversation-engine/agent-reply-id.js';
 
 /**
  * The filter every human-facing message read must carry.
@@ -641,6 +642,135 @@ export const sendAgentMedia = asyncHandler(async (req, res) => {
       // authenticated route is the one that keeps working when the asset is later made
       // private.
       mediaUrl: `/api/media/${asset.id}/file`,
+    },
+  );
+
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { lastMessageAt: new Date() },
+  });
+
+  res.status(201).json({ success: true, data: msg });
+});
+
+/**
+ * Ask the customer a question with tappable answers.
+ *
+ * ── Why the set is saved rather than typed here ──────────────────────────────
+ *
+ * The body may be overridden per send — an agent may want to name the customer — but the answers
+ * come from a `QuickReply` the workspace configured, and the ids come from those rows. That is what
+ * keeps an agent from choosing an id: a typed one could collide with the ordering flow's `cat:` and
+ * `cart:` prefixes, or with an operator's payload rule, and a collision is not an error but the
+ * wrong mechanism answering. See `agent-reply-id.ts`.
+ *
+ * The window is checked before the send, following `sendAgentMedia` rather than `sendAgentMessage`.
+ * A bounced text costs a re-read of a sentence still on screen; a bounced question costs the whole
+ * composition, and unlike a file this one can honestly point at templates as the alternative.
+ */
+export const sendAgentQuickReply = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { quickReplyId, body } = req.body as { quickReplyId?: string; body?: string };
+  if (!quickReplyId) throw ApiError.badRequest('Choose a set of replies to send');
+
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId: tenantIdOf(req) },
+    // Unmasked deliberately: `customer.waId` is the address this is sent to, not something shown.
+    include: { customer: true },
+  });
+  if (!conversation) throw ApiError.notFound('Conversation not found');
+
+  /*
+   * The set is loaded and judged **before** the window, and that order is the fix for a misleading
+   * error rather than a preference.
+   *
+   * With the window first, a plain-text set posted here outside the window was refused with "WhatsApp
+   * only allows buttons within 24 hours…" — an error about a problem the caller does not have, which
+   * sends whoever wrote the client hunting a timing bug that does not exist. What is wrong with the
+   * request is the set, and that is knowable without looking at the clock.
+   */
+  const set = await prisma.quickReply.findFirst({
+    where: { id: quickReplyId, tenantId: tenantIdOf(req) },
+    include: { buttons: { orderBy: { position: 'asc' } } },
+  });
+  if (!set) throw ApiError.notFound('That set of replies does not exist');
+  // A retired set is still readable by whoever manages them, and must not be sendable — otherwise
+  // retiring one does nothing for the agents who already had it in a dropdown.
+  if (!set.isActive) throw ApiError.badRequest('That set of replies has been retired');
+
+  /*
+   * A set with no answers is a plain-text reply, and this route is the buttons route.
+   *
+   * **Refused rather than quietly downgraded.** WhatsApp has no interactive message with zero
+   * buttons, so "send this as text instead" would hand the caller a different message type than the
+   * one they asked for, recorded as TEXT, from an endpoint whose whole job is buttons. Name the
+   * alternative instead — the client is one route away from what it wants.
+   */
+  if (!set.buttons.length) {
+    throw ApiError.badRequest(
+      'That set has no answers, so it is a plain text reply — send it with '
+      + 'POST /inbox/conversations/:id/messages.',
+    );
+  }
+
+  const window = await windowStateFor(tenantIdOf(req), conversation.id);
+  if (!window.open) {
+    throw ApiError.badRequest(
+      window.reason === 'never_messaged'
+        ? 'This customer has never messaged you, so WhatsApp will not accept a question with '
+          + 'buttons. They have to write first.'
+        : 'WhatsApp only allows buttons within 24 hours of the customer’s last message. '
+          + 'That window has closed — send a template, or wait for them to write again.',
+    );
+  }
+
+  const wa = await channelForTenant(conversation.tenantId);
+  if (!wa) throw ApiError.badRequest('WhatsApp not connected');
+
+  /*
+   * The question. `body` overrides the saved default for this conversation only.
+   *
+   * Trimmed and length-checked here as well as in the quick-reply validator, because this one
+   * arrives from a different request — the saved body is known to be within 1024 and an override
+   * is not.
+   */
+  const question = (body ?? set.body).trim();
+  if (!question) throw ApiError.badRequest('A question cannot be empty');
+  if (question.length > 1024) {
+    throw ApiError.badRequest('WhatsApp allows 1024 characters in a question with buttons');
+  }
+
+  // Built once and used twice: the same array goes to Meta and onto the message row, so what the
+  // customer taps and what the transcript shows cannot drift apart.
+  const buttons = set.buttons.map((button) => ({
+    id: quickReplyButtonId(button.id),
+    title: button.label,
+  }));
+
+  let sent: { messageId: string | null };
+  try {
+    sent = await whatsappProviderFor(wa).sendButtons({
+      to: conversation.customer.waId,
+      body: question,
+      buttons,
+    });
+  } catch (err) {
+    throw metaFailure(err) ?? err;
+  }
+
+  const msg = await recordOutboundMessage(
+    {
+      tenantId: tenantIdOf(req),
+      conversationId: conversation.id,
+      customerId: conversation.customerId,
+    },
+    {
+      type: 'INTERACTIVE',
+      body: question,
+      messageId: sent.messageId,
+      sentByUserId: userOf(req).id,
+      // What draws the pills in the thread, and the record of what was actually offered.
+      options: { kind: 'buttons', options: buttons },
     },
   );
 

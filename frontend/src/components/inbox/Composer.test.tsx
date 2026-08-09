@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -31,6 +32,30 @@ describe('when a reply can be sent', () => {
     const { onChange } = setup();
     await userEvent.type(screen.getByRole('textbox', { name: /reply/i }), 'hi');
     expect(onChange).toHaveBeenCalled();
+  });
+});
+
+/*
+ * The field holds line breaks, which for most of this product's life it could not.
+ *
+ * An `<input>`'s value cannot contain CR or LF — the browser strips them with no error — so a reply
+ * with a blank line between two paragraphs was impossible to type, and the Settings editor could
+ * already save a multi-line saved reply that the composer would have flattened on its way in.
+ */
+describe('a reply with more than one line', () => {
+  it('**keeps the line breaks it was given**', () => {
+    setup({ value: 'We are open:\n11am–11pm, every day.' });
+
+    expect(screen.getByRole('textbox', { name: /reply/i }))
+      .toHaveValue('We are open:\n11am–11pm, every day.');
+  });
+
+  it('**Shift+Enter adds a line instead of sending**', async () => {
+    const { onSend } = setup({ value: 'First line' });
+
+    await userEvent.type(screen.getByRole('textbox', { name: /reply/i }), '{Shift>}{Enter}{/Shift}');
+
+    expect(onSend).not.toHaveBeenCalled();
   });
 });
 
@@ -312,5 +337,562 @@ describe('the reply chip', () => {
   it('is absent when nothing is being quoted', () => {
     render(<Composer value="" onChange={vi.fn()} onSend={vi.fn()} sending={false} />);
     expect(screen.queryByText(/Replying to/i)).not.toBeInTheDocument();
+  });
+});
+
+/*
+ * Asking a question with tappable answers.
+ *
+ * The composer gains a third meaning for Send — reply, file, question — and the risk is the same
+ * one the file staging already has: what the agent is looking at and what Send will do must never
+ * disagree. The property with real consequences is the last one: a set that hands the conversation
+ * back to the bot has to say so in words, before Send, because an agent who has taken a thread over
+ * will not expect to lose it to a button the customer pressed.
+ */
+const A_SET = {
+  id: 'set-1',
+  name: 'Delivery or pickup',
+  body: 'Would you like delivery or pickup?',
+  isActive: true,
+  buttons: [
+    { id: 'b1', label: 'Delivery', position: 0, workflowId: null, workflow: null },
+    { id: 'b2', label: 'Pickup', position: 1, workflowId: null, workflow: null },
+  ],
+};
+
+const BOUND_SET = {
+  ...A_SET,
+  id: 'set-2',
+  name: 'Book a slot',
+  body: 'Would you like to book?',
+  buttons: [
+    {
+      id: 'b3',
+      label: 'Yes, book',
+      position: 0,
+      workflowId: 'wf-1',
+      workflow: { id: 'wf-1', name: 'Booking', status: 'PUBLISHED' },
+    },
+    { id: 'b4', label: 'Not now', position: 1, workflowId: null, workflow: null },
+  ],
+};
+
+/*
+ * The one control, now that it offers both kinds.
+ *
+ * Named "Insert a saved reply" rather than "Ask with reply buttons" since it does both — and it keeps
+ * the 24-hours sentence as its name when nothing can be sent, which is how the closed-window test
+ * below still finds it.
+ */
+const askControl = () => screen.getByRole('combobox', { name: /saved reply/i });
+
+/** A saved reply with no answers — the plain text kind. */
+const A_TEXT_SET = {
+  id: 'set-3',
+  name: 'Opening hours',
+  body: 'We are open 11am–11pm, every day.',
+  isActive: true,
+  buttons: [],
+};
+
+/**
+ * A composer that owns its own draft.
+ *
+ * `value` is lifted to the page, so `setup`'s field can never actually change — fine for asserting
+ * what was handed upward, useless for anything that depends on what is now *in* the field. Every
+ * test below that chooses a set and then presses Send needs this.
+ */
+const withDraft = (props: Partial<Parameters<typeof Composer>[0]> = {}) => {
+  const onSend = vi.fn();
+  const onSendQuickReply = vi.fn();
+
+  const Harness = () => {
+    const [value, setValue] = useState('');
+    return (
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSend={onSend}
+        sending={false}
+        onSendQuickReply={onSendQuickReply}
+        {...props}
+      />
+    );
+  };
+
+  render(<Harness />);
+  return { onSend, onSendQuickReply };
+};
+
+const pick = async (name: string) => {
+  await userEvent.click(askControl());
+  await userEvent.click(screen.getByRole('option', { name }));
+};
+
+describe('asking with reply buttons', () => {
+  it('offers nothing when the page has nowhere to send one', () => {
+    // Guards the optional prop, the same way the attachment button is guarded.
+    setup({ quickReplies: [A_SET] });
+    expect(screen.queryByRole('combobox', { name: /reply buttons/i })).not.toBeInTheDocument();
+  });
+
+  it('offers nothing when the workspace has saved none', () => {
+    setup({ quickReplies: [], onSendQuickReply: vi.fn() });
+    expect(screen.queryByRole('combobox', { name: /reply buttons/i })).not.toBeInTheDocument();
+  });
+
+  it('**is unavailable once the 24-hour window has closed, and says why**', () => {
+    // The control is found by its closed-window name here, because that name *is* the explanation —
+    // an agent who cannot use it should be able to read why without pressing it.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), windowClosed: true });
+
+    const closed = screen.getByRole('combobox', { name: /24 hours/i });
+    expect(closed).toBeDisabled();
+  });
+
+  it('**loads the saved question into the field so it can be edited**', async () => {
+    const { onChange } = setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn() });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    // Handed to the page, not held locally: the field is the page's draft, and the send carries
+    // whatever ends up in it.
+    expect(onChange).toHaveBeenCalledWith('Would you like delivery or pickup?');
+  });
+
+  it('**shows the answers exactly as the customer will see them**', async () => {
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByText('Delivery')).toBeInTheDocument();
+    expect(screen.getByText('Pickup')).toBeInTheDocument();
+  });
+
+  it('**says in words when tapping will hand the thread back to the bot**', async () => {
+    /*
+     * The property with a real consequence. A workflow started into a paused conversation would
+     * never hear the customer again, so a bound tap ends the takeover — and an agent handling the
+     * thread has to know that before they press Send, not after they lose it.
+     */
+    setup({ quickReplies: [BOUND_SET], onSendQuickReply: vi.fn(), value: 'Book?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Book a slot' }));
+
+    // The whole sentence, read as one: "Yes, book" also appears as a pill above, and asserting on
+    // the label alone would pass while the warning was missing.
+    /*
+     * Matched across elements, because the answer's name is emphasised inside the sentence — and
+     * the sentence is the point. Asserting on "Yes, book" alone would also match the pill above it
+     * and pass with the warning missing entirely.
+     */
+    expect(screen.getByText(
+      (_, element) => element?.tagName === 'P'
+        && /tapping\s+yes, book\s+hands this conversation back to the bot/i
+          .test(element.textContent ?? ''),
+    )).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort when no answer is bound', async () => {
+    // The reassurance has to be absent when it is not true, or it stops being read.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.queryByText(/back to the bot/i)).not.toBeInTheDocument();
+  });
+
+  it('**sends the set and the question instead of a plain reply**', async () => {
+    const onSendQuickReply = vi.fn();
+    const { onSend } = setup({
+      quickReplies: [A_SET], onSendQuickReply, value: 'Asha, delivery or pickup?',
+    });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+
+    expect(onSendQuickReply).toHaveBeenCalledWith('set-1', 'Asha, delivery or pickup?');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('**refuses to ask a question with no words in it**', async () => {
+    // The answers are not the message. A set with an empty body is a WhatsApp send with no text.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: '   ' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByRole('button', { name: /^ask$/i })).toBeDisabled();
+  });
+
+  it('clears the staged set once it has gone, so it cannot be sent twice', async () => {
+    const onSendQuickReply = vi.fn();
+    setup({ quickReplies: [A_SET], onSendQuickReply, value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
+  });
+
+  it('can be cancelled without sending', async () => {
+    const onSendQuickReply = vi.fn();
+    setup({ quickReplies: [A_SET], onSendQuickReply, value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /cancel the question/i }));
+
+    expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('**relabels the field, so it is clear what the words will do**', async () => {
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'x' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByRole('textbox', { name: /question/i })).toBeInTheDocument();
+  });
+});
+
+/*
+ * A saved reply with no answers is plain text.
+ *
+ * **It is inserted, not staged**, and that distinction is the whole design: staging exists because a
+ * question changes what Send *means*, and a plain reply changes only the words in the field. So the
+ * ordinary text mutation sends it, `Inbox.tsx` needed no change at all, and — unlike a question — it
+ * can quote a message.
+ */
+describe('a saved reply with no answers', () => {
+  it('**puts its words in the field and sends as an ordinary reply**', async () => {
+    const { onSend, onSendQuickReply } = withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await pick('Opening hours');
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('leaves Send saying Send and the field saying Reply, because nothing is staged', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await pick('Opening hours');
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /reply/i })).toBeInTheDocument();
+    // No pills, no handover line: there are no answers to show.
+    expect(screen.queryByText(/back to the bot/i)).not.toBeInTheDocument();
+  });
+
+  it('**keeps the line breaks a frequent reply is mostly made of**', async () => {
+    const multiline = { ...A_TEXT_SET, body: 'We are open:\n\n11am–11pm, every day.' };
+    withDraft({ quickReplies: [multiline] });
+
+    await pick('Opening hours');
+
+    expect(screen.getByRole('textbox', { name: /reply/i })).toHaveValue(multiline.body);
+  });
+
+  it('**cancels a staged question when a plain reply is chosen next**', async () => {
+    /*
+     * The one with a customer-visible consequence. Without clearing the staged id, the composer holds
+     * the question with the plain reply's words and Send fires the buttons route — so the customer
+     * gets a question the agent never chose to ask.
+     */
+    const { onSend, onSendQuickReply } = withDraft({ quickReplies: [A_SET, A_TEXT_SET] });
+
+    await pick('Delivery or pickup');
+    await pick('Opening hours');
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('**drops a staged question whose answers vanish while it is staged**', async () => {
+    /*
+     * The stale case, and the **only** one the kind guard on `staged` catches by itself — every other
+     * route goes through `chooseSet`, which clears the id. Here the agent stages a question, somebody
+     * edits its answers away in another tab, and the five-minute-stale list refetches underneath them.
+     *
+     * Without the guard the composer still holds a staged question with no answers, and Send fires
+     * the buttons route for a set the server will refuse.
+     */
+    const onSend = vi.fn();
+    const onSendQuickReply = vi.fn();
+    const Harness = ({ sets }: { sets: typeof A_SET[] }) => {
+      const [value, setValue] = useState('');
+      return (
+        <Composer
+          value={value}
+          onChange={setValue}
+          onSend={onSend}
+          sending={false}
+          onSendQuickReply={onSendQuickReply}
+          quickReplies={sets}
+        />
+      );
+    };
+
+    const { rerender } = render(<Harness sets={[A_SET]} />);
+    await pick('Delivery or pickup');
+    expect(screen.getByRole('button', { name: /^ask$/i })).toBeInTheDocument();
+
+    // Same component, same position, so the composer keeps its staged id — which is the point.
+    rerender(<Harness sets={[{ ...A_SET, buttons: [] }]} />);
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to stage a set that already had no answers when it was chosen', async () => {
+    /*
+     * The list is five minutes stale. A question edited down to no answers in another tab must
+     * degrade to "not staged" — the alternative is staging a question with nothing to offer, which
+     * the server refuses after the click.
+     */
+    withDraft({ quickReplies: [{ ...A_SET, buttons: [] }] });
+
+    await pick('Delivery or pickup');
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+  });
+
+  it('tells the two kinds apart before either is chosen', async () => {
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET] });
+
+    await userEvent.click(askControl());
+
+    expect(screen.getByText('Replies')).toBeInTheDocument();
+    expect(screen.getByText('Questions with answers')).toBeInTheDocument();
+  });
+
+  it('**is still offered once the 24-hour window has closed, and says why the questions are not**', async () => {
+    /*
+     * The correction this change carries. Disabling the control outside the window would forbid, one
+     * inch to the left, exactly what the text field to its right still permits — and the recorded
+     * stance is that the window is a hint and the send path is the authority.
+     */
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET], windowClosed: true });
+
+    expect(askControl()).not.toBeDisabled();
+    await userEvent.click(askControl());
+
+    expect(screen.getByRole('option', { name: 'Opening hours' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Delivery or pickup' })).not.toBeInTheDocument();
+    expect(screen.getByText(/need the 24-hour window/i)).toBeInTheDocument();
+  });
+
+  // Deliberately not repeated here: "the control is dead and its name is the explanation" when the
+  // window is closed and every set is a question is already pinned by **is unavailable once the
+  // 24-hour window has closed** above, which is the same fixture and the same assertion.
+});
+
+/*
+ * The `/` shortcut.
+ *
+ * ── The rule the whole thing rests on ────────────────────────────────────────
+ *
+ * **Rows present means the list owns the keyboard; no rows means it is invisible and inert.** That is
+ * what stops Enter from ever becoming a dead key — the alternative, a visible "no matches" panel that
+ * does not own Enter, would make the same key do different things depending on a match count nobody
+ * is watching.
+ *
+ * The other thing being pinned here is negative: **the two Enter tests at the top of this file are
+ * unedited.** Their values do not start with `/`, so `handleSlashKey` returns false and they take the
+ * same path they always did. If this feature ever needs them changed, it has been built wrong.
+ */
+const slashList = () => screen.queryByRole('listbox', { name: /saved replies/i });
+const typeInField = (text: string) =>
+  userEvent.type(screen.getByRole('textbox', { name: /reply/i }), text);
+
+describe('the slash shortcut', () => {
+  it('**opens on a slash typed into an empty field**', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET, A_SET] });
+
+    await typeInField('/');
+
+    expect(slashList()).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Opening hours/ })).toBeInTheDocument();
+  });
+
+  it('leaves a slash typed mid-message alone', async () => {
+    /*
+     * Agents type URLs, "and/or", "24/7", "9/10", and none of them may open a list.
+     *
+     * **Belt and braces, and worth saying so rather than pretending otherwise.** Two independent
+     * things keep this shut: the open condition is the *transition* from an empty field, and the query
+     * is `value.slice(1)` — which for mid-message text is the whole message minus its first character
+     * and so matches nothing. Mutating the open rule to `includes('/')` still leaves the list empty,
+     * so this test cannot fail on that alone; it is documentation of a property an agent relies on,
+     * not a tight guard on one line. The tight guard is **stays dismissed** below, which is what did
+     * catch that mutation.
+     */
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('ETA 9/10 mins');
+
+    expect(slashList()).not.toBeInTheDocument();
+  });
+
+  it('does not open while a question is staged, because the field is not a reply then', async () => {
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET] });
+
+    await pick('Delivery or pickup');
+    // The field holds the staged question's body, so this is not the empty-field transition either —
+    // but the guard is explicit rather than incidental.
+    await userEvent.clear(screen.getByRole('textbox', { name: /question/i }));
+    await userEvent.type(screen.getByRole('textbox', { name: /question/i }), '/');
+
+    expect(slashList()).not.toBeInTheDocument();
+  });
+
+  it('offers no list at all when there is nothing to insert', async () => {
+    withDraft({ quickReplies: [] });
+
+    await typeInField('/');
+
+    expect(slashList()).not.toBeInTheDocument();
+  });
+
+  it('filters on what is typed after the slash, by name and by body', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET, A_SET] });
+
+    await typeInField('/hours');
+
+    expect(screen.getByRole('option', { name: /Opening hours/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Delivery or pickup/ })).not.toBeInTheDocument();
+  });
+
+  it('**Enter chooses the highlighted reply instead of sending the search text**', async () => {
+    const { onSend } = withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/hours{Enter}');
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: /reply/i })).toHaveValue(A_TEXT_SET.body);
+    expect(slashList()).not.toBeInTheDocument();
+  });
+
+  it('**hands Enter straight back when nothing matches, so it can never be a dead key**', async () => {
+    const { onSend } = withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/zzzz');
+    expect(slashList()).not.toBeInTheDocument();
+
+    await typeInField('{Enter}');
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('moves the highlight with the arrows', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET, A_SET] });
+
+    await typeInField('/');
+    const before = screen.getAllByRole('option');
+    expect(before[0]).toHaveAttribute('aria-selected', 'true');
+
+    await typeInField('{ArrowDown}');
+    expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('clamps at the ends rather than wrapping', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET, A_SET] });
+
+    await typeInField('/{ArrowUp}');
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+
+    await typeInField('{ArrowDown}{ArrowDown}{ArrowDown}');
+    expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('**Escape closes the list and leaves the typed text exactly as it was**', async () => {
+    // Escape clearing a field is silent data loss on the key people press when confused.
+    const { onSend } = withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/hours{Escape}');
+
+    expect(slashList()).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /reply/i })).toHaveValue('/hours');
+    // And Send now does what the footer hint promised: sends the literal text.
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('stays dismissed until the field is emptied and a slash typed again', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/hours{Escape}');
+    // Backspacing back to a bare slash must not resurrect what was just dismissed.
+    await typeInField('{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}');
+    expect(slashList()).not.toBeInTheDocument();
+
+    await typeInField('{Backspace}/');
+    expect(slashList()).toBeInTheDocument();
+  });
+
+  it('**will not send the search text while the list is open**', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/hou');
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+    expect(screen.getByText(/Esc to type it as text/i)).toBeInTheDocument();
+  });
+
+  it('closes when focus leaves the field', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/');
+    expect(slashList()).toBeInTheDocument();
+
+    await userEvent.tab();
+    expect(slashList()).not.toBeInTheDocument();
+  });
+
+  it('**keeps focus in the field when a row is clicked, so the keyboard still works**', async () => {
+    // The reason rows preventDefault on mousedown. Without it the row unmounts on blur before its
+    // click can land — the classic autocomplete bug.
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await typeInField('/');
+    await userEvent.click(screen.getByRole('option', { name: /Opening hours/ }));
+
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: /reply/i }));
+    expect(screen.getByRole('textbox', { name: /reply/i })).toHaveValue(A_TEXT_SET.body);
+  });
+
+  it('**offers questions too, and staging one from here behaves like the dropdown**', async () => {
+    /*
+     * `/` reads as "my saved replies" — one list in Settings, one in the dropdown, one in the agent's
+     * head. A shortcut that showed half of them would teach "check the dropdown as well", and a
+     * shortcut nobody trusts is dead weight.
+     */
+    withDraft({ quickReplies: [BOUND_SET] });
+
+    await typeInField('/book{Enter}');
+
+    expect(screen.getByRole('button', { name: /^ask$/i })).toBeInTheDocument();
+    expect(screen.getByText(/hands this conversation back to the bot/i)).toBeInTheDocument();
+  });
+
+  it('lists only the plain ones once the 24-hour window has closed', async () => {
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET], windowClosed: true });
+
+    await typeInField('/');
+
+    expect(screen.getByRole('option', { name: /Opening hours/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Delivery or pickup/ })).not.toBeInTheDocument();
   });
 });
