@@ -1,8 +1,12 @@
 import { useRef, useState } from 'react';
-import { CornerUpLeft, Paperclip, SendHorizonal, X } from 'lucide-react';
+import { Bot, CornerUpLeft, ListChecks, Paperclip, SendHorizonal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { formatBytes } from '@/lib/media';
+import { handoverButtons, type QuickReply } from '@/lib/quick-replies';
 
 // The reply box.
 //
@@ -22,6 +26,7 @@ export function Composer({
   value, onChange, onSend, sending,
   onSendFile, attaching = false, fileAccept, checkFile, windowClosed = false,
   replyingTo, onCancelReply,
+  quickReplies, onSendQuickReply, askingWithButtons = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -51,16 +56,44 @@ export function Composer({
   /** The message this reply will quote, shown above the field so it cannot be forgotten. */
   replyingTo?: { body?: string | null; type: string; direction: 'INBOUND' | 'OUTBOUND' } | null;
   onCancelReply?: () => void;
+  /** The workspace's saved questions. Absent or empty hides the control entirely. */
+  quickReplies?: QuickReply[];
+  /** Send one, with the reply field as the question. */
+  onSendQuickReply?: (quickReplyId: string, body: string) => void;
+  askingWithButtons?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  /**
+   * The staged set, if the agent is asking rather than replying.
+   *
+   * Local, like `file` and for the same reason: nothing outside the composer reads it, and it has
+   * to be cleared when it is sent. `value` stays lifted because the thread and the file path share
+   * it.
+   */
+  const [quickReplyId, setQuickReplyId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const busy = sending || attaching;
+  const busy = sending || attaching || askingWithButtons;
 
-  const canSend = file ? !busy : !!value.trim() && !busy;
+  const sets = quickReplies ?? [];
+  const staged = sets.find((set) => set.id === quickReplyId) ?? null;
+  /** Which of its answers will hand the thread back to the bot. Published bindings only. */
+  const handovers = staged ? handoverButtons(staged) : [];
+
+  // A question needs words. Everything else follows the file's rule.
+  const canSend = staged ? !!value.trim() && !busy : (file ? !busy : !!value.trim() && !busy);
+
+  const clearQuickReply = () => setQuickReplyId(null);
 
   const submit = () => {
     if (!canSend) return;
+    // Before the file branch: the two are mutually exclusive, and staging one clears the other,
+    // but the order makes that impossible to get wrong from here.
+    if (staged && onSendQuickReply) {
+      onSendQuickReply(staged.id, value.trim());
+      clearQuickReply();
+      return;
+    }
     if (file && onSendFile) {
       onSendFile(file, value.trim());
       setFile(null);
@@ -73,6 +106,12 @@ export function Composer({
   const attachTitle = windowClosed
     ? 'WhatsApp only allows a file within 24 hours of the customer’s last message'
     : 'Attach a file';
+
+  const askTitle = windowClosed
+    ? 'WhatsApp only allows buttons within 24 hours of the customer’s last message'
+    : 'Ask with reply buttons';
+
+  const fieldLabel = staged ? 'Question' : (file ? 'Caption' : 'Reply');
 
   return (
     <div className="shrink-0 border-t border-ink-300 bg-surface-1 p-3">
@@ -142,7 +181,101 @@ export function Composer({
         </div>
       )}
 
+      {/*
+        The staged question, and what tapping each answer will do.
+
+        Above the row, like the quote and the staged file, because all three change what Send means
+        and none of them is visible in the text being typed.
+      */}
+      {staged && (
+        <div className="mb-2 rounded-md border border-ink-300 bg-surface-2 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <ListChecks aria-hidden className="h-4 w-4 shrink-0 text-ink-500" />
+            <span className="min-w-0 flex-1 truncate text-caption font-medium text-ink-700">
+              {staged.name}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Cancel the question"
+              disabled={busy}
+              onClick={clearQuickReply}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* The answers exactly as the customer will see them, so there is no guessing. */}
+          <div className="mt-2 flex flex-wrap gap-1">
+            {staged.buttons.map((button) => (
+              <span
+                key={button.id}
+                className="rounded-full border border-ink-300 bg-surface-1 px-2 py-px text-caption text-ink-700"
+              >
+                {button.label}
+              </span>
+            ))}
+          </div>
+
+          {/*
+            **The consequence, in words, before Send** — not a tooltip and not a colour.
+
+            A tap on a bound answer starts its workflow, and a workflow started into a paused
+            conversation would be deaf, so the tap also ends the takeover. That is the agent handing
+            the thread back to the bot, and they should be doing it on purpose.
+          */}
+          {handovers.length > 0 && (
+            <p className="mt-2 flex items-start gap-2 text-caption text-ink-500">
+              <Bot aria-hidden className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span>
+                Tapping{' '}
+                <span className="font-medium text-ink-700">
+                  {handovers.map((b) => b.label).join(' or ')}
+                </span>{' '}
+                hands this conversation back to the bot.
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
+        {onSendQuickReply && sets.length > 0 && (
+          <Select
+            value={quickReplyId ?? ''}
+            onValueChange={(id) => {
+              setQuickReplyId(id);
+              // Mutually exclusive with a file: an interactive message with a media header is a
+              // real Meta feature and deliberately out of scope, so half-building it here would be
+              // worse than not offering it.
+              setFile(null);
+              setRefused(null);
+              // Load the saved question so the agent edits it rather than retyping it. It is a
+              // starting point — the send carries whatever ends up in the field.
+              const chosen = sets.find((set) => set.id === id);
+              if (chosen) onChange(chosen.body);
+            }}
+            disabled={busy || windowClosed}
+          >
+            <SelectTrigger
+              className="w-auto shrink-0"
+              aria-label={askTitle}
+              title={askTitle}
+            >
+              {/* Icon only: the row is already three controls wide, and the label is on the
+                  trigger for anyone who cannot see it. */}
+              <ListChecks aria-hidden className="h-4 w-4" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {sets.map((set) => (
+                <SelectItem key={set.id} value={set.id}>{set.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         {onSendFile && (
           <>
             <input
@@ -180,10 +313,12 @@ export function Composer({
         )}
 
         <Input
-          aria-label={file ? 'Caption' : 'Reply'}
+          aria-label={fieldLabel}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={file ? 'Add a caption (optional)…' : 'Type a reply…'}
+          placeholder={
+            staged ? 'Ask a question…' : (file ? 'Add a caption (optional)…' : 'Type a reply…')
+          }
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
         />
 
@@ -192,7 +327,7 @@ export function Composer({
             reader without an `aria-label` that could drift from what is drawn. */}
         <Button className="shrink-0 gap-2" disabled={!canSend} onClick={submit}>
           <SendHorizonal aria-hidden className="h-4 w-4" />
-          {busy ? 'Sending…' : 'Send'}
+          {busy ? 'Sending…' : (staged ? 'Ask' : 'Send')}
         </Button>
       </div>
     </div>

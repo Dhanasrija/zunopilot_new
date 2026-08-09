@@ -314,3 +314,177 @@ describe('the reply chip', () => {
     expect(screen.queryByText(/Replying to/i)).not.toBeInTheDocument();
   });
 });
+
+/*
+ * Asking a question with tappable answers.
+ *
+ * The composer gains a third meaning for Send — reply, file, question — and the risk is the same
+ * one the file staging already has: what the agent is looking at and what Send will do must never
+ * disagree. The property with real consequences is the last one: a set that hands the conversation
+ * back to the bot has to say so in words, before Send, because an agent who has taken a thread over
+ * will not expect to lose it to a button the customer pressed.
+ */
+const A_SET = {
+  id: 'set-1',
+  name: 'Delivery or pickup',
+  body: 'Would you like delivery or pickup?',
+  isActive: true,
+  buttons: [
+    { id: 'b1', label: 'Delivery', position: 0, workflowId: null, workflow: null },
+    { id: 'b2', label: 'Pickup', position: 1, workflowId: null, workflow: null },
+  ],
+};
+
+const BOUND_SET = {
+  ...A_SET,
+  id: 'set-2',
+  name: 'Book a slot',
+  body: 'Would you like to book?',
+  buttons: [
+    {
+      id: 'b3',
+      label: 'Yes, book',
+      position: 0,
+      workflowId: 'wf-1',
+      workflow: { id: 'wf-1', name: 'Booking', status: 'PUBLISHED' },
+    },
+    { id: 'b4', label: 'Not now', position: 1, workflowId: null, workflow: null },
+  ],
+};
+
+const askControl = () => screen.getByRole('combobox', { name: /reply buttons/i });
+
+describe('asking with reply buttons', () => {
+  it('offers nothing when the page has nowhere to send one', () => {
+    // Guards the optional prop, the same way the attachment button is guarded.
+    setup({ quickReplies: [A_SET] });
+    expect(screen.queryByRole('combobox', { name: /reply buttons/i })).not.toBeInTheDocument();
+  });
+
+  it('offers nothing when the workspace has saved none', () => {
+    setup({ quickReplies: [], onSendQuickReply: vi.fn() });
+    expect(screen.queryByRole('combobox', { name: /reply buttons/i })).not.toBeInTheDocument();
+  });
+
+  it('**is unavailable once the 24-hour window has closed, and says why**', () => {
+    // The control is found by its closed-window name here, because that name *is* the explanation —
+    // an agent who cannot use it should be able to read why without pressing it.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), windowClosed: true });
+
+    const closed = screen.getByRole('combobox', { name: /24 hours/i });
+    expect(closed).toBeDisabled();
+  });
+
+  it('**loads the saved question into the field so it can be edited**', async () => {
+    const { onChange } = setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn() });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    // Handed to the page, not held locally: the field is the page's draft, and the send carries
+    // whatever ends up in it.
+    expect(onChange).toHaveBeenCalledWith('Would you like delivery or pickup?');
+  });
+
+  it('**shows the answers exactly as the customer will see them**', async () => {
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByText('Delivery')).toBeInTheDocument();
+    expect(screen.getByText('Pickup')).toBeInTheDocument();
+  });
+
+  it('**says in words when tapping will hand the thread back to the bot**', async () => {
+    /*
+     * The property with a real consequence. A workflow started into a paused conversation would
+     * never hear the customer again, so a bound tap ends the takeover — and an agent handling the
+     * thread has to know that before they press Send, not after they lose it.
+     */
+    setup({ quickReplies: [BOUND_SET], onSendQuickReply: vi.fn(), value: 'Book?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Book a slot' }));
+
+    // The whole sentence, read as one: "Yes, book" also appears as a pill above, and asserting on
+    // the label alone would pass while the warning was missing.
+    /*
+     * Matched across elements, because the answer's name is emphasised inside the sentence — and
+     * the sentence is the point. Asserting on "Yes, book" alone would also match the pill above it
+     * and pass with the warning missing entirely.
+     */
+    expect(screen.getByText(
+      (_, element) => element?.tagName === 'P'
+        && /tapping\s+yes, book\s+hands this conversation back to the bot/i
+          .test(element.textContent ?? ''),
+    )).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort when no answer is bound', async () => {
+    // The reassurance has to be absent when it is not true, or it stops being read.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.queryByText(/back to the bot/i)).not.toBeInTheDocument();
+  });
+
+  it('**sends the set and the question instead of a plain reply**', async () => {
+    const onSendQuickReply = vi.fn();
+    const { onSend } = setup({
+      quickReplies: [A_SET], onSendQuickReply, value: 'Asha, delivery or pickup?',
+    });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+
+    expect(onSendQuickReply).toHaveBeenCalledWith('set-1', 'Asha, delivery or pickup?');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('**refuses to ask a question with no words in it**', async () => {
+    // The answers are not the message. A set with an empty body is a WhatsApp send with no text.
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: '   ' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByRole('button', { name: /^ask$/i })).toBeDisabled();
+  });
+
+  it('clears the staged set once it has gone, so it cannot be sent twice', async () => {
+    const onSendQuickReply = vi.fn();
+    setup({ quickReplies: [A_SET], onSendQuickReply, value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
+  });
+
+  it('can be cancelled without sending', async () => {
+    const onSendQuickReply = vi.fn();
+    setup({ quickReplies: [A_SET], onSendQuickReply, value: 'Delivery or pickup?' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+    await userEvent.click(screen.getByRole('button', { name: /cancel the question/i }));
+
+    expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('**relabels the field, so it is clear what the words will do**', async () => {
+    setup({ quickReplies: [A_SET], onSendQuickReply: vi.fn(), value: 'x' });
+
+    await userEvent.click(askControl());
+    await userEvent.click(screen.getByRole('option', { name: 'Delivery or pickup' }));
+
+    expect(screen.getByRole('textbox', { name: /question/i })).toBeInTheDocument();
+  });
+});
