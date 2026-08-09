@@ -3,7 +3,7 @@
   "info": {
     "title": "ZunoPilot API — mobile surface",
     "version": "1.0.0",
-    "description": "The endpoints a ZunoPilot mobile client calls.\n\n### Authenticating\nSign in with a phone number and a one-time code: `POST /auth/otp` sends it,\n`POST /auth/otp/verify` exchanges it for a JWT. Send that token as\n`Authorization: Bearer <token>` on every other request. There are no passwords.\n\n**The token currently lasts 24 hours and there is no refresh endpoint.** A mobile\nclient will therefore be signed out daily until one is added — worth planning around.\n\n### Shape of a response\nSuccess is always `{ \"success\": true, \"data\": … }`. Failure is always\n`{ \"success\": false, \"message\": \"…\" }`, with the message written for a person to read.\n\n### Statuses worth knowing\n- **401** — no token, or an expired one. Sign in again.\n- **403** — signed in, but this seat lacks the permission the route needs.\n- **404** — either the thing does not exist, **or** the workspace does not have the\n  module that owns it. The two are deliberately indistinguishable, so a workspace\n  cannot probe for features it was never sold.\n- **422** — WhatsApp refused something, and `message` carries their own words.\n\n### Push notifications\nThe endpoints under `/notifications/push` are **Web Push (VAPID)**. There is no FCM or\nAPNs support yet, so a native client cannot receive pushes through them — the in-app\nlist and unread count under `/notifications` do work."
+    "description": "The endpoints a ZunoPilot mobile client calls.\n\n### Authenticating\nSign in with a phone number and a one-time code: `POST /auth/otp` sends it,\n`POST /auth/otp/verify` exchanges it for a JWT. Send that token as\n`Authorization: Bearer <token>` on every other request. There are no passwords.\n\n**The token currently lasts 24 hours and there is no refresh endpoint.** A mobile\nclient will therefore be signed out daily until one is added — worth planning around.\n\n### Shape of a response\nSuccess is always `{ \"success\": true, \"data\": … }`. Failure is always\n`{ \"success\": false, \"message\": \"…\" }`, with the message written for a person to read.\n\n### Statuses worth knowing\n- **401** — no token, or an expired one. Sign in again.\n- **403** — signed in, but this seat lacks the permission the route needs.\n- **404** — either the thing does not exist, **or** the workspace does not have the\n  module that owns it. The two are deliberately indistinguishable, so a workspace\n  cannot probe for features it was never sold.\n- **422** — WhatsApp refused something, and `message` carries their own words.\n\n### Media\n**`mediaUrl` on a message is a relative API path, not a public link.** It reads\n`/api/media/<id>/file`, and fetching it needs the same `Authorization` header as\neverything else — an image widget pointed straight at it with no header gets a 401. Both\ndirections use that one path: a photograph the customer sent, and a file the business sent\nback.\n\nSending a file is two calls, never one. `POST /media` with `multipart/form-data` returns an\nid; `POST /inbox/conversations/{id}/media` sends that id. Uploading and sending are separate\nbecause the same upload can be sent more than once and reused as a campaign header.\n\nAsk `GET /media/rules` for what may be uploaded rather than hardcoding it — the limits are\nWhatsApp's and they change.\n\n### Push notifications\nTwo transports, and a client uses exactly one of them.\n\n- **A native app** registers with `POST /notifications/push/devices`, sending its FCM\n  registration token and a `deviceId` it generates once and keeps. Re-send on every\n  token refresh — the `deviceId` is what makes that an update rather than a duplicate.\n  iOS is delivered through FCM as well, so there is one call for both platforms.\n- **A browser** uses `POST /notifications/push/subscribe` with a VAPID subscription.\n\n`GET /notifications/preferences` reports which of the two this server can actually do,\nas `push.available` (browser) and `push.mobileAvailable` (app). Every device a person\nhas registered is sent to, so being signed in on two phones means both of them buzz.\n\nA push payload carries `tenantId`. Switch to that workspace before following `link` —\n`link` is a relative path with no workspace in it, so following it while the app is\nshowing a different workspace opens the wrong inbox."
   },
   "servers": [
     {
@@ -44,6 +44,10 @@
     {
       "name": "Catalogue",
       "description": "Products or menu items. Requires the ECOMMERCE module"
+    },
+    {
+      "name": "Media",
+      "description": "Files, in both directions"
     },
     {
       "name": "Notifications",
@@ -822,6 +826,23 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "A cursor for asking **what changed** instead of re-reading the list. Send the `nextSince` and `nextSinceId` from the previous response; the reply contains only rows modified since, and `meta.hasMore` says whether to ask again straight away rather than waiting for the next tick. Omit both for the current state. **A filter plus a cursor has one gap**: a conversation that changes out of the filtered set is not in the delta, so poll the unfiltered list and filter locally if you need it to be exact."
+          },
+          {
+            "name": "sinceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The other half of the cursor. Breaks ties between rows sharing one `since`, which happens whenever a bulk update stamps many rows at the same instant."
           }
         ],
         "responses": {
@@ -841,11 +862,15 @@
                       "items": {
                         "$ref": "#/components/schemas/Conversation"
                       }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/DeltaMeta"
                     }
                   },
                   "required": [
                     "success",
-                    "data"
+                    "data",
+                    "meta"
                   ]
                 }
               }
@@ -1074,6 +1099,7 @@
           }
         ],
         "summary": "The messages in a conversation",
+        "description": "Without `since`, the thread as it stands, oldest first, with removed messages left out.\n\nWith `since` and `sinceId`, **only what changed** — ordered by when it changed, and\nincluding delivery-status updates to messages you already have. This is how a client\nfollows the ticks without re-reading the thread: status arrives as a change to an existing\nrow, not as a new one.\n\nA delta also reports **removals**. A message an agent deleted comes back as a tombstone —\n`id`, `conversationId`, `direction`, the timestamps and `deletedAt`, with no content. Drop\nit from the thread when you see one.\n\nEcho `meta.nextSince` and `meta.nextSinceId` back on the next call, and call again\nimmediately while `meta.hasMore` is true.",
         "parameters": [
           {
             "name": "id",
@@ -1084,6 +1110,23 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "From `meta.nextSince`. An unparseable value is a 400, not a full read."
+          },
+          {
+            "name": "sinceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "From `meta.nextSinceId`."
           }
         ],
         "responses": {
@@ -1103,11 +1146,15 @@
                       "items": {
                         "$ref": "#/components/schemas/Message"
                       }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/DeltaMeta"
                     }
                   },
                   "required": [
                     "success",
-                    "data"
+                    "data",
+                    "meta"
                   ]
                 }
               }
@@ -3765,8 +3812,8 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Registered Web Push devices",
-        "description": "**Web Push only — not FCM or APNs.** A native client cannot use these yet.",
+        "summary": "Registered devices",
+        "description": "Every device registered for push, browsers and phones together. `platform` is `WEB`, `ANDROID` or `IOS`. Neither the browser keys nor the FCM token are returned — use `id` with the DELETE below to unregister one.",
         "responses": {
           "200": {
             "description": "Devices",
@@ -3784,6 +3831,147 @@
                       "items": {
                         "type": "object"
                       }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register this phone (FCM)",
+        "description": "Call on sign-in and on every FCM token refresh. `deviceId` is the app's own install id, stable across token rotation — the same `deviceId` updates its row instead of adding a second one for the same phone. Also switches the `push` preference on. **422** means this server has no FCM credentials.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "ANDROID",
+                      "IOS"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "The FCM registration token"
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "description": "Generated once by the app and kept"
+                  },
+                  "deviceName": {
+                    "type": "string",
+                    "example": "Pixel 8"
+                  },
+                  "appVersion": {
+                    "type": "string",
+                    "example": "1.4.0"
+                  }
+                },
+                "required": [
+                  "platform",
+                  "token",
+                  "deviceId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/notifications/push/devices/{id}": {
+      "delete": {
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unregister a device",
+        "description": "What signing out of the app calls. Works for a browser row too. Idempotent — an id that is already gone answers 200 with `removed: 0`. Deliberately leaves the `push` preference alone: the person may still want push on their other phone.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -3907,6 +4095,332 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/media": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The workspace's uploaded files",
+        "description": "Needs `campaigns:read`. **Uploads only** — files customers sent are not listed here, and `GET /media/{id}/file` is the only way to reach one. The two are deliberately separate: a library an operator browses and a customer's private photograph are not the same thing.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "IMAGE",
+                "VIDEO",
+                "DOCUMENT"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MediaAsset"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Media"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload a file",
+        "description": "Needs `campaigns:write`. `multipart/form-data` with one part named `file`.\n\n**The kind is decided from the bytes, not from anything you send.** A caller claiming\nIMAGE for an MP4 would produce a send WhatsApp refuses, and the file is the only honest\nsource. A type WhatsApp does not accept is a 400 naming what it does — as is a file over\nthe limit for its kind, with both sizes in the message.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MediaAsset"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/media/rules": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "What may be uploaded",
+        "description": "Needs `campaigns:read`. Read this instead of hardcoding the limits — they are\nWhatsApp's, and `label` is written to be shown to a person as it stands.\n\n`publicUrlReachable` is false when this server's `APP_URL` cannot be fetched from the\ninternet, which is normal in development. Campaign header media will not work while it\nis false, because Meta fetches the file itself; conversation media is unaffected.",
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "kinds": {
+                          "type": "object",
+                          "description": "Keyed by IMAGE, VIDEO and DOCUMENT.",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "mimeTypes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "maxBytes": {
+                                "type": "integer",
+                                "example": 5242880
+                              },
+                              "label": {
+                                "type": "string",
+                                "example": "JPEG or PNG, up to 5 MB"
+                              }
+                            }
+                          }
+                        },
+                        "publicUrlReachable": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/media/{id}": {
+      "delete": {
+        "tags": [
+          "Media"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove an uploaded file",
+        "description": "Needs `campaigns:write`. Removes the row and the bytes. A message already sent with it keeps its `mediaUrl`, which will then 404 — the customer's copy is unaffected either way, since WhatsApp delivered its own.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Media id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/media/{id}/file": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The bytes",
+        "description": "Needs `inbox:read`. **This is what `mediaUrl` on a message points at**, in both\ndirections — what the customer sent and what the business sent back.\n\nAuthenticated and scoped to the workspace, so send the bearer token. In Flutter that\nmeans `Image.network(url, headers: {...})` or fetching the bytes yourself; a plain\n`<img src>`-style load with no header gets a 401 and renders as a broken image.\n\nStreamed through the API rather than redirecting to a presigned URL, deliberately: the\nURL stops working the moment the session does, instead of remaining usable by anyone\nholding it until it expires. Answers `Cache-Control: private, max-age=3600`, so caching\nthe bytes on the device for an hour is safe and re-fetching on every scroll is not\nnecessary.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Media id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file. `Content-Type` is the stored MIME type.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorised"
@@ -5473,6 +5987,26 @@
           "message"
         ]
       },
+      "DeltaMeta": {
+        "type": "object",
+        "description": "Where to resume from. Echo the two cursor fields back on the next call.",
+        "properties": {
+          "nextSince": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Send as `since` next time. On an empty delta this is the cursor you sent, unchanged — it deliberately does not jump to now, because nothing was observed in between."
+          },
+          "nextSinceId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Send as `sinceId` next time. Breaks ties at `nextSince`."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "The page was full and more is already waiting. Call again immediately rather than waiting for the next tick."
+          }
+        }
+      },
       "PageMeta": {
         "type": "object",
         "properties": {
@@ -5768,7 +6302,19 @@
           },
           "type": {
             "type": "string",
-            "example": "TEXT"
+            "enum": [
+              "TEXT",
+              "IMAGE",
+              "DOCUMENT",
+              "AUDIO",
+              "VIDEO",
+              "LOCATION",
+              "INTERACTIVE",
+              "TEMPLATE",
+              "SYSTEM"
+            ],
+            "example": "TEXT",
+            "description": "Anything but `TEXT` normally carries a `mediaUrl`. `body` is still set on a media message — the caption if there was one, otherwise a short description such as \"Sent a photo\", so a list preview has something to show."
           },
           "status": {
             "type": "string",
@@ -5841,7 +6387,9 @@
           },
           "mediaUrl": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "example": "/api/media/6c3acaa4-2284-4e45-8d65-e17fc45d8fd8/file",
+            "description": "**A relative path on this API, not a public URL.** Prefix it with the API base and send the bearer token; without the header it is a 401. Null on a text message, and null on a media message whose file could not be captured from Meta — the message still exists and `body` says what kind of thing it was."
           },
           "waMessageId": {
             "type": "string",
@@ -5852,6 +6400,42 @@
             "format": "uuid",
             "nullable": true,
             "description": "Null on an OUTBOUND message means the bot sent it, not a person."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MediaAsset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "IMAGE",
+              "VIDEO",
+              "DOCUMENT"
+            ]
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "image/jpeg"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "originalName": {
+            "type": "string",
+            "description": "As the uploader named it. Display only — never used to build a path."
+          },
+          "url": {
+            "type": "string",
+            "description": "The **public** link, for a campaign template header, which Meta fetches itself. Not the route a signed-in client should use for a conversation file: that is `/api/media/{id}/file`, and it is the one that keeps working when an asset is private."
           },
           "createdAt": {
             "type": "string",

@@ -1,123 +1,90 @@
-import webpush from 'web-push';
 import type { Notification, PushSubscription } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { logger } from '../../config/logger.js';
 import { recipientsOf, preferencesFor, wants } from './notification.service.js';
+import type { PushOutcome, PushPayload, TransportTable } from './push-transport.js';
+import { fcmTransport } from './fcm.js';
+import { webPushTransport, webPushAvailable, pushPublicKey } from './push-web.js';
 
-// Web Push: reaching a device with the app closed.
+// Getting a notification onto a device that is not looking at the app.
 //
-// **Why Web Push and not a vendor SDK.** It is the only option that needs no third
-// party, no app store presence and no per-message cost — the browser's own push
-// service delivers, authenticated by a VAPID key pair we hold. The cost is a real
-// platform caveat, stated here because it will otherwise be discovered as a bug:
-// **on iOS this only works once the site has been added to the home screen.** Safari
-// implements Web Push for installed web apps only. Desktop Safari, Chrome, Edge and
-// Android Chrome all work from a normal tab.
+// This module owns two things and no more: **which devices a notification goes to**, and
+// **what happens to a device that did not accept it**. How a send is actually performed
+// belongs to a transport — `push-web.ts` for browsers, `fcm.ts` for the Flutter app.
 //
-// **Why the keys are read from `process.env` at the point of use, with no fallback.**
-// `config/env.ts` snapshots the environment at import, and a rotatable secret read
-// from that snapshot reads as configured after it has been changed — a trap this
-// codebase has hit five times. There is also deliberately no fallback to any other
-// secret: a push key pair that silently became something else would mean every
-// existing subscription breaks with no error anyone would connect to the cause.
+// ── Every device, always ─────────────────────────────────────────────────────
+//
+// A person may be signed in on a laptop, a work phone and their own phone at the same
+// time, and they do not know which one we picked. So all of them are sent to, and only the
+// people who asked not to be are skipped. The alternative — most-recent device wins — reads
+// to the person as push working intermittently, which is indistinguishable from broken.
 
-/** VAPID configuration, or null when the server has none. */
-const vapid = (): { publicKey: string; privateKey: string; subject: string } | null => {
-  const publicKey = process.env.VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
-  if (!publicKey || !privateKey) return null;
+// Re-exported so callers have one import for "what can this server do".
+export { webPushAvailable, pushPublicKey };
 
-  // `mailto:` or an https URL, required by the spec so a push service can contact the
-  // sender. Falls back to a mailto built from the public URL rather than refusing,
-  // because a missing subject is a much smaller problem than disabled push.
-  const subject = process.env.VAPID_SUBJECT || 'mailto:support@zunopilot.com';
-  return { publicKey, privateKey, subject };
+const transports: TransportTable = {
+  WEB: webPushTransport,
+  ANDROID: fcmTransport,
+  IOS: fcmTransport,
 };
 
 /**
- * Is push usable at all?
+ * Can this server push at all, by any route?
  *
- * The client asks before offering the control, so a server without keys shows nothing
- * rather than a button that fails when pressed.
+ * The delivery worker's gate. Distinct from `webPushAvailable`, which answers the narrower
+ * question the browser cares about.
  */
-export const pushEnabled = (): boolean => vapid() !== null;
+export const pushAvailable = (): boolean =>
+  Object.values(transports).some((transport) => transport.available());
 
-/** The public key, which the browser needs to build a subscription. Safe to expose. */
-export const pushPublicKey = (): string | null => vapid()?.publicKey ?? null;
-
-/** What the service worker receives. Kept small — push payloads have a size limit. */
-interface PushPayload {
-  id: string;
-  title: string;
-  body: string;
-  link: string | null;
-  kind: string;
-}
+/** How many strikes before a device is dropped rather than retried forever. */
+const MAX_FAILURES = 5;
 
 /**
- * Send one notification to one subscription.
+ * Record what a send attempt did to the device, and say whether it landed.
  *
- * Returns whether the subscription is still alive. **404 and 410 mean gone for good**
- * — the browser was uninstalled, the permission revoked, or the endpoint expired — and
- * the row is deleted immediately rather than retried, because a dead endpoint retried
- * forever is how a push queue silently becomes all garbage.
+ * The whole of the dead-row policy, in one place:
+ *
+ * - **`gone` deletes immediately.** A dead endpoint retried forever is how a push table
+ *   silently becomes all garbage and every notification spends its sends on nobody.
+ * - **`failed` is counted**, and a device that keeps failing is eventually dropped, so one
+ *   broken handset cannot consume sends indefinitely.
+ * - **`unavailable` is recorded against nothing at all.** It means *we* could not send —
+ *   no credentials, a rejected service account, a provider outage — and that is true of
+ *   every device simultaneously. Counting it would delete every registration on the
+ *   platform within five notifications of a bad deploy.
  */
-const sendTo = async (
-  subscription: PushSubscription,
-  payload: PushPayload,
-  config: NonNullable<ReturnType<typeof vapid>>,
-): Promise<boolean> => {
-  try {
-    await webpush.sendNotification(
-      {
-        endpoint: subscription.endpoint,
-        keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-      },
-      JSON.stringify(payload),
-      {
-        vapidDetails: {
-          subject: config.subject,
-          publicKey: config.publicKey,
-          privateKey: config.privateKey,
-        },
-        // A notification nobody saw within a few minutes is stale for this product.
-        TTL: 600,
-      },
-    );
-
+const applyOutcome = async (device: PushSubscription, outcome: PushOutcome): Promise<boolean> => {
+  if (outcome === 'ok') {
     await prisma.pushSubscription.update({
-      where: { id: subscription.id },
+      where: { id: device.id },
       data: { lastUsedAt: new Date(), failureCount: 0 },
-    });
-    return true;
-  } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-
-    if (status === 404 || status === 410) {
-      await prisma.pushSubscription.delete({ where: { id: subscription.id } }).catch(() => {});
-      logger.debug('Dropped a dead push subscription', { id: subscription.id, status });
-      return false;
-    }
-
-    // Anything else might be transient — a push service having a bad minute. Counted,
-    // and dropped once it is clearly not coming back, so one broken device cannot
-    // consume sends forever.
-    const failureCount = subscription.failureCount + 1;
-    if (failureCount >= 5) {
-      await prisma.pushSubscription.delete({ where: { id: subscription.id } }).catch(() => {});
-      logger.warn('Dropped a push subscription after repeated failures', {
-        id: subscription.id, failureCount, status,
-      });
-      return false;
-    }
-
-    await prisma.pushSubscription.update({
-      where: { id: subscription.id },
-      data: { failureCount },
     }).catch(() => {});
-    logger.warn('Push send failed', { id: subscription.id, status, failureCount });
+    return true;
+  }
+
+  if (outcome === 'unavailable') return false;
+
+  if (outcome === 'gone') {
+    await prisma.pushSubscription.delete({ where: { id: device.id } }).catch(() => {});
+    logger.debug('Dropped a dead push device', { id: device.id, platform: device.platform });
     return false;
   }
+
+  const failureCount = device.failureCount + 1;
+  if (failureCount >= MAX_FAILURES) {
+    await prisma.pushSubscription.delete({ where: { id: device.id } }).catch(() => {});
+    logger.warn('Dropped a push device after repeated failures', {
+      id: device.id, platform: device.platform, failureCount,
+    });
+    return false;
+  }
+
+  await prisma.pushSubscription.update({
+    where: { id: device.id },
+    data: { failureCount },
+  }).catch(() => {});
+  return false;
 };
 
 export interface PushResult {
@@ -125,21 +92,26 @@ export interface PushResult {
   skipped?: 'not-configured' | 'no-recipients' | 'no-subscriptions';
   sent: number;
   failed: number;
+  /**
+   * Devices we could not even attempt — a phone registered on a server with no FCM
+   * credentials, say. Separate from `failed` because it says nothing about the device, and
+   * because a number here is a configuration problem to go and fix.
+   */
+  unavailable: number;
 }
 
 /**
- * Push a notification to every subscribed device of everyone it is addressed to.
+ * Push a notification to every device of everyone it is addressed to.
  *
  * Preferences are honoured per person, not per notification: two people on the same
- * workspace-wide notification can want different things, and one having push off must
- * not stop the other being told.
+ * workspace-wide notification can want different things, and one having push off must not
+ * stop the other being told.
  */
 export const pushNotification = async (notification: Notification): Promise<PushResult> => {
-  const config = vapid();
-  if (!config) return { skipped: 'not-configured', sent: 0, failed: 0 };
+  if (!pushAvailable()) return { skipped: 'not-configured', sent: 0, failed: 0, unavailable: 0 };
 
   const userIds = await recipientsOf(notification);
-  if (!userIds.length) return { skipped: 'no-recipients', sent: 0, failed: 0 };
+  if (!userIds.length) return { skipped: 'no-recipients', sent: 0, failed: 0, unavailable: 0 };
 
   const payload: PushPayload = {
     id: notification.id,
@@ -147,26 +119,44 @@ export const pushNotification = async (notification: Notification): Promise<Push
     body: notification.body,
     link: notification.link,
     kind: notification.kind,
+    // Which workspace this is about — see `PushPayload`. Without it a push about one
+    // workspace, tapped while the app is showing another, opens the wrong inbox.
+    tenantId: notification.tenantId,
   };
 
   let sent = 0;
   let failed = 0;
+  let unavailable = 0;
 
   for (const userId of userIds) {
+    // eslint-disable-next-line no-await-in-loop
     const preference = await preferencesFor(userId);
     if (!wants(preference, notification.kind, 'push')) continue;
 
-    const subscriptions = await prisma.pushSubscription.findMany({ where: { userId } });
-    for (const subscription of subscriptions) {
-      // Sequential rather than Promise.all: a workspace's devices are a handful, and
-      // a burst of parallel sends to one push service is how you get rate limited.
+    // eslint-disable-next-line no-await-in-loop
+    const devices = await prisma.pushSubscription.findMany({ where: { userId } });
+    for (const device of devices) {
+      // Sequential rather than Promise.all: a workspace's devices are a handful, and a
+      // burst of parallel sends to one push service is how you get rate limited.
       // eslint-disable-next-line no-await-in-loop
-      const ok = await sendTo(subscription, payload, config);
-      if (ok) sent += 1;
+      const outcome = await transports[device.platform].send(device, payload);
+      // eslint-disable-next-line no-await-in-loop
+      const landed = await applyOutcome(device, outcome);
+
+      if (landed) sent += 1;
+      else if (outcome === 'unavailable') unavailable += 1;
       else failed += 1;
     }
   }
 
-  if (!sent && !failed) return { skipped: 'no-subscriptions', sent: 0, failed: 0 };
-  return { sent, failed };
+  if (unavailable) {
+    logger.warn('Some devices could not be pushed to because a transport is not configured', {
+      notificationId: notification.id, unavailable,
+    });
+  }
+
+  if (!sent && !failed && !unavailable) {
+    return { skipped: 'no-subscriptions', sent: 0, failed: 0, unavailable: 0 };
+  }
+  return { sent, failed, unavailable };
 };

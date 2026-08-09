@@ -33,6 +33,7 @@ export const MOBILE_SURFACE = [
   '/api/customers',
   '/api/orders',
   '/api/catalogue',
+  '/api/media',
   '/api/notifications',
   '/api/tickets',
   '/api/leads',
@@ -65,6 +66,30 @@ const okPaged = (description: string, item: unknown) => ({
           meta: { $ref: '#/components/schemas/PageMeta' },
         },
         required: ['success', 'data'],
+      },
+    },
+  },
+});
+
+/**
+ * A list plus its delta cursor, for the two Inbox reads a client follows incrementally.
+ *
+ * Separate from `okPaged` because the two `meta` shapes answer different questions: one is "where
+ * am I in a list", the other is "what have I already seen". Sharing one schema would leave every client
+ * guessing which fields are populated.
+ */
+const okDelta = (description: string, item: unknown) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          data: { type: 'array', items: item },
+          meta: { $ref: '#/components/schemas/DeltaMeta' },
+        },
+        required: ['success', 'data', 'meta'],
       },
     },
   },
@@ -120,10 +145,36 @@ export const openapi = {
       '  cannot probe for features it was never sold.',
       '- **422** — WhatsApp refused something, and `message` carries their own words.',
       '',
+      '### Media',
+      '**`mediaUrl` on a message is a relative API path, not a public link.** It reads',
+      '`/api/media/<id>/file`, and fetching it needs the same `Authorization` header as',
+      'everything else — an image widget pointed straight at it with no header gets a 401. Both',
+      'directions use that one path: a photograph the customer sent, and a file the business sent',
+      'back.',
+      '',
+      'Sending a file is two calls, never one. `POST /media` with `multipart/form-data` returns an',
+      'id; `POST /inbox/conversations/{id}/media` sends that id. Uploading and sending are separate',
+      'because the same upload can be sent more than once and reused as a campaign header.',
+      '',
+      'Ask `GET /media/rules` for what may be uploaded rather than hardcoding it — the limits are',
+      "WhatsApp's and they change.",
+      '',
       '### Push notifications',
-      'The endpoints under `/notifications/push` are **Web Push (VAPID)**. There is no FCM or',
-      'APNs support yet, so a native client cannot receive pushes through them — the in-app',
-      'list and unread count under `/notifications` do work.',
+      'Two transports, and a client uses exactly one of them.',
+      '',
+      '- **A native app** registers with `POST /notifications/push/devices`, sending its FCM',
+      '  registration token and a `deviceId` it generates once and keeps. Re-send on every',
+      '  token refresh — the `deviceId` is what makes that an update rather than a duplicate.',
+      '  iOS is delivered through FCM as well, so there is one call for both platforms.',
+      '- **A browser** uses `POST /notifications/push/subscribe` with a VAPID subscription.',
+      '',
+      '`GET /notifications/preferences` reports which of the two this server can actually do,',
+      'as `push.available` (browser) and `push.mobileAvailable` (app). Every device a person',
+      'has registered is sent to, so being signed in on two phones means both of them buzz.',
+      '',
+      'A push payload carries `tenantId`. Switch to that workspace before following `link` —',
+      '`link` is a relative path with no workspace in it, so following it while the app is',
+      'showing a different workspace opens the wrong inbox.',
     ].join('\n'),
   },
   servers: [
@@ -138,6 +189,7 @@ export const openapi = {
     { name: 'Customers', description: 'The people who have messaged the business' },
     { name: 'Orders', description: 'Requires the ECOMMERCE module' },
     { name: 'Catalogue', description: 'Products or menu items. Requires the ECOMMERCE module' },
+    { name: 'Media', description: 'Files, in both directions' },
     { name: 'Notifications', description: 'The bell, its unread count, and delivery preferences' },
     { name: 'Support', description: 'Tickets. Requires the SUPPORT module' },
     { name: 'Leads', description: 'The sales pipeline. Requires the LEADS module' },
@@ -354,8 +406,29 @@ export const openapi = {
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['OPEN', 'HUMAN_TAKEOVER', 'CLOSED'] } },
           { name: 'assignedToMe', in: 'query', schema: { type: 'boolean' } },
+          {
+            name: 'since',
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+            description: [
+          'A cursor for asking **what changed** instead of re-reading the list. Send the `nextSince`',
+          'and `nextSinceId` from the previous response; the reply contains only rows modified since,',
+          'and `meta.hasMore` says whether to ask again straight away rather than waiting for the next',
+          'tick. Omit both for the current state. **A filter plus a cursor has one gap**: a',
+          'conversation that changes out of the filtered set is not in the delta, so poll the',
+          'unfiltered list and filter locally if you need it to be exact.',
+        ].join(' '),
+          },
+          {
+            name: 'sinceId',
+            in: 'query',
+            schema: { type: 'string' },
+            description:
+              'The other half of the cursor. Breaks ties between rows sharing one `since`, which'
+              + ' happens whenever a bulk update stamps many rows at the same instant.',
+          },
         ],
-        responses: { 200: ok('Conversations', arrayOf('Conversation')), ...errors },
+        responses: { 200: okDelta('Conversations', ref('Conversation')), ...errors },
       },
       post: {
         tags: ['Inbox'], security: auth, summary: 'Open a conversation with a customer',
@@ -394,8 +467,32 @@ export const openapi = {
       },
       get: {
         tags: ['Inbox'], security: auth, summary: 'The messages in a conversation',
-        parameters: [pathParam('id', 'Conversation id')],
-        responses: { 200: ok('Messages, oldest first', arrayOf('Message')), ...errors },
+        description: [
+          'Without `since`, the thread as it stands, oldest first, with removed messages left out.',
+          '',
+          'With `since` and `sinceId`, **only what changed** — ordered by when it changed, and',
+          'including delivery-status updates to messages you already have. This is how a client',
+          'follows the ticks without re-reading the thread: status arrives as a change to an existing',
+          'row, not as a new one.',
+          '',
+          'A delta also reports **removals**. A message an agent deleted comes back as a tombstone —',
+          '`id`, `conversationId`, `direction`, the timestamps and `deletedAt`, with no content. Drop',
+          'it from the thread when you see one.',
+          '',
+          'Echo `meta.nextSince` and `meta.nextSinceId` back on the next call, and call again',
+          'immediately while `meta.hasMore` is true.',
+        ].join('\n'),
+        parameters: [
+          pathParam('id', 'Conversation id'),
+          {
+            name: 'since',
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+            description: 'From `meta.nextSince`. An unparseable value is a 400, not a full read.',
+          },
+          { name: 'sinceId', in: 'query', schema: { type: 'string' }, description: 'From `meta.nextSinceId`.' },
+        ],
+        responses: { 200: okDelta('Messages, oldest first', ref('Message')), ...errors },
       },
       post: {
         tags: ['Inbox'], security: auth, summary: 'Reply as a human',
@@ -774,9 +871,46 @@ export const openapi = {
     },
     '/notifications/push/devices': {
       get: {
-        tags: ['Notifications'], security: auth, summary: 'Registered Web Push devices',
-        description: '**Web Push only — not FCM or APNs.** A native client cannot use these yet.',
+        tags: ['Notifications'], security: auth, summary: 'Registered devices',
+        description: [
+          'Every device registered for push, browsers and phones together. `platform` is `WEB`,',
+          '`ANDROID` or `IOS`. Neither the browser keys nor the FCM token are returned — use',
+          '`id` with the DELETE below to unregister one.',
+        ].join(' '),
         responses: { 200: ok('Devices', { type: 'array', items: { type: 'object' } }), 401: errors[401] },
+      },
+      post: {
+        tags: ['Notifications'], security: auth, summary: 'Register this phone (FCM)',
+        description: [
+          'Call on sign-in and on every FCM token refresh. `deviceId` is the app\'s own install',
+          'id, stable across token rotation — the same `deviceId` updates its row instead of',
+          'adding a second one for the same phone. Also switches the `push` preference on.',
+          '**422** means this server has no FCM credentials.',
+        ].join(' '),
+        requestBody: jsonBody({
+          type: 'object',
+          properties: {
+            platform: { type: 'string', enum: ['ANDROID', 'IOS'] },
+            token: { type: 'string', description: 'The FCM registration token' },
+            deviceId: { type: 'string', description: 'Generated once by the app and kept' },
+            deviceName: { type: 'string', example: 'Pixel 8' },
+            appVersion: { type: 'string', example: '1.4.0' },
+          },
+          required: ['platform', 'token', 'deviceId'],
+        }),
+        responses: { 201: ok('Registered', { type: 'object' }), ...errors },
+      },
+    },
+    '/notifications/push/devices/{id}': {
+      delete: {
+        tags: ['Notifications'], security: auth, summary: 'Unregister a device',
+        description: [
+          'What signing out of the app calls. Works for a browser row too. Idempotent — an id',
+          'that is already gone answers 200 with `removed: 0`. Deliberately leaves the `push`',
+          'preference alone: the person may still want push on their other phone.',
+        ].join(' '),
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { 200: ok('Removed', { type: 'object' }), 401: errors[401] },
       },
     },
     '/notifications/push/subscribe': {
@@ -791,6 +925,120 @@ export const openapi = {
         tags: ['Notifications'], security: auth, summary: 'Remove a Web Push subscription',
         requestBody: jsonBody({ type: 'object' }),
         responses: { 200: ok('Removed', { type: 'object' }), ...errors },
+      },
+    },
+
+    // ── Media ─────────────────────────────────────────────────────────────────
+    '/media': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'The workspace\'s uploaded files',
+        description: [
+          'Needs `campaigns:read`. **Uploads only** — files customers sent are not listed here, and',
+          '`GET /media/{id}/file` is the only way to reach one. The two are deliberately separate:',
+          'a library an operator browses and a customer\'s private photograph are not the same thing.',
+        ].join(' '),
+        parameters: [
+          { name: 'kind', in: 'query', schema: { type: 'string', enum: ['IMAGE', 'VIDEO', 'DOCUMENT'] } },
+        ],
+        responses: { 200: ok('Files', arrayOf('MediaAsset')), ...errors },
+      },
+      post: {
+        tags: ['Media'], security: auth, summary: 'Upload a file',
+        description: [
+          'Needs `campaigns:write`. `multipart/form-data` with one part named `file`.',
+          '',
+          '**The kind is decided from the bytes, not from anything you send.** A caller claiming',
+          'IMAGE for an MP4 would produce a send WhatsApp refuses, and the file is the only honest',
+          'source. A type WhatsApp does not accept is a 400 naming what it does — as is a file over',
+          'the limit for its kind, with both sizes in the message.',
+        ].join('\n'),
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: { file: { type: 'string', format: 'binary' } },
+                required: ['file'],
+              },
+            },
+          },
+        },
+        responses: { 201: ok('The stored file', ref('MediaAsset')), ...errors },
+      },
+    },
+    '/media/rules': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'What may be uploaded',
+        description: [
+          'Needs `campaigns:read`. Read this instead of hardcoding the limits — they are',
+          "WhatsApp's, and `label` is written to be shown to a person as it stands.",
+          '',
+          '`publicUrlReachable` is false when this server\'s `APP_URL` cannot be fetched from the',
+          'internet, which is normal in development. Campaign header media will not work while it',
+          'is false, because Meta fetches the file itself; conversation media is unaffected.',
+        ].join('\n'),
+        responses: {
+          200: ok('The rules', {
+            type: 'object',
+            properties: {
+              kinds: {
+                type: 'object',
+                description: 'Keyed by IMAGE, VIDEO and DOCUMENT.',
+                additionalProperties: {
+                  type: 'object',
+                  properties: {
+                    mimeTypes: { type: 'array', items: { type: 'string' } },
+                    maxBytes: { type: 'integer', example: 5242880 },
+                    label: { type: 'string', example: 'JPEG or PNG, up to 5 MB' },
+                  },
+                },
+              },
+              publicUrlReachable: { type: 'boolean' },
+            },
+          }),
+          ...errors,
+        },
+      },
+    },
+    '/media/{id}': {
+      delete: {
+        tags: ['Media'], security: auth, summary: 'Remove an uploaded file',
+        description:
+          'Needs `campaigns:write`. Removes the row and the bytes. A message already sent with it'
+          + ' keeps its `mediaUrl`, which will then 404 — the customer\'s copy is unaffected either'
+          + ' way, since WhatsApp delivered its own.',
+        parameters: [pathParam('id', 'Media id')],
+        responses: { 200: ok('Removed', { type: 'object' }), ...errors },
+      },
+    },
+    '/media/{id}/file': {
+      get: {
+        tags: ['Media'], security: auth, summary: 'The bytes',
+        description: [
+          'Needs `inbox:read`. **This is what `mediaUrl` on a message points at**, in both',
+          'directions — what the customer sent and what the business sent back.',
+          '',
+          'Authenticated and scoped to the workspace, so send the bearer token. In Flutter that',
+          'means `Image.network(url, headers: {...})` or fetching the bytes yourself; a plain',
+          '`<img src>`-style load with no header gets a 401 and renders as a broken image.',
+          '',
+          'Streamed through the API rather than redirecting to a presigned URL, deliberately: the',
+          'URL stops working the moment the session does, instead of remaining usable by anyone',
+          'holding it until it expires. Answers `Cache-Control: private, max-age=3600`, so caching',
+          'the bytes on the device for an hour is safe and re-fetching on every scroll is not',
+          'necessary.',
+        ].join('\n'),
+        parameters: [pathParam('id', 'Media id')],
+        responses: {
+          200: {
+            description: 'The file. `Content-Type` is the stored MIME type.',
+            content: { '*/*': { schema: { type: 'string', format: 'binary' } } },
+          },
+          401: errors[401],
+          403: errors[403],
+          404: errors[404],
+        },
       },
     },
 
@@ -1039,6 +1287,28 @@ export const openapi = {
         },
         required: ['success', 'message'],
       },
+      DeltaMeta: {
+        type: 'object',
+        description: 'Where to resume from. Echo the two cursor fields back on the next call.',
+        properties: {
+          nextSince: {
+            type: 'string', format: 'date-time',
+            description:
+              'Send as `since` next time. On an empty delta this is the cursor you sent, unchanged —'
+              + ' it deliberately does not jump to now, because nothing was observed in between.',
+          },
+          nextSinceId: {
+            type: 'string', nullable: true,
+            description: 'Send as `sinceId` next time. Breaks ties at `nextSince`.',
+          },
+          hasMore: {
+            type: 'boolean',
+            description:
+              'The page was full and more is already waiting. Call again immediately rather than'
+              + ' waiting for the next tick.',
+          },
+        },
+      },
       PageMeta: {
         type: 'object',
         properties: {
@@ -1181,7 +1451,16 @@ export const openapi = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           direction: { type: 'string', enum: ['INBOUND', 'OUTBOUND'] },
-          type: { type: 'string', example: 'TEXT' },
+          type: {
+            type: 'string',
+            enum: ['TEXT', 'IMAGE', 'DOCUMENT', 'AUDIO', 'VIDEO', 'LOCATION', 'INTERACTIVE',
+              'TEMPLATE', 'SYSTEM'],
+            example: 'TEXT',
+            description:
+              'Anything but `TEXT` normally carries a `mediaUrl`. `body` is still set on a media'
+              + ' message — the caption if there was one, otherwise a short description such as'
+              + ' "Sent a photo", so a list preview has something to show.',
+          },
           status: {
             type: 'string',
             enum: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'RECEIVED'],
@@ -1220,11 +1499,41 @@ export const openapi = {
             example: '131030: Add recipient phone number to recipient list',
           },
           body: { type: 'string', nullable: true },
-          mediaUrl: { type: 'string', nullable: true },
+          mediaUrl: {
+            type: 'string', nullable: true,
+            example: '/api/media/6c3acaa4-2284-4e45-8d65-e17fc45d8fd8/file',
+            description:
+              '**A relative path on this API, not a public URL.** Prefix it with the API base and'
+              + ' send the bearer token; without the header it is a 401. Null on a text message,'
+              + ' and null on a media message whose file could not be captured from Meta — the'
+              + ' message still exists and `body` says what kind of thing it was.',
+          },
           waMessageId: { type: 'string', nullable: true },
           sentByUserId: {
             type: 'string', format: 'uuid', nullable: true,
             description: 'Null on an OUTBOUND message means the bot sent it, not a person.',
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      MediaAsset: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          kind: { type: 'string', enum: ['IMAGE', 'VIDEO', 'DOCUMENT'] },
+          mimeType: { type: 'string', example: 'image/jpeg' },
+          sizeBytes: { type: 'integer' },
+          originalName: {
+            type: 'string',
+            description: 'As the uploader named it. Display only — never used to build a path.',
+          },
+          url: {
+            type: 'string',
+            description:
+              'The **public** link, for a campaign template header, which Meta fetches itself.'
+              + ' Not the route a signed-in client should use for a conversation file: that is'
+              + ' `/api/media/{id}/file`, and it is the one that keeps working when an asset is'
+              + ' private.',
           },
           createdAt: { type: 'string', format: 'date-time' },
         },

@@ -1,6 +1,7 @@
 import { tenantIdOf } from '../middleware/auth.js';
 import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
 
 export const getProfile = asyncHandler(async (req, res) => {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantIdOf(req) } });
@@ -9,8 +10,8 @@ export const getProfile = asyncHandler(async (req, res) => {
 
 export const updateProfile = asyncHandler(async (req, res) => {
   const {
-    businessName, category, contactNumber, address, website, logoUrl, maskCustomerNumbers,
-    aiAgentEnabled,
+    businessName, businessCategoryId, contactNumber, address, website, logoUrl,
+    maskCustomerNumbers, aiAgentEnabled,
   } = req.body;
 
   /**
@@ -44,15 +45,43 @@ export const updateProfile = asyncHandler(async (req, res) => {
     ? undefined
     : aiAgentEnabled === true || aiAgentEnabled === 'true';
 
+  /*
+   * The category, checked against the table before it is written.
+   *
+   * A uuid that is not a category — or one that is deactivated — would otherwise be stored as a
+   * dangling relation the app then reads as "not set". `undefined` leaves it alone; explicit `null`
+   * clears it, which is how a workspace says it has not chosen.
+   */
+  let categoryId: string | null | undefined;
+  if (businessCategoryId !== undefined) {
+    if (businessCategoryId === null) {
+      categoryId = null;
+    } else {
+      const category = await prisma.businessCategory.findFirst({
+        where: { id: businessCategoryId, isActive: true },
+        select: { id: true },
+      });
+      if (!category) throw ApiError.badRequest('That business category does not exist');
+      categoryId = category.id;
+    }
+  }
+
   const tenant = await prisma.tenant.update({
     where: { id: tenantIdOf(req) },
     data: {
       businessName,
-      category,
+      ...(categoryId === undefined ? {} : { businessCategoryId: categoryId }),
       contactNumber,
       address,
-      website,
-      logoUrl,
+      /*
+       * Blank means cleared, stored as `null`.
+       *
+       * An empty string here would be a value the rest of the app has to keep guarding against — a
+       * logo `<img src="">` re-requests the page itself in some browsers, and a website link to `''`
+       * points at nowhere while looking set.
+       */
+      ...(website === undefined ? {} : { website: website || null }),
+      ...(logoUrl === undefined ? {} : { logoUrl: logoUrl || null }),
       ...(masking === undefined ? {} : { maskCustomerNumbers: masking }),
       ...(aiAgent === undefined ? {} : { aiAgentEnabled: aiAgent }),
     },

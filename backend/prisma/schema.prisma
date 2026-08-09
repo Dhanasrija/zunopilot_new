@@ -750,6 +750,14 @@ model Message {
   deletedByUser   User?     @relation("DeletedMessages", fields: [deletedByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
+  /// When this row last changed, which is **not** when it was created.
+  ///
+  /// A message is written once and then mutated repeatedly: three status webhooks walk
+  /// it from SENT to DELIVERED to READ, and a soft delete blanks it. Those are the
+  /// changes a client is waiting for, and `createdAt` cannot see any of them — which is
+  /// why the Inbox polls the whole thread every second instead of asking what changed.
+  /// Every write goes through Prisma, so `@updatedAt` covers all of them.
+  updatedAt DateTime @updatedAt
 
   // Meta retries webhook deliveries, so the same wamid can arrive several times.
   // This makes the insert the idempotency gate: a retry hits a unique violation
@@ -758,6 +766,9 @@ model Message {
   // multiple NULLs in a unique index).
   @@unique([tenantId, waMessageId])
   @@index([conversationId, createdAt])
+  /// The delta cursor: "what changed in this thread since". Ordered by the same column
+  /// the client sends back, so the scan is the index rather than the whole thread.
+  @@index([conversationId, updatedAt])
   @@index([sentByUserId])
   @@index([replyToId])
 }
@@ -3304,34 +3315,88 @@ model NotificationPreference {
   updatedAt DateTime @updatedAt
 }
 
-/// One browser on one device, subscribed to Web Push.
+/// Where a push can be delivered.
 ///
-/// **Per device, not per user.** Someone with a laptop and a phone has two rows, and
-/// revoking one must not silence the other. `endpoint` is the push service's URL and
-/// is globally unique, which makes it the natural key — re-subscribing the same
-/// browser updates rather than duplicating.
+/// `WEB` is a browser's own push service, addressed by `endpoint` and encrypted with
+/// the subscription's keys. `ANDROID` and `IOS` are the Flutter app, addressed by an
+/// FCM registration token. They are different transports, not different flavours of
+/// one — which is why the columns below come in two sets and each set is nullable.
+enum PushPlatform {
+  WEB
+  ANDROID
+  IOS
+}
+
+/// One device that can be pushed to.
 ///
-/// `failureCount` exists because push endpoints die silently. A 404 or 410 from the
-/// push service means the browser is gone for good and the row is deleted; anything
-/// else is counted, and a subscription that keeps failing is dropped rather than
+/// **Per device, not per user, and every device of a person is sent to.** Somebody with
+/// a laptop, a work phone and a personal phone has three rows; a message that reached
+/// only the most recently registered one would look like push randomly not working.
+///
+/// ── Two transports, one table ────────────────────────────────────────────────
+///
+/// Web Push needs `endpoint` + `p256dh` + `auth`; FCM needs `deviceToken`. Both sets
+/// are nullable and exactly one is filled, which keeps the fan-out, the preference
+/// check and the dead-row policy in a single place. A sibling table would have
+/// duplicated all three, and the bug that follows from that — a device the fan-out
+/// forgot to look at — is silent.
+///
+/// ── Why the key is (userId, deviceId) and not the token ──────────────────────
+///
+/// **An FCM registration token is not stable.** It rotates on reinstall, on restore
+/// from a backup, when app data is cleared, and occasionally on its own. Keyed on the
+/// token, every rotation would leave the old row behind: the same phone would collect
+/// rows and be sent to several times over, and each stale token stays deliverable for
+/// a while before it starts answering UNREGISTERED. So the app sends a `deviceId` it
+/// generates once and stores, and a rotation updates that row.
+///
+/// `deviceToken` stays globally unique for the other half of the same problem: a phone
+/// handed to a colleague, or a second login on one device, would otherwise leave the
+/// token on both rows and deliver one person's notifications to the other's screen.
+/// Registering takes the token off whatever row held it.
+///
+/// `failureCount` exists because push targets die silently. A 404 or 410 from a browser
+/// push service, or `UNREGISTERED` from FCM, means gone for good and the row is deleted;
+/// anything else is counted, and a device that keeps failing is dropped rather than
 /// retried forever.
 model PushSubscription {
   id     String @id @default(uuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  endpoint String @unique
+  /// Which transport reaches this device. Defaults to `WEB` so every row that existed
+  /// before the app did keeps meaning what it meant.
+  platform PushPlatform @default(WEB)
+
+  /// ── Web Push ──
+  /// The push service's URL. Null on a mobile device.
+  endpoint String? @unique
   /// The subscription's public key and auth secret, from the browser's PushManager.
   /// Not credentials of ours — they are useless without the VAPID private key.
-  p256dh   String
-  auth     String
+  p256dh   String?
+  auth     String?
 
-  /// For showing a person which devices are subscribed.
+  /// ── FCM ──
+  /// The registration token. Null on a browser, and expected to change over the life
+  /// of the row — see the note above about why it is not the key.
+  deviceToken String? @unique
+  /// The app's own install id, stable across token rotation. Null on a browser, where
+  /// `endpoint` already plays this part.
+  deviceId    String?
+  /// What to call this device in the list a person can revoke from: "Pixel 8", not a
+  /// user agent string.
+  deviceName  String?
+  /// Which build is registered, so a delivery problem confined to one release is
+  /// visible rather than mysterious.
+  appVersion  String?
+
+  /// For showing a person which browsers are subscribed. Mobile fills `deviceName`.
   userAgent String?
 
   failureCount Int       @default(0)
   createdAt    DateTime  @default(now())
   lastUsedAt   DateTime?
 
+  @@unique([userId, deviceId])
   @@index([userId])
 }
