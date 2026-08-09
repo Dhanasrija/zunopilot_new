@@ -6,6 +6,7 @@ import { withContext } from '../../../../config/logger.js';
 import { withAdvisoryLock } from '../../../../utils/withAdvisoryLock.js';
 import type { NormalisedInboundMessage } from '../../http/webhook-intake.js';
 import { routeInboundMessage } from '../../routing/index.js';
+import { handleAgentQuickReply } from '../../routing/agent-quick-reply.js';
 import { whatsappProviderFor } from '../../providers/whatsapp.js';
 import { recordOutboundMessage } from '../../providers/mirror.js';
 import { enqueue, QUEUES, type ProcessInboundMessageJob } from '../queue.js';
@@ -405,6 +406,44 @@ const processEvent = async (eventId: string): Promise<void> => {
       message.body,
     )) {
       logger.info('Consent keyword handled, not routing');
+      await prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: { processingStatus: 'PROCESSED', processedAt: new Date() },
+      });
+      return;
+    }
+
+    /*
+     * A tap on a button a human agent sent.
+     *
+     * **Above the human-takeover check on purpose**, and it is the only thing that is. An agent who
+     * sends buttons is, almost by definition, in a thread they have taken over — so below that
+     * check a workflow-bound button could never fire in the one situation it exists for. Honouring
+     * it is carrying out the agent's own instruction, not overriding it: they offered the button
+     * and the customer accepted.
+     *
+     * Below the consent check, because STOP outranks an outstanding question.
+     *
+     * Returns `not-ours` for every id belonging to the ordering flow, a workflow node or an
+     * operator's payload rule, so nothing else changes shape. See `agent-quick-reply.ts` for what
+     * each of the chain's steps would otherwise do with one of these — two of them corrupt data
+     * rather than merely misfire.
+     */
+    const quickReply = await handleAgentQuickReply({
+      tenant: context.tenant,
+      channel: context.channel,
+      contact: context.contact,
+      conversation: context.conversation,
+      message: {
+        id: message.id,
+        body: message.body ?? '',
+        type: message.type,
+        payload: message.payload,
+        interactive: payload.message.interactive,
+      },
+    });
+    if (quickReply !== 'not-ours') {
+      logger.info('Handled a tap on an agent-sent button', { outcome: quickReply });
       await prisma.webhookEvent.update({
         where: { id: eventId },
         data: { processingStatus: 'PROCESSED', processedAt: new Date() },
