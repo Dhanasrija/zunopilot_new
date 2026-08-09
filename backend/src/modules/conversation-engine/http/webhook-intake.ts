@@ -118,13 +118,77 @@ export const verifySignature = (req: Request): boolean => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+/**
+ * A WhatsApp **Flow** submission, as something an agent can read.
+ *
+ * ── Why this needs its own reader ────────────────────────────────────────────
+ *
+ * Meta sends a completed Flow as `interactive.nfm_reply`, which carries no `title` — so the two
+ * lines below it produced `''`, the Inbox drew the literal `[INTERACTIVE]`, and the empty body went
+ * to the AI router, which answered a message the customer never sent. That is what was happening on
+ * a live conversation.
+ *
+ * The answers live in `response_json`, a **string** of JSON whose shape is whatever the Flow's
+ * author designed. So it is read defensively and summarised rather than trusted:
+ *
+ *   • only scalar values, because a nested object rendered into a message body is noise
+ *   • `flow_token` is dropped — it is Meta's correlation id, not something the customer typed
+ *   • capped, because this becomes persisted text that many people read
+ *
+ * `nfm_reply.body` is preferred when Meta supplies one, but it is often the literal "Sent", which
+ * tells an agent nothing — so it is the fallback rather than the first choice.
+ */
+const FLOW_SUMMARY_MAX = 300;
+
+const flowReplyText = (nfm: Record<string, any>): string => {
+  let answers: unknown;
+  try {
+    answers = typeof nfm.response_json === 'string' ? JSON.parse(nfm.response_json) : nfm.response_json;
+  } catch {
+    // A Flow whose payload will not parse is still a message that arrived. Fall through to the
+    // label rather than throwing away the whole webhook.
+    answers = null;
+  }
+
+  if (answers && typeof answers === 'object' && !Array.isArray(answers)) {
+    const parts = Object.entries(answers as Record<string, unknown>)
+      .filter(([key, value]) => (
+        key !== 'flow_token'
+        && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+        && String(value).trim() !== ''
+      ))
+      .map(([key, value]) => `${key}: ${String(value).trim()}`);
+
+    if (parts.length) {
+      const summary = parts.join(', ');
+      return summary.length > FLOW_SUMMARY_MAX
+        ? `${summary.slice(0, FLOW_SUMMARY_MAX - 1)}…`
+        : summary;
+    }
+  }
+
+  const label = typeof nfm.body === 'string' ? nfm.body.trim() : '';
+  return label || 'Completed a form';
+};
+
 const textOf = (message: Record<string, any>): string => {
   switch (message.type) {
     case 'text': return message.text?.body ?? '';
-    case 'interactive':
-      return message.interactive?.list_reply?.title
-        ?? message.interactive?.button_reply?.title
-        ?? '';
+    case 'interactive': {
+      const interactive = message.interactive ?? {};
+      if (interactive.list_reply?.title) return interactive.list_reply.title;
+      if (interactive.button_reply?.title) return interactive.button_reply.title;
+      if (interactive.nfm_reply) return flowReplyText(interactive.nfm_reply);
+      /*
+       * Anything else Meta adds under `interactive`.
+       *
+       * Deliberately `''` rather than a guess: `process-inbound` treats a message with no readable
+       * text and no reply id as something to record and not answer, which is the honest outcome for
+       * a shape we do not understand. It also logs the type, so the next one turns up in the logs
+       * instead of in a screenshot of a customer being answered twice.
+       */
+      return '';
+    }
     case 'button': return message.button?.text ?? '';
     case 'location': {
       const l = message.location ?? {};

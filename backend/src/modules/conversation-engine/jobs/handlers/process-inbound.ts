@@ -488,6 +488,58 @@ const processEvent = async (eventId: string): Promise<void> => {
       return;
     }
 
+    /*
+     * A message with nothing in it we can act on is recorded and left alone.
+     *
+     * ── The bug this closes ──────────────────────────────────────────────────
+     *
+     * A WhatsApp Flow submission, a reaction, a native catalogue order: each arrives with no text
+     * our normaliser could read, and each was handed to the router as an empty string. The router
+     * has nothing to classify, so the model answered from the previous turn — and a live customer
+     * was told the same thing twice for something they never said. The Inbox drew `[INTERACTIVE]`
+     * beside it.
+     *
+     * ── Why the test is this narrow and not "any empty body" ─────────────────
+     *
+     * **A bare location pin has an empty body and must still route.** `textOf` builds its text from
+     * the pin's name and address, and a dropped pin has neither — but the ordering flow reads
+     * `payload.location` and treats it as the answer to "where do we deliver?". Swallowing that
+     * would break checkout.
+     *
+     * Media is excluded for the opposite reason: it has its own acknowledgement above, which sends
+     * something, because a photo with no caption is usually a question.
+     *
+     * So: no readable text, no reply id we could route on, and not a pin. Silence rather than an
+     * apology — the customer performed an action, not asked a question, and "I could not read that"
+     * would be wrong in every case where we simply have not taught the normaliser a shape yet.
+     */
+    const unreadable = !payload.message.text.trim()
+      && !payload.message.interactive?.replyId
+      && !payload.message.location;
+
+    if (unreadable) {
+      /*
+       * Logged at warn with the shape and no content.
+       *
+       * This is the line that turns "a customer noticed" into "the logs noticed". The keys are the
+       * useful part — `nfm_reply` versus something Meta has not documented yet — and none of them is
+       * the customer's data.
+       */
+      // `raw` is `unknown` on the normalised shape, deliberately — nothing downstream should be
+      // reading Meta's envelope by field. Narrowed here, for a log line, and nowhere else.
+      const raw = (payload.message.raw ?? {}) as { type?: string; interactive?: Record<string, unknown> };
+      logger.warn('An inbound message had nothing to route, so it was recorded only', {
+        type: message.type,
+        whatsappType: raw.type ?? null,
+        interactiveKeys: Object.keys(raw.interactive ?? {}),
+      });
+      await prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: { processingStatus: 'PROCESSED', processedAt: new Date() },
+      });
+      return;
+    }
+
     await routeInboundMessage({
       tenant: context.tenant,
       channel: context.channel,

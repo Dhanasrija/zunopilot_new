@@ -218,6 +218,23 @@ const tapPayload = (wamid: string, replyId: string, title: string) => ({
   }],
 });
 
+/** An arbitrary inbound message, for the shapes that have no helper of their own. */
+const rawPayload = (wamid: string, message: Record<string, unknown>) => ({
+  object: 'whatsapp_business_account',
+  entry: [{
+    id: 'waba-qr',
+    changes: [{
+      field: 'messages',
+      value: {
+        messaging_product: 'whatsapp',
+        metadata: { display_phone_number: '15550007777', phone_number_id: PHONE_NUMBER_ID },
+        contacts: [{ wa_id: CUSTOMER_WA_ID, profile: { name: 'Asha' } }],
+        messages: [{ id: wamid, from: CUSTOMER_WA_ID, timestamp: '1785000000', ...message }],
+      },
+    }],
+  }],
+});
+
 /** The same, typed rather than tapped — for the property that pins the guard's scope. */
 const textPayload = (wamid: string, text: string) => ({
   object: 'whatsapp_business_account',
@@ -574,5 +591,93 @@ describe('the whole round trip', () => {
 
     expect(await instances()).toBe(1);
     expect(sent().map((m) => m.body)).toContain('Which day suits you?');
+  });
+});
+
+/*
+ * A message with nothing in it we can act on.
+ *
+ * ── Found in production, from a screenshot ───────────────────────────────────
+ *
+ * A customer's Flow submission arrived, the Inbox drew `[INTERACTIVE]` because the body was empty,
+ * and the empty message went to the router — which answered from the previous turn, so the customer
+ * was told the same thing twice for something they never said.
+ *
+ * The fix has two halves and both are tested: the normaliser now reads a Flow, and the worker
+ * refuses to route anything it could not read. This file covers the second half, and the property
+ * that keeps it from being too greedy: **a bare location pin has an empty body and must still
+ * route**, because the ordering flow reads the pin rather than the text.
+ */
+describe('an inbound message with nothing to route', () => {
+  it('**is recorded and answered with nothing at all**', async () => {
+    const event = await deliverAndRun(rawPayload('wamid.qr.30', {
+      type: 'interactive',
+      interactive: { type: 'something_new', something_new: { opaque: true } },
+    }), 'wamid.qr.30');
+
+    expect(event.processingStatus).toBe('PROCESSED');
+
+    // Stored, so the agent can see that something happened and go and look at it.
+    const message = await prisma.message.findFirstOrThrow({
+      where: { tenantId: TENANT, waMessageId: 'wamid.qr.30' },
+    });
+    expect(message.type).toBe('INTERACTIVE');
+
+    // **The whole point**: no reply went out, and no workflow started.
+    expect(sent()).toHaveLength(0);
+    expect(await instances()).toBe(0);
+    // And nothing was classified — a decision row would mean a model had been asked about it.
+    expect(await prisma.routingDecision.count({ where: { conversationId } })).toBe(0);
+  });
+
+  it('**still routes a Flow, now that its answers are readable**', async () => {
+    /*
+     * The other half of the fix, from this end. Before it, this message was the one being answered
+     * twice; now it carries text, so it is an ordinary message and goes through the chain.
+     */
+    await deliverAndRun(rawPayload('wamid.qr.31', {
+      type: 'interactive',
+      interactive: {
+        type: 'nfm_reply',
+        nfm_reply: { body: 'Sent', response_json: '{"party_size":"4","time":"8pm"}' },
+      },
+    }), 'wamid.qr.31');
+
+    const message = await prisma.message.findFirstOrThrow({
+      where: { tenantId: TENANT, waMessageId: 'wamid.qr.31' },
+    });
+    expect(message.body).toBe('party_size: 4, time: 8pm');
+    // It reached the chain, which is what "readable" buys.
+    expect(await prisma.routingDecision.count({ where: { conversationId } })).toBeGreaterThan(0);
+  });
+
+  it('**does not swallow a location pin, which has no text by nature**', async () => {
+    /*
+     * The reason the guard tests three things and not just the body. A dropped pin carries no name
+     * and no address, so `textOf` yields '' — but `payload.location` is how the ordering flow learns
+     * where to deliver. A guard on the empty body alone would have broken checkout.
+     */
+    const event = await deliverAndRun(rawPayload('wamid.qr.32', {
+      type: 'location',
+      location: { latitude: 17.44, longitude: 78.39 },
+    }), 'wamid.qr.32');
+
+    expect(event.processingStatus).toBe('PROCESSED');
+    const message = await prisma.message.findFirstOrThrow({
+      where: { tenantId: TENANT, waMessageId: 'wamid.qr.32' },
+    });
+    expect(message.body).toBe('');
+    // Routed, not swallowed: a decision exists for it.
+    expect(await prisma.routingDecision.count({ where: { conversationId } })).toBeGreaterThan(0);
+  });
+
+  it('leaves a photo with no caption to its own acknowledgement', async () => {
+    // Media is excluded from the guard because it already has a reply of its own — a photo is
+    // usually a question, and silence there reads as though it never arrived.
+    await deliverAndRun(rawPayload('wamid.qr.33', {
+      type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg' },
+    }), 'wamid.qr.33');
+
+    expect(sent().map((m) => m.body).join(' ')).toMatch(/photo/i);
   });
 });
