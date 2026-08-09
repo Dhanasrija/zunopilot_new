@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Bot, CornerUpLeft, ListChecks, Paperclip, SendHorizonal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,7 +6,10 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { formatBytes } from '@/lib/media';
-import { handoverButtons, isTextReply, type QuickReply } from '@/lib/quick-replies';
+import { cn } from '@/lib/utils';
+import {
+  handoverButtons, isTextReply, quickReplyMatches, type QuickReply,
+} from '@/lib/quick-replies';
 
 // The reply box.
 //
@@ -87,8 +90,17 @@ export function Composer({
    * it.
    */
   const [quickReplyId, setQuickReplyId] = useState<string | null>(null);
+  /**
+   * Whether a `/` typed into an empty field has opened the saved-reply list.
+   *
+   * Only ever set by the transition below and cleared by Escape, blur or backspacing past the slash —
+   * never derived from `value`, so a `/` in the middle of a message can never open it.
+   */
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashActive, setSlashActive] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const slashList = useRef<HTMLDivElement>(null);
   const busy = sending || attaching || askingWithButtons;
 
   /*
@@ -146,8 +158,43 @@ export function Composer({
   /** Which of its answers will hand the thread back to the bot. Published bindings only. */
   const handovers = staged ? handoverButtons(staged) : [];
 
-  // A question needs words. Everything else follows the file's rule.
-  const canSend = staged ? !!value.trim() && !busy : (file ? !busy : !!value.trim() && !busy);
+  /*
+   * ── The `/` list ───────────────────────────────────────────────────────────
+   *
+   * Derived, not stored, and the derivation is the contract: **rows present means the list owns the
+   * keyboard; no rows means it is invisible and inert.**
+   *
+   * That single rule is what stops Enter from ever becoming a dead key. A visible "no matches" panel
+   * that did not own Enter would be worse than no panel at all, because the same key would do
+   * different things depending on a match count nobody is watching.
+   */
+  const slashQuery = slashOpen ? value.slice(1) : '';
+  const slashMatches = slashOpen
+    ? offerable.filter((set) => quickReplyMatches(set, slashQuery))
+    : [];
+  const slashListOpen = slashMatches.length > 0;
+
+  // Back to the top whenever the query changes, so the highlight is never left pointing at a row
+  // that has been filtered out from under it.
+  useEffect(() => { setSlashActive(0); }, [slashQuery]);
+
+  // Keep the highlighted row in view — same idiom as the country list.
+  useEffect(() => {
+    if (!slashListOpen) return;
+    slashList.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [slashListOpen, slashActive]);
+
+  /*
+   * A question needs words. Everything else follows the file's rule.
+   *
+   * **The leading guard is the `/` list.** While it is open the field holds a search, not a message,
+   * and the composer's whole discipline is that what the agent is looking at and what Send does must
+   * never disagree. Without it, clicking Send blurs the field, closes the list, and fires `/deliv` at
+   * a customer.
+   */
+  const canSend = slashListOpen
+    ? false
+    : (staged ? !!value.trim() && !busy : (file ? !busy : !!value.trim() && !busy));
 
   const clearQuickReply = () => setQuickReplyId(null);
 
@@ -162,6 +209,8 @@ export function Composer({
    * never chose.
    */
   const chooseSet = (set: QuickReply) => {
+    // Choosing always dismisses, whichever door it came through.
+    setSlashOpen(false);
     setQuickReplyId(isTextReply(set) ? null : set.id);
     // Mutually exclusive with a file: an interactive message with a media header is a real Meta
     // feature and deliberately out of scope, so half-building it would be worse than not offering it.
@@ -200,8 +249,115 @@ export function Composer({
 
   const fieldLabel = staged ? 'Question' : (file ? 'Caption' : 'Reply');
 
+  /**
+   * The keys the `/` list takes, and only while it has rows.
+   *
+   * **Returns whether it handled the key**, so the field's `onKeyDown` can guard on it and otherwise
+   * fall through to exactly the line it had before. That shape is deliberate: Enter-to-send is the
+   * composer's oldest behaviour and has two tests on it, and neither may need editing for this.
+   *
+   * `preventDefault` matters twice for the arrows — without it they would also move the caret to
+   * either end of the field, so the list and the cursor would jump at once.
+   *
+   * `Home`, `End` and `Tab` are deliberately **not** taken: the first two are caret movement and
+   * stealing them inside a text field is hostile, and Tab means "leave this control" everywhere else.
+   */
+  const handleSlashKey = (event: React.KeyboardEvent): boolean => {
+    if (!slashListOpen) return false;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      // Clamped rather than wrapping, for consistency with the country list.
+      setSlashActive((current) => Math.min(current + 1, slashMatches.length - 1));
+      return true;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSlashActive((current) => Math.max(current - 1, 0));
+      return true;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const chosen = slashMatches[slashActive];
+      if (chosen) chooseSet(chosen);
+      return true;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      /*
+       * Closes the list and **changes not one character of the draft.**
+       *
+       * Escape clearing a field is silent data loss on the key people press when they are confused.
+       * What is in the field is literally what will be sent, so leaving `/deliv` behind is a message
+       * the agent can see and judge — and Send lights up the moment the list is gone, which is what
+       * the footer hint promises.
+       *
+       * It stays dismissed without a flag: reopening needs the empty-field transition, and the field
+       * still holds the query.
+       */
+      setSlashOpen(false);
+      return true;
+    }
+    return false;
+  };
+
   return (
-    <div className="shrink-0 border-t border-ink-300 bg-surface-1 p-3">
+    // `relative` so the `/` list can be positioned against it — it opens upward, since the composer
+    // sits at the bottom of the thread.
+    <div className="relative shrink-0 border-t border-ink-300 bg-surface-1 p-3">
+      {/*
+        The saved replies a `/` has filtered to.
+        Hand-built rather than `DropdownMenu` or `Select`: both move focus into themselves, so the
+        next keystroke would go to their own typeahead and the filtering would die. `CountrySelect` in
+        `ui/phone-field.tsx` solves the same problem the same way, and this follows it.
+      */}
+      {slashListOpen && (
+        <div
+          id="composer-saved-replies"
+          role="listbox"
+          aria-label="Saved replies"
+          className="absolute bottom-full left-3 right-3 z-20 mb-2 max-h-64 overflow-y-auto rounded-md border border-ink-300 bg-surface-1 shadow-overlay"
+        >
+          <div ref={slashList}>
+            {slashMatches.map((set, index) => (
+              <button
+                key={set.id}
+                id={`saved-reply-${set.id}`}
+                type="button"
+                role="option"
+                aria-selected={index === slashActive}
+                data-active={index === slashActive}
+                className={cn(
+                  'flex w-full flex-col items-start gap-px px-3 py-2 text-left',
+                  index === slashActive && 'bg-accent-100',
+                )}
+                /*
+                  **`preventDefault` on mousedown, and it is not decoration.** It keeps focus in the
+                  field, which is what makes dismissing on blur safe — without it the row unmounts
+                  before its click can land, which is the classic autocomplete bug.
+                */
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setSlashActive(index)}
+                onClick={() => chooseSet(set)}
+              >
+                <span className="w-full truncate text-sm text-ink-900">{set.name}</span>
+                <span className="w-full truncate text-caption text-ink-500">
+                  {isTextReply(set) ? set.body : `Question · ${set.buttons.length} answers`}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/*
+            The dismissal contract, taught in six words where it is needed.
+            After Escape, Send lights up and sends the literal text — which is exactly what this
+            promises, so the promise has to be visible before the agent presses anything.
+          */}
+          <p className="border-t border-ink-300 px-3 py-2 text-caption text-ink-500">
+            Enter to insert · Esc to type it as text
+          </p>
+        </div>
+      )}
       {/*
         What this reply will quote.
 
@@ -430,7 +586,33 @@ export function Composer({
           rows={1}
           aria-label={fieldLabel}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          aria-autocomplete="list"
+          aria-controls={slashListOpen ? 'composer-saved-replies' : undefined}
+          aria-activedescendant={
+            slashListOpen && slashMatches[slashActive]
+              ? `saved-reply-${slashMatches[slashActive]!.id}`
+              : undefined
+          }
+          onChange={(e) => {
+            const next = e.target.value;
+            /*
+             * **The transition, not the state.** `/` only opens the list when it is the first
+             * character typed into an empty field — so a paste of `/foo` does not open it, and a `/`
+             * in the middle of a message is untouched. That matters more than it sounds: agents type
+             * URLs, "and/or", "24/7", "9/10".
+             *
+             * Not while a file or a question is staged, because the field is then a caption or a
+             * question rather than a reply.
+             */
+            if (value === '' && next === '/' && !file && !staged && offerable.length > 0) {
+              setSlashOpen(true);
+            } else if (slashOpen && !next.startsWith('/')) {
+              // Backspacing past the slash puts the field back to being an ordinary reply.
+              setSlashOpen(false);
+            }
+            onChange(next);
+          }}
+          onBlur={() => setSlashOpen(false)}
           placeholder={
             staged ? 'Ask a question…' : (file ? 'Add a caption (optional)…' : 'Type a reply…')
           }
@@ -442,6 +624,8 @@ export function Composer({
            * the field and, on a slow send, in the message.
            */
           onKeyDown={(e) => {
+            // Guard first, fall through unchanged. See `handleSlashKey`.
+            if (handleSlashKey(e)) return;
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               submit();
