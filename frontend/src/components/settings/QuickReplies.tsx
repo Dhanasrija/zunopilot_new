@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, ListChecks, Plus, Trash2, X } from 'lucide-react';
+import { Bot, ChevronDown, ListChecks, MessageSquare, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,20 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Badge } from '@/components/ui/badge';
 import {
-  QUICK_REPLY_LIMITS, createQuickReply, deleteQuickReply, fetchQuickReplies, updateQuickReply,
-  type QuickReply,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  QUICK_REPLY_LIMITS, bodyLimitFor, createQuickReply, deleteQuickReply, fetchQuickReplies,
+  isTextReply, updateQuickReply, type QuickReply,
 } from '@/lib/quick-replies';
 
-// Questions an agent can ask with tappable answers.
+// Replies a team sends often, in two kinds.
+//
+// **No answers is a plain text reply; one to three make it a question.** The same row either way, so
+// an operator turns one into the other by adding or removing rows — and the editor has to say what
+// emptiness means, because nothing about a blank Answers section announces "this will send as text".
 //
 // **This screen is where a button gets its meaning, which is why it is not in the Inbox.** An
 // answer can be bound to a workflow, so a tap starts it — and that is configuration to be written
@@ -38,12 +46,23 @@ interface Draft {
   buttons: Array<{ label: string; workflowId: string | null }>;
 }
 
-const BLANK: Draft = {
-  id: null,
-  name: '',
-  body: '',
-  // Two, because a single button is a worse message than plain text — but one is allowed, so an
-  // agent who removes one is not stuck.
+/**
+ * A plain text reply — no answers, and the default.
+ *
+ * The common case by some distance: a team saves its opening hours long before it saves a question.
+ */
+const BLANK_TEXT: Draft = { id: null, name: '', body: '', buttons: [] };
+
+/**
+ * A question, which starts with two blank rows.
+ *
+ * Two because a single button is a worse message than plain text — though one is allowed, so an
+ * operator who removes a row is not stuck. **A separate starting point rather than the default**:
+ * flipping the default to zero rows without offering this would make questions markedly harder to
+ * discover, since nothing on an empty form suggests answers exist.
+ */
+const BLANK_QUESTION: Draft = {
+  ...BLANK_TEXT,
   buttons: [{ label: '', workflowId: null }, { label: '', workflowId: null }],
 };
 
@@ -115,7 +134,27 @@ export default function QuickReplies() {
 
   const busy = save.isPending || remove.isPending;
   const filled = draft?.buttons.filter((button) => button.label.trim()) ?? [];
-  const canSave = !!draft?.name.trim() && !!draft?.body.trim() && filled.length > 0 && !busy;
+  /*
+   * **Two different questions, and they have different answers while a row is still blank.**
+   *
+   * `hasRows` is what the operator is looking at — they chose "Question with answers" and there are
+   * two empty boxes on screen, so the copy must call it a question. `filled` is what will actually be
+   * saved, since blank rows are dropped, and that is what Meta's limit has to follow.
+   *
+   * Using `filled` for the copy told somebody who had just asked for a question that it would send as
+   * plain text. Using `hasRows` for the limit would hold a draft to 1024 that is going to be saved as
+   * text and is perfectly legal at 4000.
+   */
+  const hasRows = (draft?.buttons.length ?? 0) > 0;
+  /** Which of Meta's two limits this draft is being judged against, as it stands right now. */
+  const bodyLimit = bodyLimitFor(filled.length);
+  const bodyLength = draft?.body.trim().length ?? 0;
+  const tooLong = bodyLength > bodyLimit;
+  /*
+   * No floor on the answers any more — a set without them is the plain text kind, which is the whole
+   * point. The length term replaces it, because the limit now moves as rows are added and removed.
+   */
+  const canSave = !!draft?.name.trim() && !!draft?.body.trim() && !tooLong && !busy;
 
   /** Which answers in the draft will hand the thread over. Published bindings only. */
   const bound = filled.filter((button) => button.workflowId);
@@ -138,14 +177,30 @@ export default function QuickReplies() {
           <div className="min-w-0">
             <CardTitle>Quick replies</CardTitle>
             <CardDescription>
-              Questions an agent can send with up to {QUICK_REPLY_LIMITS.buttons} tappable answers.
-              An answer can start a workflow when it is tapped.
+              Replies your team sends often. Save one as plain text, or give it up to{' '}
+              {QUICK_REPLY_LIMITS.buttons} tappable answers to make it a question — and an answer can
+              start a workflow when it is tapped.
             </CardDescription>
           </div>
-          <Button className="shrink-0 gap-2" disabled={!!draft} onClick={() => setDraft(BLANK)}>
-            <Plus aria-hidden className="h-4 w-4" />
-            New set
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="shrink-0 gap-2" disabled={!!draft}>
+                <Plus aria-hidden className="h-4 w-4" />
+                New reply
+                <ChevronDown aria-hidden className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setDraft(BLANK_TEXT)}>
+                <MessageSquare aria-hidden className="h-4 w-4" />
+                Text reply
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setDraft(BLANK_QUESTION)}>
+                <ListChecks aria-hidden className="h-4 w-4" />
+                Question with answers
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </CardHeader>
 
         <CardContent className="space-y-3">
@@ -153,8 +208,8 @@ export default function QuickReplies() {
 
           {sets.data?.length === 0 && !draft && (
             <EmptyState>
-              Save a question your team asks often — “delivery or pickup?” — and any agent can send
-              it in one click.
+              Save a reply your team sends often — your opening hours, or “delivery or pickup?” with
+              two answers to tap — and any agent can send it in one click.
             </EmptyState>
           )}
 
@@ -165,10 +220,16 @@ export default function QuickReplies() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink-900">
+                  <p className="flex items-center gap-2 text-sm font-medium text-ink-900">
                     {set.name}
+                    {/*
+                      A question needs no badge — its answer pills below say what it is. A text reply
+                      has nothing to show, and before this it rendered an empty pill row: a stray gap
+                      that read as a rendering fault rather than as "no answers".
+                    */}
+                    {isTextReply(set) && <Badge variant="secondary">Text</Badge>}
                     {!set.isActive && (
-                      <span className="ml-2 text-caption font-normal text-ink-500">retired</span>
+                      <span className="text-caption font-normal text-ink-500">retired</span>
                     )}
                   </p>
                   <p className="mt-px text-caption text-ink-500">{set.body}</p>
@@ -197,6 +258,7 @@ export default function QuickReplies() {
                 </div>
               </div>
 
+              {set.buttons.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {set.buttons.map((button) => (
                   <span
@@ -210,6 +272,7 @@ export default function QuickReplies() {
                   </span>
                 ))}
               </div>
+              )}
 
               {/*
                 Said on the list, not only in the editor: a workflow can be unpublished long after
@@ -229,11 +292,19 @@ export default function QuickReplies() {
       {draft && (
         <Card>
           <CardHeader>
-            <CardTitle>{draft.id ? 'Edit set' : 'New set'}</CardTitle>
+            <CardTitle>
+              {draft.id ? 'Edit reply' : (hasRows ? 'New question' : 'New text reply')}
+            </CardTitle>
             <CardDescription>
+              {/*
+                Three sentences, and only the ones that are true. "The answers cannot" was still being
+                said on a text reply that has none — noise on the form where it is least wanted.
+              */}
               {draft.id
-                ? 'Changing the answers replaces them, so a tap on a question already sent will no longer resolve. Editing the name or the question leaves them working.'
-                : 'The question can be edited each time it is sent. The answers cannot.'}
+                ? 'Changing the answers replaces them, so a tap on a question already sent will no longer resolve. Editing the name or the message leaves them working.'
+                : hasRows
+                  ? 'The question can be edited each time it is sent. The answers cannot.'
+                  : 'An agent can edit the message before sending it, without changing what is saved here.'}
             </CardDescription>
           </CardHeader>
 
@@ -253,15 +324,37 @@ export default function QuickReplies() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="qr-body">Question</Label>
+              <Label htmlFor="qr-body">{hasRows ? 'Question' : 'Message'}</Label>
               <Textarea
                 id="qr-body"
-                rows={2}
+                rows={hasRows ? 2 : 4}
                 value={draft.body}
-                maxLength={QUICK_REPLY_LIMITS.body}
-                placeholder="Would you like delivery or pickup?"
+                maxLength={QUICK_REPLY_LIMITS.textBody}
+                placeholder={hasRows
+                  ? 'Would you like delivery or pickup?'
+                  : 'We are open 11am–11pm, every day.'}
                 onChange={(e) => patch({ body: e.target.value })}
               />
+              {/*
+                **Said before Save, not by the server afterwards.**
+
+                `maxLength` is the outer 4000 and cannot help here, because it does not truncate text
+                already in the box: an operator who writes 2,000 characters and *then* adds an answer
+                is holding a draft that cannot be saved, and nothing about the form would say why. The
+                same discipline as the composer's refused-file line.
+              */}
+              {tooLong ? (
+                <p className="text-caption text-warning">
+                  This message is {bodyLength.toLocaleString()} characters. A question with tappable
+                  answers allows {QUICK_REPLY_LIMITS.body} — shorten it, or remove the answers.
+                </p>
+              ) : (
+                <p className="text-caption text-ink-500">
+                  {hasRows
+                    ? `Up to ${QUICK_REPLY_LIMITS.body} characters, which is what WhatsApp allows alongside answers.`
+                    : 'Sent exactly as written, line breaks and all. The agent can edit it before sending.'}
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -295,19 +388,22 @@ export default function QuickReplies() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {draft.buttons.length > 1 && (
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="shrink-0"
-                      aria-label={`Remove answer ${index + 1}`}
-                      onClick={() => patch({
-                        buttons: draft.buttons.filter((_, i) => i !== index),
-                      })}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
+                  {/*
+                    No `length > 1` guard. Removing the last answer is a meaningful act now — it is
+                    how an operator turns a question into a plain text reply, and the primary way
+                    they will do it.
+                  */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label={`Remove answer ${index + 1}`}
+                    onClick={() => patch({
+                      buttons: draft.buttons.filter((_, i) => i !== index),
+                    })}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               ))}
 
@@ -326,9 +422,26 @@ export default function QuickReplies() {
               )}
 
               <p className="text-caption text-ink-500">
-                Up to {QUICK_REPLY_LIMITS.buttons}, {QUICK_REPLY_LIMITS.label} characters each —
-                WhatsApp&rsquo;s limit. Leave one blank to drop it.
+                {hasRows
+                  ? <>Up to {QUICK_REPLY_LIMITS.buttons}, {QUICK_REPLY_LIMITS.label} characters
+                    each — WhatsApp&rsquo;s limit. Leave one blank to drop it.</>
+                  : <>No answers, so this sends as plain text. Add up to {QUICK_REPLY_LIMITS.buttons}{' '}
+                    to make it a question the customer can tap.</>}
               </p>
+
+              {/*
+                The cost of demoting an existing question, said where the decision is made.
+
+                Only for a saved set that had answers and now has none — the same trade `writeButtons`
+                documents on the server, and one an operator should meet before Save rather than
+                discover from a customer whose tap stopped working.
+              */}
+              {draft.id && !hasRows && (
+                <p className="text-caption text-warning">
+                  Saving with no answers turns this into a plain text reply, and taps on questions
+                  already sent will no longer resolve.
+                </p>
+              )}
             </div>
 
             {/*
