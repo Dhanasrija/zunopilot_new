@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -376,7 +377,57 @@ const BOUND_SET = {
   ],
 };
 
-const askControl = () => screen.getByRole('combobox', { name: /reply buttons/i });
+/*
+ * The one control, now that it offers both kinds.
+ *
+ * Named "Insert a saved reply" rather than "Ask with reply buttons" since it does both — and it keeps
+ * the 24-hours sentence as its name when nothing can be sent, which is how the closed-window test
+ * below still finds it.
+ */
+const askControl = () => screen.getByRole('combobox', { name: /saved reply/i });
+
+/** A saved reply with no answers — the plain text kind. */
+const A_TEXT_SET = {
+  id: 'set-3',
+  name: 'Opening hours',
+  body: 'We are open 11am–11pm, every day.',
+  isActive: true,
+  buttons: [],
+};
+
+/**
+ * A composer that owns its own draft.
+ *
+ * `value` is lifted to the page, so `setup`'s field can never actually change — fine for asserting
+ * what was handed upward, useless for anything that depends on what is now *in* the field. Every
+ * test below that chooses a set and then presses Send needs this.
+ */
+const withDraft = (props: Partial<Parameters<typeof Composer>[0]> = {}) => {
+  const onSend = vi.fn();
+  const onSendQuickReply = vi.fn();
+
+  const Harness = () => {
+    const [value, setValue] = useState('');
+    return (
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSend={onSend}
+        sending={false}
+        onSendQuickReply={onSendQuickReply}
+        {...props}
+      />
+    );
+  };
+
+  render(<Harness />);
+  return { onSend, onSendQuickReply };
+};
+
+const pick = async (name: string) => {
+  await userEvent.click(askControl());
+  await userEvent.click(screen.getByRole('option', { name }));
+};
 
 describe('asking with reply buttons', () => {
   it('offers nothing when the page has nowhere to send one', () => {
@@ -511,4 +562,140 @@ describe('asking with reply buttons', () => {
 
     expect(screen.getByRole('textbox', { name: /question/i })).toBeInTheDocument();
   });
+});
+
+/*
+ * A saved reply with no answers is plain text.
+ *
+ * **It is inserted, not staged**, and that distinction is the whole design: staging exists because a
+ * question changes what Send *means*, and a plain reply changes only the words in the field. So the
+ * ordinary text mutation sends it, `Inbox.tsx` needed no change at all, and — unlike a question — it
+ * can quote a message.
+ */
+describe('a saved reply with no answers', () => {
+  it('**puts its words in the field and sends as an ordinary reply**', async () => {
+    const { onSend, onSendQuickReply } = withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await pick('Opening hours');
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('leaves Send saying Send and the field saying Reply, because nothing is staged', async () => {
+    withDraft({ quickReplies: [A_TEXT_SET] });
+
+    await pick('Opening hours');
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /reply/i })).toBeInTheDocument();
+    // No pills, no handover line: there are no answers to show.
+    expect(screen.queryByText(/back to the bot/i)).not.toBeInTheDocument();
+  });
+
+  it('**keeps the line breaks a frequent reply is mostly made of**', async () => {
+    const multiline = { ...A_TEXT_SET, body: 'We are open:\n\n11am–11pm, every day.' };
+    withDraft({ quickReplies: [multiline] });
+
+    await pick('Opening hours');
+
+    expect(screen.getByRole('textbox', { name: /reply/i })).toHaveValue(multiline.body);
+  });
+
+  it('**cancels a staged question when a plain reply is chosen next**', async () => {
+    /*
+     * The one with a customer-visible consequence. Without clearing the staged id, the composer holds
+     * the question with the plain reply's words and Send fires the buttons route — so the customer
+     * gets a question the agent never chose to ask.
+     */
+    const { onSend, onSendQuickReply } = withDraft({ quickReplies: [A_SET, A_TEXT_SET] });
+
+    await pick('Delivery or pickup');
+    await pick('Opening hours');
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+  });
+
+  it('**drops a staged question whose answers vanish while it is staged**', async () => {
+    /*
+     * The stale case, and the **only** one the kind guard on `staged` catches by itself — every other
+     * route goes through `chooseSet`, which clears the id. Here the agent stages a question, somebody
+     * edits its answers away in another tab, and the five-minute-stale list refetches underneath them.
+     *
+     * Without the guard the composer still holds a staged question with no answers, and Send fires
+     * the buttons route for a set the server will refuse.
+     */
+    const onSend = vi.fn();
+    const onSendQuickReply = vi.fn();
+    const Harness = ({ sets }: { sets: typeof A_SET[] }) => {
+      const [value, setValue] = useState('');
+      return (
+        <Composer
+          value={value}
+          onChange={setValue}
+          onSend={onSend}
+          sending={false}
+          onSendQuickReply={onSendQuickReply}
+          quickReplies={sets}
+        />
+      );
+    };
+
+    const { rerender } = render(<Harness sets={[A_SET]} />);
+    await pick('Delivery or pickup');
+    expect(screen.getByRole('button', { name: /^ask$/i })).toBeInTheDocument();
+
+    // Same component, same position, so the composer keeps its staged id — which is the point.
+    rerender(<Harness sets={[{ ...A_SET, buttons: [] }]} />);
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    expect(onSendQuickReply).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to stage a set that already had no answers when it was chosen', async () => {
+    /*
+     * The list is five minutes stale. A question edited down to no answers in another tab must
+     * degrade to "not staged" — the alternative is staging a question with nothing to offer, which
+     * the server refuses after the click.
+     */
+    withDraft({ quickReplies: [{ ...A_SET, buttons: [] }] });
+
+    await pick('Delivery or pickup');
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
+  });
+
+  it('tells the two kinds apart before either is chosen', async () => {
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET] });
+
+    await userEvent.click(askControl());
+
+    expect(screen.getByText('Replies')).toBeInTheDocument();
+    expect(screen.getByText('Questions with answers')).toBeInTheDocument();
+  });
+
+  it('**is still offered once the 24-hour window has closed, and says why the questions are not**', async () => {
+    /*
+     * The correction this change carries. Disabling the control outside the window would forbid, one
+     * inch to the left, exactly what the text field to its right still permits — and the recorded
+     * stance is that the window is a hint and the send path is the authority.
+     */
+    withDraft({ quickReplies: [A_SET, A_TEXT_SET], windowClosed: true });
+
+    expect(askControl()).not.toBeDisabled();
+    await userEvent.click(askControl());
+
+    expect(screen.getByRole('option', { name: 'Opening hours' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Delivery or pickup' })).not.toBeInTheDocument();
+    expect(screen.getByText(/need the 24-hour window/i)).toBeInTheDocument();
+  });
+
+  // Deliberately not repeated here: "the control is dead and its name is the explanation" when the
+  // window is closed and every set is a question is already pinned by **is unavailable once the
+  // 24-hour window has closed** above, which is the same fixture and the same assertion.
 });

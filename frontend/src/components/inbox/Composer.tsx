@@ -3,10 +3,10 @@ import { Bot, CornerUpLeft, ListChecks, Paperclip, SendHorizonal, X } from 'luci
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { formatBytes } from '@/lib/media';
-import { handoverButtons, type QuickReply } from '@/lib/quick-replies';
+import { handoverButtons, isTextReply, type QuickReply } from '@/lib/quick-replies';
 
 // The reply box.
 //
@@ -109,7 +109,40 @@ export function Composer({
   }, [value]);
 
   const sets = quickReplies ?? [];
-  const staged = sets.find((set) => set.id === quickReplyId) ?? null;
+
+  /*
+   * ── The two kinds of saved reply, and why only one of them is "staged" ──────
+   *
+   * A **question** changes what Send means: a different route, a different message type, and
+   * possibly a handover. That is what staging is for.
+   *
+   * A **plain text reply** changes only the words in the field. The ordinary text mutation already
+   * sends words, so it is inserted and nothing is staged — no second route, no second home for the
+   * 4000-character limit, and nothing to clear afterwards. Send still says "Send", because nothing
+   * about the send is unusual.
+   */
+  const textReplies = sets.filter(isTextReply);
+  const questions = sets.filter((set) => !isTextReply(set));
+
+  /**
+   * What may be chosen right now.
+   *
+   * A question needs the 24-hour window; a plain reply needs nothing the text field does not already
+   * have. **So `windowClosed` no longer disables this control** — doing that would forbid, one inch
+   * to the left, exactly what the field to its right still permits. The questions are absent
+   * instead, with a line saying why: a control that does nothing is worse than an absent one.
+   */
+  const canAsk = !!onSendQuickReply && !windowClosed;
+  const offerable = [...textReplies, ...(canAsk ? questions : [])];
+
+  /*
+   * Staged only if it is still a question.
+   *
+   * The list is five minutes stale, so a set whose answers were removed in another tab must degrade
+   * to "not staged" rather than to "a question with no answers" — which the server would refuse
+   * after the click.
+   */
+  const staged = sets.find((set) => set.id === quickReplyId && !isTextReply(set)) ?? null;
   /** Which of its answers will hand the thread back to the bot. Published bindings only. */
   const handovers = staged ? handoverButtons(staged) : [];
 
@@ -117,6 +150,27 @@ export function Composer({
   const canSend = staged ? !!value.trim() && !busy : (file ? !busy : !!value.trim() && !busy);
 
   const clearQuickReply = () => setQuickReplyId(null);
+
+  /**
+   * Put a saved reply into the composer.
+   *
+   * One function for both entry points, so the dropdown and anything added later cannot drift.
+   *
+   * **The `null` for a text reply is load-bearing.** Choosing a plain reply while a question is
+   * staged has to cancel the question — otherwise the composer holds the question's id with the
+   * plain reply's words, and Send fires `onSendQuickReply`, so the customer gets buttons the agent
+   * never chose.
+   */
+  const chooseSet = (set: QuickReply) => {
+    setQuickReplyId(isTextReply(set) ? null : set.id);
+    // Mutually exclusive with a file: an interactive message with a media header is a real Meta
+    // feature and deliberately out of scope, so half-building it would be worse than not offering it.
+    setFile(null);
+    setRefused(null);
+    // The saved words, to edit rather than retype. A starting point — the send carries whatever
+    // ends up in the field.
+    onChange(set.body);
+  };
 
   const submit = () => {
     if (!canSend) return;
@@ -140,9 +194,9 @@ export function Composer({
     ? 'WhatsApp only allows a file within 24 hours of the customer’s last message'
     : 'Attach a file';
 
-  const askTitle = windowClosed
+  const askTitle = offerable.length === 0
     ? 'WhatsApp only allows buttons within 24 hours of the customer’s last message'
-    : 'Ask with reply buttons';
+    : 'Insert a saved reply';
 
   const fieldLabel = staged ? 'Question' : (file ? 'Caption' : 'Reply');
 
@@ -274,22 +328,18 @@ export function Composer({
       )}
 
       <div className="flex items-end gap-2">
+        {/*
+          Rendered whenever the workspace has saved anything, even if none of it can be sent right
+          now — because the reason it cannot is worth reading, and an absent control explains nothing.
+        */}
         {onSendQuickReply && sets.length > 0 && (
           <Select
             value={quickReplyId ?? ''}
             onValueChange={(id) => {
-              setQuickReplyId(id);
-              // Mutually exclusive with a file: an interactive message with a media header is a
-              // real Meta feature and deliberately out of scope, so half-building it here would be
-              // worse than not offering it.
-              setFile(null);
-              setRefused(null);
-              // Load the saved question so the agent edits it rather than retyping it. It is a
-              // starting point — the send carries whatever ends up in the field.
               const chosen = sets.find((set) => set.id === id);
-              if (chosen) onChange(chosen.body);
+              if (chosen) chooseSet(chosen);
             }}
-            disabled={busy || windowClosed}
+            disabled={busy || offerable.length === 0}
           >
             <SelectTrigger
               className="w-auto shrink-0"
@@ -302,9 +352,38 @@ export function Composer({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {sets.map((set) => (
-                <SelectItem key={set.id} value={set.id}>{set.name}</SelectItem>
-              ))}
+              {/*
+                Grouped rather than marked with a suffix on each name. The heading is not selectable,
+                so it cannot be chosen by accident and it does not change what any option is called.
+              */}
+              {textReplies.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Replies</SelectLabel>
+                  {textReplies.map((set) => (
+                    <SelectItem key={set.id} value={set.id}>{set.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+
+              {canAsk && questions.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Questions with answers</SelectLabel>
+                  {questions.map((set) => (
+                    <SelectItem key={set.id} value={set.id}>{set.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+
+              {/*
+                Why the questions are missing, said where they would have been.
+
+                Only when there are some to be missing — a workspace with none has nothing to explain.
+              */}
+              {!canAsk && questions.length > 0 && (
+                <p className="px-3 py-2 text-caption text-ink-500">
+                  Questions with answers need the 24-hour window.
+                </p>
+              )}
             </SelectContent>
           </Select>
         )}
