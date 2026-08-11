@@ -78,6 +78,35 @@ const ALLOW = {
     // untokenised marketing markup in the tree than before, not more.
     'src/components/layout/PublicHeader.tsx',
     'src/pages/NotFound.tsx',
+    // The features/solutions tree and the shell it shares with Landing.
+    //
+    // Same decision as the pages above, and worth being explicit about: these are on stock
+    // Tailwind *by design*, because the marketing site's visual language (48px display
+    // headings, `rounded-3xl` cards, `font-extrabold`) is deliberately not the product's.
+    // Folding them into the brand tokens would mean the website could no longer look like a
+    // website. The debt this list tracks is that the two systems exist; it is not a promise
+    // that every file here will eventually migrate.
+    //
+    // `primitives.tsx`, `SiteHeader.tsx` and `SiteFooter.tsx` are the shared shell — the
+    // reason the eight marketing pages are eight entries here and not eight copies of the
+    // same markup.
+    'src/components/marketing/primitives.tsx',
+    'src/components/marketing/SiteHeader.tsx',
+    'src/components/marketing/SiteFooter.tsx',
+    'src/pages/Features.tsx',
+    'src/pages/Solutions.tsx',
+    'src/pages/DetailPage.tsx',
+    /*
+     * **Deleted — remove this line once the file is gone from your working copy.**
+     *
+     * `ComingSoon.tsx` was replaced by `DetailPage.tsx`: the eleven placeholder routes
+     * became eleven real, indexable pages. Nothing imports it any more. It is listed here
+     * only so that a checkout where the file is still lying around does not fail the brand
+     * gate on dead code — deleting the file and this line together is the tidy end state.
+     */
+    'src/pages/ComingSoon.tsx',
+    'src/pages/features/WhatsAppAutomation.tsx',
+    'src/pages/features/AiWhatsAppAutomation.tsx',
   ],
 };
 

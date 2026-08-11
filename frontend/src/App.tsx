@@ -54,6 +54,32 @@ import PageViews from '@/components/layout/PageViews';
 const WorkflowCanvas = lazy(() => import('@/pages/WorkflowCanvas'));
 const WorkflowBuilder = lazy(() => import('@/pages/WorkflowBuilder'));
 
+/*
+ * The marketing pages below the home page, split out for the same reason.
+ *
+ * They are long — several thousand words of copy each — and almost nobody who lands on
+ * `/` reads all of them. Bundled into the entry chunk they would be dead weight on the
+ * one page whose LCP actually matters. `Landing` itself stays eager, because it *is*
+ * the landing page and a suspense flash there is the thing we are trying to avoid.
+ *
+ * `DetailPage` is lazy too. It resolves its own copy from `lib/marketing-content.ts` by
+ * pathname, so nothing about that table needs to be imported here.
+ */
+const Features = lazy(() => import('@/pages/Features'));
+const Solutions = lazy(() => import('@/pages/Solutions'));
+const WhatsAppAutomation = lazy(() => import('@/pages/features/WhatsAppAutomation'));
+const AiWhatsAppAutomation = lazy(() => import('@/pages/features/AiWhatsAppAutomation'));
+const DetailPage = lazy(() => import('@/pages/DetailPage'));
+
+/** Full-height spinner, so a lazy marketing page does not collapse the layout while it loads. */
+const PageFallback = (
+  <div className="grid min-h-screen place-items-center">
+    <Loader2 className="h-6 w-6 animate-spin text-accent-600" />
+  </div>
+);
+
+const page = (element: React.ReactNode) => <Suspense fallback={PageFallback}>{element}</Suspense>;
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -63,6 +89,52 @@ export default function App() {
         <Routes>
           {/* Public Website Routes */}
           <Route path="/" element={<Landing />} />
+
+          {/*
+            The features and solutions trees — two hubs and thirteen detail pages.
+
+            The two longest detail pages have components of their own; the other eleven
+            share `DetailPage`, which renders from the copy in `lib/marketing-content.ts`.
+            Every one of them is a real, indexable page: there are no placeholder routes
+            here, because a placeholder at a URL a search term lands on is worse than no
+            page at all.
+
+            Paths are written out literally rather than nested, because
+            `document-head.test.ts` greps this file for `path="<canonical>"` to prove the
+            canonical, the route and the sitemap agree — for all twenty public pages.
+            Nested relative segments would defeat that check.
+          */}
+          <Route path="/features" element={page(<Features />)} />
+          <Route path="/features/whatsapp-automation" element={page(<WhatsAppAutomation />)} />
+          <Route path="/features/ai-whatsapp-automation" element={page(<AiWhatsAppAutomation />)} />
+          <Route path="/solutions" element={page(<Solutions />)} />
+
+          {/*
+            **Written out one per line rather than mapped over `DETAIL_PAGES`, on purpose.**
+
+            `document-head.test.ts` proves the canonical, the route and the sitemap agree
+            by searching this file for the literal `path="<canonical>"` of every entry in
+            `PAGE_HEADS`. A `.map()` produces the same routes at runtime and *no such
+            string in the source*, so the check silently passes on nothing — which is
+            exactly the class of bug it was written to catch. Eleven repetitive lines are
+            the price of keeping the assertion real.
+
+            `DETAIL_PAGES` is still the source of the copy and of `DETAIL_BY_PATH`; a route
+            added here without an entry there renders `NotFound`, and an entry there
+            without a route here fails the test above. Both directions are covered.
+          */}
+          <Route path="/features/shared-whatsapp-portal" element={page(<DetailPage />)} />
+          <Route path="/features/whatsapp-number-masking" element={page(<DetailPage />)} />
+          <Route path="/features/whatsapp-campaigns" element={page(<DetailPage />)} />
+          <Route path="/features/whatsapp-team-inbox" element={page(<DetailPage />)} />
+          <Route path="/whatsapp-business-api" element={page(<DetailPage />)} />
+          <Route path="/industries" element={page(<DetailPage />)} />
+          <Route path="/solutions/lead-management" element={page(<DetailPage />)} />
+          <Route path="/solutions/sales-automation" element={page(<DetailPage />)} />
+          <Route path="/solutions/customer-support" element={page(<DetailPage />)} />
+          <Route path="/solutions/marketing-automation" element={page(<DetailPage />)} />
+          <Route path="/solutions/customer-engagement" element={page(<DetailPage />)} />
+
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />

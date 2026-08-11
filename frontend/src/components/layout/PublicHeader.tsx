@@ -1,29 +1,21 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
+import { PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
 
 /**
- * The website's header: logo, section nav, and the right-hand call to action.
+ * The lightweight header for the legal pages and the 404.
  *
- * Lifted out of `LegalLayout` when the 404 page needed the same thing. It was going to be a
- * fourth hand-written copy of this markup — Landing, Contact and Login each still have their
- * own — and a fourth copy is how a nav link gets added in three places out of four.
+ * **Why this still exists next to `components/marketing/SiteHeader`.** SiteHeader is
+ * sticky, opaque and carries a scroll-spy; it belongs on top of the marketing pages it
+ * was built for. These two contexts want neither — the legal pages are a reading layout
+ * and the 404 sits on a full-bleed background image that a white bar would cut in half.
+ * So the shapes stay different on purpose.
  *
- * Those three are not converted here. Landing's header animates on scroll and Login's is a
- * different shape, so folding them in is a real change with its own risk, and this one is
- * about giving a missing page somewhere to go. Named so it is not mistaken for finished.
- *
- * The signed-in branch matters more on an error page than on a legal one: somebody who mistypes
- * a URL inside the app needs a way back to it, and the nav below only points at the website.
+ * What they no longer duplicate is the *link list*. That comes from
+ * `lib/marketing-nav.ts`, which is the whole reason the module exists: adding
+ * `/solutions` to the site should not be an edit anyone can forget to make here.
  */
-
-const NAV = [
-  { label: 'Home', href: '/#home' },
-  { label: 'Features', href: '/#features' },
-  { label: 'Pricing', href: '/#pricing' },
-  { label: 'Testimonial', href: '/#testimonial' },
-  { label: 'Contact Us', href: '/contact' },
-];
 
 export default function PublicHeader() {
   const token = useAuthStore((s) => s.token);
@@ -37,14 +29,24 @@ export default function PublicHeader() {
         </Link>
 
         <nav className="hidden lg:flex items-center gap-8">
-          {NAV.map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              className="text-[15px] font-medium text-slate-700 hover:text-slate-900 transition-colors"
-            >
-              {item.label}
-            </a>
+          {PRIMARY_NAV.map((entry) => (
+            entry.anchor ? (
+              <a
+                key={entry.href}
+                href={entry.href}
+                className="text-[15px] font-medium text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                {entry.label}
+              </a>
+            ) : (
+              <Link
+                key={entry.href}
+                to={entry.href}
+                className="text-[15px] font-medium text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                {entry.label}
+              </Link>
+            )
           ))}
         </nav>
 
@@ -60,9 +62,9 @@ export default function PublicHeader() {
               <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
                 Sign in
               </Link>
-              <Link to="/signup">
+              <Link to={SIGNUP_LINK}>
                 <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">
-                  Start Free Trial
+                  Start Free
                 </Button>
               </Link>
             </>

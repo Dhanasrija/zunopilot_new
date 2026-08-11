@@ -37,16 +37,20 @@
     was written for, so an edit to only some of them makes the previews disagree with Google.
 
     Both are at the edge of their useful length: the title is exactly 60 characters and the
-    description 147. Google truncates titles around 60 and descriptions around 160, so
-    neither is currently cut — but any word added to the title will cost the tail. If it ever
-    needs to grow, "Platform" is the word to drop; it is the least load-bearing.
+    description 155. Google truncates titles around 60 and descriptions around 160, so
+    neither is currently cut — but any word added to either will cost the tail. If the title
+    ever needs to grow, "Platform" is the word to drop; it is the least load-bearing.
+
+    A test in src/lib/document-head.test.ts asserts both strings match PAGE_HEADS.landing
+    exactly, so an edit here that is not mirrored there fails the build rather than shipping
+    a page Google indexes one way and WhatsApp previews another.
 
     The separator is an en dash (–, U+2013), not a hyphen, and "ZunoPilot's" uses a straight
     apostrophe. Both are literal characters, which the UTF-8 charset above makes safe.
   -->
   <title>ZunoPilot – AI-Powered WhatsApp Business Automation Platform</title>
   <meta name="description"
-    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+    content="Automate WhatsApp customer communication with ZunoPilot. Use AI-powered workflows, shared conversations, number masking, campaigns, and team collaboration." />
   <link rel="canonical" href="https://zunopilot.com/" />
   <meta name="robots" content="index, follow, max-image-preview:large" />
 
@@ -56,7 +60,7 @@
   <meta property="og:site_name" content="ZunoPilot" />
   <meta property="og:title" content="ZunoPilot – AI-Powered WhatsApp Business Automation Platform" />
   <meta property="og:description"
-    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+    content="Automate WhatsApp customer communication with ZunoPilot. Use AI-powered workflows, shared conversations, number masking, campaigns, and team collaboration." />
   <meta property="og:url" content="https://zunopilot.com/" />
   <meta property="og:image" content="https://zunopilot.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
@@ -69,7 +73,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="ZunoPilot – AI-Powered WhatsApp Business Automation Platform" />
   <meta name="twitter:description"
-    content="Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform." />
+    content="Automate WhatsApp customer communication with ZunoPilot. Use AI-powered workflows, shared conversations, number masking, campaigns, and team collaboration." />
   <meta name="twitter:image" content="https://zunopilot.com/og-image.png" />
 
   <link rel="icon" type="image/png" href="/app-logo.png" />
@@ -125,7 +129,7 @@
           "operatingSystem": "Web",
           "url": "https://zunopilot.com/",
           "publisher": { "@id": "https://zunopilot.com/#organization" },
-          "description": "Automate WhatsApp marketing, customer support, broadcasts, AI chatbots, and CRM integrations with ZunoPilot's powerful business messaging platform."
+          "description": "Automate WhatsApp customer communication with ZunoPilot. Use AI-powered workflows, shared conversations, number masking, campaigns, and team collaboration."
         }
       ]
     }

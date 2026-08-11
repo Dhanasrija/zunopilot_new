@@ -32,6 +32,20 @@ const LEGACY = [
   'src/pages/Terms.tsx',
   'src/pages/Contact.tsx',
   'src/components/layout/LegalLayout.tsx',
+  // The features/solutions tree. These matter to this check more than the originals did:
+  // most of their utilities come from `components/marketing/primitives.tsx`, so a token
+  // narrowed in tailwind.config.js would break eight pages from one file rather than one.
+  'src/components/marketing/primitives.tsx',
+  'src/components/marketing/SiteHeader.tsx',
+  'src/components/marketing/SiteFooter.tsx',
+  'src/pages/Features.tsx',
+  'src/pages/Solutions.tsx',
+  'src/pages/DetailPage.tsx',
+  // Deleted alongside its brand-gate entry — see the note in check-brand.mjs. Harmless
+  // while present because this script skips paths that do not exist.
+  'src/pages/ComingSoon.tsx',
+  'src/pages/features/WhatsAppAutomation.tsx',
+  'src/pages/features/AiWhatsAppAutomation.tsx',
 ];
 
 /**
