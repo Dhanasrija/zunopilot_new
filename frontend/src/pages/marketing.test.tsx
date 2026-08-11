@@ -57,31 +57,51 @@ beforeAll(() => {
 const at = (path: string, ui: ReactNode) =>
   render(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>);
 
-const HUBS: readonly [string, string, ReactNode, RegExp][] = [
-  ['home', '/', <Landing />, /AI-Powered WhatsApp Business Automation/i],
-  ['features hub', '/features', <Features />, /Powerful WhatsApp Automation Features/i],
-  ['solutions hub', '/solutions', <Solutions />, /WhatsApp Business Solutions/i],
-  ['whatsapp automation', '/features/whatsapp-automation', <WhatsAppAutomation />, /Keeps Your Business Moving/i],
-  ['ai automation', '/features/ai-whatsapp-automation', <AiWhatsAppAutomation />, /Smarter Customer Conversations/i],
+/**
+ * A heading's text with its whitespace normalised.
+ *
+ * `AnimatedHeading` joins its lines with a **non-breaking** space (U+00A0), because a
+ * plain space in that position is the last child of a `block` and the browser collapses
+ * it away — the words then render on separate lines but the text is one fused run. So
+ * U+00A0 appearing here is the fix working, and an assertion comparing against a normal
+ * space has to fold it. `\s` does not match U+00A0 in a JS regex, hence the explicit
+ * replace rather than a `\s+` pattern.
+ */
+const headingText = (el: Element | null): string =>
+  (el?.textContent ?? '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+
+const HUBS: readonly [string, string, ReactNode, string][] = [
+  ['home', '/', <Landing />, 'AI-Powered WhatsApp Business Automation'],
+  ['features hub', '/features', <Features />, 'Powerful WhatsApp Automation Features for Your Business'],
+  ['solutions hub', '/solutions', <Solutions />, 'WhatsApp Business Solutions for Sales, Support & Customer Engagement'],
+  ['whatsapp automation', '/features/whatsapp-automation', <WhatsAppAutomation />, 'WhatsApp Automation That Keeps Your Business Moving'],
+  ['ai automation', '/features/ai-whatsapp-automation', <AiWhatsAppAutomation />, 'AI WhatsApp Automation for Smarter Customer Conversations'],
 ];
 
-/** Every public page, hub or detail, with the route it lives at. */
-const ALL_PAGES: readonly [string, string, ReactNode, RegExp][] = [
+/**
+ * Every public page, hub or detail, with its route and the **exact** text its `<h1>`
+ * should read once whitespace is normalised.
+ *
+ * Exact text rather than a loose regex, deliberately. The defect this suite exists for
+ * is a *missing separator* between two words, and a regex like `/[a-z][A-Z]/` cannot
+ * distinguish "BusinessCommunication" (broken) from "WhatsApp" (correct). Comparing the
+ * whole string to what the copy says catches a lost space anywhere in the heading and
+ * needs no heuristic at all.
+ */
+const ALL_PAGES: readonly [string, string, ReactNode, string][] = [
   ...HUBS,
   ...DETAIL_PAGES.map((p) => [
-    p.headKey,
-    p.path,
-    <DetailPage />,
-    new RegExp(p.h1.join(' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
-  ] as [string, string, ReactNode, RegExp]),
+    p.headKey, p.path, <DetailPage />, p.h1.join(' '),
+  ] as [string, string, ReactNode, string]),
 ];
 
 describe('every marketing page mounts', () => {
-  it.each(ALL_PAGES)('%s renders exactly one h1', (_name, path, ui, heading) => {
+  it.each(ALL_PAGES)('%s renders exactly one h1, with its words separated', (_name, path, ui, expected) => {
     at(path, ui);
     const h1s = screen.getAllByRole('heading', { level: 1 });
     expect(h1s).toHaveLength(1);
-    expect(h1s[0].textContent ?? '').toMatch(heading);
+    // Exact, so a space lost anywhere in the heading fails here.
+    expect(headingText(h1s[0])).toBe(expected);
     cleanup();
   });
 });
@@ -113,8 +133,13 @@ describe('**animated headings keep their spaces**', () => {
     // (Line-final wrappers are followed by the between-lines space on the parent.)
     expect(wordGapsIn(container).length).toBeGreaterThanOrEqual(wrappers.length - 2);
 
-    // And the belt-and-braces version: no two words fused into one token.
-    expect(heading.textContent ?? '').not.toMatch(/[a-z][A-Z]{2,}/);
+    // Every line break carries a separator, so the heading reads as one run.
+    const lines = heading.querySelectorAll('span.block');
+    if (lines.length > 1) {
+      for (const line of [...lines].slice(0, -1)) {
+        expect(line.textContent?.endsWith('\u00A0'), 'line break lost its separator').toBe(true);
+      }
+    }
     cleanup();
   });
 });

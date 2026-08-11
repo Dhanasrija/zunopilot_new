@@ -144,6 +144,11 @@ export default function Features() {
           'Notifications',
           'Recurring communication',
           'Workflow-based responses',
+          'Appointment and booking confirmations',
+          'Order and status updates',
+          'Post-purchase follow-up',
+          'Repeat-customer re-engagement',
+          'Internal handover between team members',
         ]}
         href="/features/whatsapp-automation"
         cta="Explore WhatsApp Automation"
@@ -175,6 +180,11 @@ export default function Features() {
           'Response assistance',
           'Lead engagement',
           'Automated communication workflows',
+          'Interpreting the same question asked in different words',
+          'Collecting requirements before a person takes over',
+          'Early-stage lead qualification',
+          'Deciding when a conversation needs a human',
+          'Keeping answers consistent with approved business information',
         ]}
         href="/features/ai-whatsapp-automation"
         cta="Explore AI WhatsApp Automation"
@@ -208,6 +218,11 @@ export default function Features() {
           'Service businesses',
           'Multi-user operations',
           'Businesses handling high conversation volumes',
+          'Teams covering different shifts',
+          'Businesses where more than one person answers the same number',
+          'Owners who need visibility without reading every chat',
+          'Handing a conversation over without losing its history',
+          'Keeping customer relationships with the business, not a device',
         ]}
         href="/features/shared-whatsapp-portal"
         cta="Explore Shared WhatsApp Portal"
@@ -241,6 +256,12 @@ export default function Features() {
           'Multi-user teams',
           'Customer-facing operations',
           'Greater control over business numbers',
+          'Reducing exposure of employees\u2019 personal numbers',
+          'Keeping conversations inside a defined workflow',
+          'Field and service staff who meet customers in person',
+          'Roles where the person handling a customer changes often',
+          'Clean handover when staff change role or leave',
+          'A consistent customer-facing identity for your business',
         ]}
         href="/features/whatsapp-number-masking"
         cta="Explore WhatsApp Number Masking"
@@ -273,6 +294,11 @@ export default function Features() {
           'Re-engagement',
           'Marketing communication',
           'Customer engagement',
+          'Seasonal and event-driven outreach',
+          'Restock and back-in-stock notices',
+          'Post-purchase and repeat-order prompts',
+          'Reusable approved message templates',
+          'Targeted sends to a defined audience',
         ]}
         href="/features/whatsapp-campaigns"
         cta="Explore WhatsApp Campaigns"
@@ -306,6 +332,10 @@ export default function Features() {
           'Service teams',
           'Multi-agent operations',
           'Growing businesses',
+          'Avoiding two agents answering the same customer',
+          'Internal notes that are never sent to the customer',
+          'Escalating a conversation to a more senior colleague',
+          'Taking over from automation the moment judgment is needed',
         ]}
         href="/features/whatsapp-team-inbox"
         cta="Explore WhatsApp Team Inbox"
@@ -340,6 +370,10 @@ export default function Features() {
           'Automated communication',
           'Software integrations',
           'Customer communication workflows',
+          'Messaging triggered by events in your own systems',
+          'Multi-agent access to one business number',
+          'Approved templates for recurring operational messages',
+          'Consent and messaging-policy compliance',
         ]}
         href="/whatsapp-business-api"
         cta="Explore WhatsApp Business API"
@@ -493,7 +527,9 @@ const TEAMS = [
   { title: 'Marketing Teams', body: 'Use campaigns and customer communication to support promotions and engagement.' },
   { title: 'Operations', body: 'Automate recurring notifications, reminders, and operational communication.' },
   { title: 'Business Owners', body: 'Create a more centralized approach to customer communication and team collaboration.' },
+  { title: 'Service & Field Teams', body: 'Keep customers informed before, during and after a visit without swapping personal numbers.' },
 ];
+
 
 const WHY_FEATURES = [
   { title: 'Reduce Manual Work', body: "Automate repetitive communication that would otherwise consume your team's time." },
@@ -501,6 +537,7 @@ const WHY_FEATURES = [
   { title: 'Support Team Collaboration', body: 'Give multiple users a shared environment for managing business conversations.' },
   { title: 'Maintain Business Control', body: 'Move customer communication toward a centralized business-managed process.' },
   { title: 'Prepare for Growth', body: 'Create workflows that can evolve as your customer base, team, and communication volume increase.' },
+  { title: 'Keep Customer Relationships', body: 'Conversations belong to the business, so a customer relationship survives a change of staff.' },
 ];
 
 const FEATURES_FAQS = [

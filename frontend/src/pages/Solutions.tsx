@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import {
+  ArrowRight, LifeBuoy, Megaphone, MessageSquare, Repeat,
+} from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  ArrowLink, CheckList, CtaBand, EASE_OUT, FaqSection, MatchTable, PageHero,
-  ScrollProgress, Section, SectionHead, StepRail, TileGrid, viewport
+  ArrowLink, CARD_SPRING, CheckList, CtaBand, EASE_OUT, FaqSection, MatchTable, PageHero,
+  ScrollProgress, Section, SectionHead, StepRail, TileGrid, item, stagger, viewport
 } from '@/components/marketing/primitives';
 
 /*
@@ -150,6 +153,10 @@ export default function Solutions() {
           'Qualification conversations',
           'Sales handoffs',
           'Re-engagement',
+          'First-response acknowledgement',
+          'Requirement collection before handoff',
+          'Reminders for prospects who go quiet',
+          'Routing an enquiry to the right salesperson',
         ]}
         href="/solutions/lead-management"
         cta="Explore Lead Management"
@@ -185,6 +192,10 @@ export default function Solutions() {
           'Qualification workflows',
           'Customer communication',
           'Opportunity follow-up',
+          'Scheduled and triggered follow-ups',
+          'Answering recurring product questions',
+          'Quote and proposal follow-through',
+          'Shared visibility of live opportunities',
         ]}
         href="/solutions/sales-automation"
         cta="Explore Sales Automation"
@@ -217,6 +228,10 @@ export default function Solutions() {
           'Status updates',
           'Follow-ups',
           'Support conversations',
+          'Order and delivery status questions',
+          'Routing to the right agent',
+          'Escalation with the full conversation history',
+          'Post-resolution follow-up',
         ]}
         href="/solutions/customer-support"
         cta="Explore Customer Support"
@@ -248,6 +263,10 @@ export default function Solutions() {
           'Re-engagement',
           'Campaign communication',
           'Audience engagement',
+          'Seasonal and event-driven offers',
+          'Approved message templates for recurring sends',
+          'Targeted sends to a defined audience',
+          'Turning a campaign reply into a lead',
         ]}
         href="/solutions/marketing-automation"
         cta="Explore Marketing Automation"
@@ -280,6 +299,10 @@ export default function Solutions() {
           'Re-engagement',
           'Relationship building',
           'Repeat interactions',
+          'Appointment and booking reminders',
+          'Post-purchase check-ins',
+          'Renewal and repeat-order prompts',
+          'Win-back messages for lapsed customers',
         ]}
         href="/solutions/customer-engagement"
         cta="Explore Customer Engagement"
@@ -355,38 +378,87 @@ export default function Solutions() {
       </Section>
 
       {/* ----------------------------- The next step -------------------------- */}
+      {/*
+        Rebuilt. This band was a centred heading, a centred question, then a
+        left-aligned tick list inside a narrower container and a trailing paragraph
+        that lined up with neither — four different alignments stacked on top of each
+        other, which is what made it read as broken.
+
+        It is now one centred column throughout, and the four statements are the point
+        of the section rather than a footnote to it: each is a trigger and an outcome
+        with an arrow between them, because "a customer enquiry can lead to a sales
+        workflow" *is* a two-part statement and setting it as a sentence hides that.
+      */}
       <Section>
         <SectionHead
           title={['Build More Efficient', 'WhatsApp Workflows']}
           lead={(
-            <>
-              <p>
-                A business WhatsApp strategy should be more than sending and receiving messages.
-              </p>
-              <p>It should help your team answer an important question:</p>
-            </>
+            <p>
+              A business WhatsApp strategy should be more than sending and receiving messages.
+              It should help your team answer an important question:
+            </p>
           )}
         />
-        <p className="mt-6 text-center text-xl sm:text-2xl font-bold text-violet-600 max-w-2xl mx-auto">
-          What should happen after this customer sends a message?
-        </p>
-        <p className="mt-6 text-center text-base text-slate-600">
-          ZunoPilot helps businesses structure that next step.
-        </p>
-        <div className="mt-10 max-w-3xl mx-auto">
-          <CheckList
-            columns={1}
-            items={[
-              'A customer enquiry can lead to a sales workflow.',
-              'A support request can reach the appropriate team.',
-              'A campaign response can become a new lead.',
-              'A customer interaction can trigger a follow-up.',
-            ]}
+
+        {/* The question, given the weight the copy gives it. */}
+        <motion.figure
+          initial={{ opacity: 0, y: 24, scale: 0.97 }}
+          whileInView={{ opacity: 1, y: 0, scale: 1 }}
+          viewport={viewport}
+          transition={{ duration: 0.6, ease: EASE_OUT }}
+          className="relative mt-10 mx-auto max-w-3xl overflow-hidden rounded-3xl bg-gradient-to-br from-violet-600 to-violet-700 px-6 py-10 sm:px-12 sm:py-12 text-center shadow-xl shadow-violet-300/50"
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-2xl"
           />
-          <p className="mt-6 text-base text-slate-600">
-            This makes WhatsApp a more useful part of your overall business process.
-          </p>
-        </div>
+          <blockquote className="relative text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-snug">
+            What should happen after this customer sends a message?
+          </blockquote>
+          <figcaption className="relative mt-5 text-sm font-medium text-violet-100">
+            ZunoPilot helps businesses structure that next step.
+          </figcaption>
+        </motion.figure>
+
+        {/* Trigger → outcome, four ways. */}
+        <motion.ul
+          initial="hidden"
+          whileInView="show"
+          viewport={viewport}
+          variants={stagger(0.05, 0.09)}
+          className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 max-w-5xl mx-auto"
+        >
+          {NEXT_STEPS.map(({ icon: Icon, trigger, outcome }) => (
+            <motion.li
+              key={trigger}
+              variants={item}
+              whileHover={{ y: -4 }}
+              transition={CARD_SPRING}
+              className="flex h-full items-center gap-4 rounded-3xl bg-white ring-1 ring-slate-200/80 p-5 sm:p-6"
+            >
+              <span className="grid place-items-center h-11 w-11 shrink-0 rounded-2xl bg-violet-100 text-violet-600 ring-1 ring-violet-200/70">
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[15px] font-semibold text-slate-900">{trigger}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+                  <ArrowRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                  {outcome}
+                </p>
+              </div>
+            </motion.li>
+          ))}
+        </motion.ul>
+
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={viewport}
+          transition={{ duration: 0.5, ease: EASE_OUT }}
+          className="mt-10 text-center text-base text-slate-600 max-w-2xl mx-auto"
+        >
+          This makes WhatsApp a more useful part of your overall business process.
+        </motion.p>
       </Section>
 
       {/* --------------------------------- Why -------------------------------- */}
@@ -434,6 +506,14 @@ const JOURNEY_STAGES = [
   { index: '06', title: 'Re-engage', body: 'Businesses can continue appropriate communication after the initial interaction.' },
 ];
 
+/** The four "what happens next" pairs, split into trigger and outcome. */
+const NEXT_STEPS = [
+  { icon: MessageSquare, trigger: 'A customer enquiry', outcome: 'can lead to a sales workflow' },
+  { icon: LifeBuoy, trigger: 'A support request', outcome: 'can reach the appropriate team' },
+  { icon: Megaphone, trigger: 'A campaign response', outcome: 'can become a new lead' },
+  { icon: Repeat, trigger: 'A customer interaction', outcome: 'can trigger a follow-up' },
+];
+
 const CHOOSER: readonly (readonly [string, string, string?])[] = [
   ['Manage incoming prospects', 'Lead Management', '/solutions/lead-management'],
   ['Improve follow-ups and conversions', 'Sales Automation', '/solutions/sales-automation'],
@@ -478,6 +558,7 @@ const TEAMS = [
   { title: 'Marketing Teams', body: 'Use WhatsApp as part of a broader customer engagement and campaign strategy.' },
   { title: 'Operations Teams', body: 'Create repeatable communication processes for reminders, updates, and notifications.' },
   { title: 'Business Owners', body: 'Bring customer communication into a more structured business-managed process.' },
+  { title: 'Founders & Small Teams', body: 'Stop being the person who personally answers every enquiry that comes in.' },
 ];
 
 const WHY_SOLUTIONS = [

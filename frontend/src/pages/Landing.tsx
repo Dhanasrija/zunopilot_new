@@ -1,6 +1,9 @@
 import { useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, ArrowRight } from 'lucide-react';
+import {
+  Star, ArrowRight, Check, Building2, GraduationCap, ShoppingBag, Stethoscope,
+  UtensilsCrossed, Wrench,
+} from 'lucide-react';
 import {
   motion, useScroll, useTransform, useReducedMotion,
 } from 'framer-motion';
@@ -11,7 +14,7 @@ import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  AnimatedHeading, ArrowLink, CARD_SPRING, CheckList, CtaBand, CtaPair, EASE_OUT,
+  AnimatedHeading, ArrowLink, CARD_SPRING, CheckCards, CheckList, CtaBand, CtaPair, EASE_OUT,
   FaqSection, ScrollProgress, Section, SectionHead, StepRail, TileGrid, fadeUp, item,
   scaleIn, stagger, viewport
 } from '@/components/marketing/primitives';
@@ -200,31 +203,110 @@ function WhyAutomate() {
   return (
     <Section tone="tinted">
       <SectionHead
+        eyebrow="Built for business communication"
         title={['Automate Your Business', 'Communication on WhatsApp']}
         lead={(
-          <>
-            <p>
-              WhatsApp is an essential communication channel for businesses, but managing
-              conversations manually across individual phones becomes difficult as your team
-              and customer base grow.
-            </p>
-            <p>ZunoPilot turns WhatsApp conversations into organized, automated business workflows.</p>
-            <p>
-              Use AI and automation to handle repetitive interactions, manage customer
-              conversations from one shared portal, streamline follow-ups, and keep your team
-              connected.
-            </p>
-          </>
+          <p>
+            WhatsApp is an essential communication channel for businesses, but managing
+            conversations manually across individual phones becomes difficult as your team and
+            customer base grow.
+          </p>
         )}
       />
 
-      <div className="mt-10 max-w-4xl mx-auto rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
-        <p className="text-base font-semibold text-slate-900">With ZunoPilot, you can:</p>
-        <CheckList items={WHAT_YOU_CAN_DO} className="mt-5" />
+      {/*
+        The before/after, side by side.
+
+        This band used to be three paragraphs and a bullet list, which is the same
+        information and none of the argument. The problem and the answer are the two
+        halves of the pitch, so they are set against each other — the manual column in
+        muted slate, the ZunoPilot column in brand violet and visibly lifted. Nothing
+        here is new copy; it is the supplied copy given a shape.
+      */}
+      <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 items-stretch">
+        <motion.div
+          initial={{ opacity: 0, x: -24 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={viewport}
+          transition={{ duration: 0.6, ease: EASE_OUT }}
+          className="rounded-3xl bg-slate-100/80 ring-1 ring-slate-200 p-6 sm:p-8"
+        >
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            Handled manually
+          </p>
+          <h3 className="mt-3 text-xl font-bold text-slate-700">
+            Conversations spread across phones
+          </h3>
+          <ul className="mt-6 space-y-3">
+            {MANUAL_REALITY.map((line) => (
+              <li key={line} className="flex items-start gap-3">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+                <span className="text-[15px] text-slate-600 leading-relaxed">{line}</span>
+              </li>
+            ))}
+          </ul>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, x: 24 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={viewport}
+          transition={{ duration: 0.6, ease: EASE_OUT }}
+          whileHover={{ y: -6 }}
+          className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-600 to-violet-700 p-6 sm:p-8 shadow-xl shadow-violet-300/50"
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl"
+          />
+          <p className="relative text-xs font-semibold uppercase tracking-widest text-violet-200">
+            With ZunoPilot
+          </p>
+          <h3 className="relative mt-3 text-xl font-bold text-white">
+            One organized, automated workflow
+          </h3>
+          <ul className="relative mt-6 space-y-3">
+            {AUTOMATED_REALITY.map((line) => (
+              <li key={line} className="flex items-start gap-3">
+                <span className="mt-0.5 grid place-items-center h-5 w-5 shrink-0 rounded-full bg-white/20 text-white">
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                </span>
+                <span className="text-[15px] text-violet-50 leading-relaxed">{line}</span>
+              </li>
+            ))}
+          </ul>
+        </motion.div>
       </div>
+
+      <p className="mt-12 text-center text-lg font-semibold text-slate-900 max-w-2xl mx-auto">
+        ZunoPilot turns WhatsApp conversations into organized, automated business workflows.
+      </p>
+
+      <p className="mt-10 text-center text-base font-semibold text-slate-900">
+        With ZunoPilot, you can:
+      </p>
+      <CheckCards items={WHAT_YOU_CAN_DO} columns={2} className="mt-6 max-w-5xl mx-auto" />
     </Section>
   );
 }
+
+/** The left-hand column: what the copy says happens without automation. */
+const MANUAL_REALITY = [
+  'Every message waits for someone to notice it',
+  'Follow-ups depend on who remembers them',
+  'Customer history lives on one employee\u2019s device',
+  'The same questions get answered again and again',
+  'Nobody can see which conversations are still open',
+];
+
+/** The right-hand column. */
+const AUTOMATED_REALITY = [
+  'AI and automation handle the repetitive interactions',
+  'Conversations are managed from one shared portal',
+  'Follow-ups run as workflows, not reminders',
+  'Your team keeps full context on every handover',
+  'Communication stays with the business as the team changes',
+];
 
 /* -------------------------------------------------------------------------- */
 /*                              The four pillars                               */
@@ -273,6 +355,7 @@ const PORTAL_TILES = [
   { title: 'Conversation Management', body: 'Organize and manage customer interactions more efficiently.' },
   { title: 'Team Collaboration', body: 'Allow sales, support, and service teams to work from the same environment.' },
   { title: 'Better Visibility', body: 'Give your team a clearer view of ongoing customer conversations.' },
+  { title: 'Continuity as Teams Change', body: 'Keep customer conversations with the business when someone changes role or leaves.' },
 ];
 
 function SharedPortal() {
@@ -623,11 +706,12 @@ function CustomerJourney() {
 /* -------------------------------------------------------------------------- */
 
 const INDUSTRIES = [
-  { title: 'Restaurants', body: 'Automate enquiries, reservations, order communication, promotions, and customer engagement.' },
-  { title: 'Ecommerce', body: 'Manage customer enquiries, order updates, promotions, and post-purchase communication.' },
-  { title: 'Real Estate', body: 'Manage property enquiries, lead conversations, follow-ups, and customer communication.' },
-  { title: 'Education', body: 'Streamline enquiries, admissions communication, reminders, and updates.' },
-  { title: 'Service Businesses', body: 'Automate enquiries, bookings, reminders, notifications, and customer support.' },
+  { icon: UtensilsCrossed, title: 'Restaurants', body: 'Automate enquiries, reservations, order communication, promotions, and customer engagement.' },
+  { icon: ShoppingBag, title: 'Ecommerce', body: 'Manage customer enquiries, order updates, promotions, and post-purchase communication.' },
+  { icon: Building2, title: 'Real Estate', body: 'Manage property enquiries, lead conversations, follow-ups, and customer communication.' },
+  { icon: GraduationCap, title: 'Education', body: 'Streamline enquiries, admissions communication, reminders, and updates.' },
+  { icon: Wrench, title: 'Service Businesses', body: 'Automate enquiries, bookings, reminders, notifications, and customer support.' },
+  { icon: Stethoscope, title: 'Healthcare & Clinics', body: 'Automate appointment reminders, confirmations, and routine patient communication.' },
 ];
 
 function Industries() {

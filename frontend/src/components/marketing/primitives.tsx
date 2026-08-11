@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import {
@@ -147,8 +147,18 @@ export function AnimatedHeading({
                 {i < words.length - 1 && ' '}
               </Fragment>
             ))}
-            {/* And one between the lines, so the heading is a single readable run. */}
-            {lineIdx < groups.length - 1 && ' '}
+            {/*
+              And one between the lines — as a **non-breaking** space, U+00A0.
+
+              A plain `' '` here was still wrong, and wrong in a way that looked fine:
+              it is the *last* child of a `block`, where the browser collapses trailing
+              whitespace. So the words rendered on separate lines and looked correct,
+              but the heading's text was one fused run — "Automate Your
+              BusinessCommunication on WhatsApp" — which is what a copy-paste, a screen
+              reader and a text extraction all see. U+00A0 does not collapse, and it is
+              invisible sitting at the end of a line.
+            */}
+            {lineIdx < groups.length - 1 && '\u00A0'}
           </span>
         );
       })}
@@ -328,9 +338,59 @@ export function CheckList({
   );
 }
 
+/**
+ * A tick list rendered as cards rather than as rows.
+ *
+ * `CheckList` is right inside a panel that already has a border. This is for the case
+ * where the list *is* the section — eight or nine short capability statements that need
+ * to carry a band on their own. Each item gets its own surface, a violet tick that
+ * fills on hover, and a staggered reveal, so a long list reads as a grid of things the
+ * product does instead of as a wall of bullets.
+ */
+export function CheckCards({
+  items, columns = 2, className = '',
+}: {
+  items: readonly string[];
+  columns?: 2 | 3 | 4;
+  className?: string;
+}) {
+  const cols = columns === 4
+    ? 'sm:grid-cols-2 lg:grid-cols-4'
+    : columns === 3
+      ? 'sm:grid-cols-2 lg:grid-cols-3'
+      : 'sm:grid-cols-2';
+
+  return (
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.05)}
+      className={`grid grid-cols-1 ${cols} gap-3 sm:gap-4 ${className}`}
+    >
+      {items.map((text) => (
+        <motion.li
+          key={text}
+          variants={item}
+          whileHover={{ y: -4, boxShadow: '0 14px 30px -12px rgb(96 73 231 / 0.25)' }}
+          transition={CARD_SPRING}
+          className="group flex items-start gap-3 rounded-2xl bg-white ring-1 ring-slate-200/80 p-4 sm:p-5"
+        >
+          <span className="mt-0.5 grid place-items-center h-6 w-6 shrink-0 rounded-full bg-violet-100 text-violet-600 ring-1 ring-violet-200/70 transition-colors group-hover:bg-violet-600 group-hover:text-white">
+            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+          </span>
+          <span className="text-[15px] font-medium text-slate-800 leading-relaxed">{text}</span>
+        </motion.li>
+      ))}
+    </motion.ul>
+  );
+}
+
 export interface Tile {
   title: string;
   body?: string;
+  /** Optional lucide icon component, rendered above the title. */
+  icon?: ComponentType<{ className?: string }>;
 }
 
 /** The card grid used for feature lists, benefit lists and use-case lists. */
@@ -364,7 +424,16 @@ export function TileGrid({
               {String(i + 1).padStart(2, '0')}
             </span>
           )}
-          <h3 className={`${numbered ? 'mt-4' : ''} text-lg font-bold text-slate-900`}>{tile.title}</h3>
+          {tile.icon && (
+            <motion.span
+              className="inline-grid place-items-center h-11 w-11 rounded-2xl bg-violet-100 text-violet-600 ring-1 ring-violet-200/70"
+              whileHover={{ rotate: -6, scale: 1.08 }}
+              transition={CARD_SPRING}
+            >
+              <tile.icon className="h-5 w-5" />
+            </motion.span>
+          )}
+          <h3 className={`${numbered || tile.icon ? 'mt-4' : ''} text-lg font-bold text-slate-900`}>{tile.title}</h3>
           {tile.body && (
             <p className="mt-2 text-sm text-slate-500 leading-relaxed">{tile.body}</p>
           )}
@@ -430,19 +499,48 @@ export function FlowChain({ steps, className = '' }: { steps: readonly string[];
       initial="hidden"
       whileInView="show"
       viewport={viewport}
-      variants={stagger(0, 0.06)}
+      variants={stagger(0.05, 0.14)}
       className={`mx-auto max-w-2xl ${className}`}
     >
       {steps.map((step, i) => (
         <motion.li key={step} variants={fadeUp}>
-          <div className="rounded-2xl bg-violet-50/70 ring-1 ring-violet-100 px-5 py-4 text-center text-[15px] font-medium text-slate-800">
-            {step}
-          </div>
+          <motion.div
+            whileHover={{ scale: 1.02, y: -2 }}
+            transition={CARD_SPRING}
+            className="flex items-center gap-4 rounded-2xl bg-white ring-1 ring-violet-100 px-5 py-4 shadow-sm shadow-violet-100/60"
+          >
+            <span className="grid place-items-center h-8 w-8 shrink-0 rounded-full bg-violet-600 text-white text-xs font-semibold">
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span className="text-[15px] font-medium text-slate-800 text-left">{step}</span>
+          </motion.div>
+
           {i < steps.length - 1 && (
-            <div aria-hidden className="flex justify-center py-2 text-violet-400">
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 4v16m0 0l-6-6m6 6l6-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+            /*
+              The connector, drawn rather than typed.
+              
+              A static "↓" glyph between the stages read as punctuation. Scaling a 1px
+              rule from its top edge as the step scrolls in makes the sequence look like
+              it is being traced, which is the whole point of showing a flow instead of
+              a list. `scaleY` on a transformed element, so it costs nothing per frame.
+            */
+            <div aria-hidden className="flex justify-center py-1.5">
+              <div className="relative h-6 w-px">
+                <motion.div
+                  className="absolute inset-0 origin-top bg-gradient-to-b from-violet-300 to-violet-500"
+                  variants={{
+                    hidden: { scaleY: 0 },
+                    show: { scaleY: 1, transition: { duration: 0.35, ease: EASE_OUT } },
+                  }}
+                />
+                <motion.span
+                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full bg-violet-500"
+                  variants={{
+                    hidden: { scale: 0, opacity: 0 },
+                    show: { scale: 1, opacity: 1, transition: { delay: 0.3, duration: 0.25 } },
+                  }}
+                />
+              </div>
             </div>
           )}
         </motion.li>
