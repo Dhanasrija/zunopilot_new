@@ -4,6 +4,9 @@ import { motion } from 'framer-motion';
 import {
   FEATURE_LINKS, LEGAL_LINKS, PRIMARY_NAV, SOLUTION_LINKS, type NavItem,
 } from '@/lib/marketing-nav';
+import {
+  OFFICE_ADDRESS, SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY, SUPPORT_PHONE_E164, WHATSAPP_LINK,
+} from '@/lib/contact';
 import { EASE_OUT, SPRING, viewport } from './primitives';
 
 /*
@@ -57,7 +60,7 @@ export default function SiteFooter() {
               <img src="/app-logo.png" alt="ZunoPilot" className="h-9 w-auto" />
               <span className="text-xl font-bold tracking-tight text-slate-900">ZunoPilot</span>
             </Link>
-            <p className="mt-6 text-sm text-slate-500 max-w-xs leading-relaxed">
+            <p className="mt-6 text-sm text-slate-600 max-w-xs leading-relaxed">
               AI-powered WhatsApp business automation. Automate customer conversations,
               manage them from one shared portal, and keep your team connected.
             </p>
@@ -73,16 +76,42 @@ export default function SiteFooter() {
               {LEGAL_LINKS.map((it) => (
                 <li key={it.href}><FooterLink item={it} /></li>
               ))}
-              <li><a href="mailto:support@zunopilot.com" className="hover:text-slate-900 break-all">support@zunopilot.com</a></li>
-              <li><a href="tel:+919390683154" className="hover:text-slate-900">+91 939-068-3154</a></li>
+              <li>
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:text-slate-900 break-all">
+                  {SUPPORT_EMAIL}
+                </a>
+              </li>
+              <li>
+                <a href={`tel:${SUPPORT_PHONE_E164}`} className="hover:text-slate-900">
+                  {SUPPORT_PHONE_DISPLAY}
+                </a>
+              </li>
+              {/*
+                WhatsApp as its own row rather than a second use of the phone number.
+
+                `tel:` and `wa.me` are different intents — one dials, one opens a chat — and on
+                a site whose entire premise is WhatsApp, "message us on WhatsApp" is the one
+                most visitors actually want. Labelled with the icon so it is not mistaken for a
+                duplicate of the line above it.
+              */}
+              <li>
+                <a
+                  href={WHATSAPP_LINK}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 hover:text-slate-900"
+                >
+                  <WhatsAppLogo className="h-4 w-4 shrink-0 text-[#25D366]" />
+                  Chat on WhatsApp
+                </a>
+              </li>
             </ul>
           </div>
         </div>
 
-        <p className="mt-10 text-sm text-slate-500 leading-relaxed">
-          #514, Manjeera Trinity Corporate, JNTU-Hitech City Road, Kukatpally,
-          Hyderabad, Telangana 500072, India
-        </p>
+        <address className="mt-10 text-sm text-slate-600 leading-relaxed not-italic">
+          {OFFICE_ADDRESS}
+        </address>
 
         <div className="mt-8 border-t border-slate-200" />
 
@@ -133,6 +162,20 @@ function SocialIcon({
     >
       {children}
     </motion.a>
+  );
+}
+
+/**
+ * The WhatsApp glyph.
+ *
+ * Inline rather than from lucide-react, which has no WhatsApp icon — its brand icons were
+ * removed upstream. One path is cheaper than a second icon dependency.
+ */
+function WhatsAppLogo({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2m0 1.67c2.2 0 4.27.86 5.83 2.42a8.2 8.2 0 0 1 2.41 5.82c0 4.54-3.7 8.24-8.25 8.24a8.24 8.24 0 0 1-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.26-8.24m-3.6 4.1c-.17 0-.44.06-.67.31s-.88.86-.88 2.1.9 2.43 1.03 2.6c.13.16 1.76 2.68 4.27 3.76.6.26 1.06.41 1.42.53.6.19 1.14.16 1.57.1.48-.07 1.48-.6 1.68-1.19.21-.58.21-1.08.15-1.19-.06-.1-.23-.16-.48-.29s-1.48-.73-1.71-.81c-.23-.09-.4-.13-.56.12s-.64.81-.79.98c-.14.16-.29.19-.54.06s-1.05-.39-2-1.23a7.5 7.5 0 0 1-1.38-1.72c-.15-.25-.02-.38.11-.51.11-.11.25-.29.37-.44s.17-.25.25-.41c.08-.17.04-.31-.02-.44s-.56-1.35-.77-1.85c-.2-.48-.4-.42-.55-.42z" />
+    </svg>
   );
 }
 

@@ -1,13 +1,20 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import {
+  ArrowRight, Bot, Building2, ClipboardList, Clock, HeartHandshake, Headphones,
+  LayoutGrid, Megaphone, MessageSquare, Repeat, ShieldCheck, Target, TrendingUp,
+  UserRound, Users, Workflow, Wrench,
+} from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  ArrowLink, CheckList, CtaBand, EASE_OUT, FaqSection, FlowChain, MatchTable, PageHero,
+  ArrowLink, CARD_SPRING, CheckList, CtaBand, EASE_OUT, FaqSection, MatchTable, PageHero,
   ScrollProgress, Section, SectionHead, TileGrid, viewport
 } from '@/components/marketing/primitives';
+import { IconTitle, Reveal, useTravellingIndex } from '@/components/marketing/motion-kit';
+import type { FlowNode } from '@/components/marketing/motion-kit';
 
 /*
  * /features — the hub.
@@ -191,44 +198,6 @@ export default function Features() {
       />
 
       <FeatureBlock
-        id="shared-whatsapp-portal"
-        tone="tinted"
-        eyebrow="Shared WhatsApp Portal"
-        title={['Give Your Entire Team', 'a Central Workspace']}
-        body={(
-          <>
-            <p>
-              When several employees handle WhatsApp communication independently, businesses can
-              lose visibility into conversations and follow-ups.
-            </p>
-            <p>
-              ZunoPilot&rsquo;s Shared WhatsApp Portal provides a centralized environment where
-              authorized team members can work with business conversations.
-            </p>
-            <p>
-              Instead of customer communication being dependent on one employee&rsquo;s device,
-              teams can work from a shared business environment.
-            </p>
-          </>
-        )}
-        listLabel="Useful for:"
-        list={[
-          'Sales teams',
-          'Customer support',
-          'Service businesses',
-          'Multi-user operations',
-          'Businesses handling high conversation volumes',
-          'Teams covering different shifts',
-          'Businesses where more than one person answers the same number',
-          'Owners who need visibility without reading every chat',
-          'Handing a conversation over without losing its history',
-          'Keeping customer relationships with the business, not a device',
-        ]}
-        href="/features/shared-whatsapp-portal"
-        cta="Explore Shared WhatsApp Portal"
-      />
-
-      <FeatureBlock
         id="whatsapp-number-masking"
         flip
         eyebrow="WhatsApp Number Masking"
@@ -375,7 +344,7 @@ export default function Features() {
           'Approved templates for recurring operational messages',
           'Consent and messaging-policy compliance',
         ]}
-        href="/whatsapp-business-api"
+        href="/features/whatsapp-business-api"
         cta="Explore WhatsApp Business API"
       />
 
@@ -398,8 +367,8 @@ export default function Features() {
             </p>
           )}
         />
-        <FlowChain className="mt-10" steps={CONNECTED_FLOW} />
-        <p className="mt-8 text-center text-base text-slate-600 max-w-2xl mx-auto">
+        <ConnectedWorkflow stages={CONNECTED_FLOW} />
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
           This creates a more connected communication process from the first customer message
           through ongoing engagement.
         </p>
@@ -429,39 +398,15 @@ export default function Features() {
             </>
           )}
         />
-        <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
-            <p className="text-base font-semibold text-slate-900">ZunoPilot can automate:</p>
-            <CheckList
-              columns={1}
-              className="mt-5"
-              items={[
-                'Recurring messages',
-                'Routine enquiries',
-                'Follow-up workflows',
-                'Notifications',
-                'Reminders',
-                'Campaign communication',
-              ]}
-            />
-          </div>
-          <div className="rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
-            <p className="text-base font-semibold text-slate-900">Your team can focus on:</p>
-            <CheckList
-              columns={1}
-              className="mt-5"
-              items={[
-                'Complex enquiries',
-                'Sales discussions',
-                'Customer issues',
-                'Negotiations',
-                'High-value opportunities',
-                'Human support',
-              ]}
-            />
-          </div>
+        <div className="mt-10">
+          <Handoff />
         </div>
-        <p className="mt-8 text-center text-base text-slate-600 max-w-2xl mx-auto">
+
+        <div className="mt-12">
+          <RoutingSplit />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
           Let automation handle repeatable tasks while your team handles meaningful conversations.
         </p>
       </Section>
@@ -487,6 +432,316 @@ export default function Features() {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                          Page-local design devices                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The connected workflow: a stepper across the top, roomy cards underneath.
+ *
+ * **Why it is not six cards in a row.** It was, and it looked cramped — six stages across a
+ * 1280px container is about 190px each, which is not enough width for a sentence, so every
+ * card wrapped to four or five lines of small text and the row read as clutter rather than as
+ * a sequence.
+ *
+ * Splitting the job fixes it. The **stepper** carries the sequence: one continuous rail, six
+ * numbered nodes, short labels, and a fill that sweeps left to right as the section arrives —
+ * that is the "horizontal flow" the section needs, and short labels genuinely fit at that
+ * width. The **cards** carry the content, three across, so each sentence gets roughly 400px
+ * and sits on two comfortable lines.
+ *
+ * Nothing is duplicated between the two: the stepper shows the label, the card shows the
+ * sentence.
+ */
+function ConnectedWorkflow({ stages }: { stages: readonly FlowNode[] }) {
+  /*
+   * The highlight walks the six stages rather than sitting on one.
+   *
+   * It used to mark "Shared workspace" as the active stage and leave it violet forever, which
+   * read as *that stage matters most* — the opposite of the point. One index, one timer, and the
+   * node and its card light together so the eye follows a single object down the section. Anyone
+   * with reduced motion turned on gets the resting stage lit and nothing moving.
+   */
+  const lit = useTravellingIndex(stages.length, 1400, Math.max(0, stages.findIndex((s) => s.active)));
+
+  return (
+    <div className="mt-10">
+      {/* ------------------------------- The stepper ------------------------------ */}
+      <motion.ol
+        initial="hidden"
+        whileInView="show"
+        viewport={viewport}
+        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
+        className="relative hidden md:grid md:grid-cols-6"
+      >
+        {/*
+          The rail, drawn once behind every node rather than as a mark between each pair.
+          `scaleX` from the left edge, so it costs one composited property and reads as the
+          flow filling in. Inset by half a column at each end so it starts and stops at the
+          first and last node instead of running off into the margin.
+        */}
+        <span aria-hidden className="pointer-events-none absolute left-[8.333%] right-[8.333%] top-5 h-0.5 overflow-hidden rounded-full bg-slate-200">
+          <motion.span
+            variants={{
+              hidden: { scaleX: 0 },
+              show: { scaleX: 1, transition: { duration: 1.1, ease: EASE_OUT } },
+            }}
+            className="block h-full w-full origin-left rounded-full bg-gradient-to-r from-violet-400 via-violet-600 to-violet-400"
+          />
+        </span>
+
+        {stages.map((stage, i) => (
+          <motion.li
+            key={stage.label}
+            variants={{
+              hidden: { opacity: 0, y: 10 },
+              show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: EASE_OUT } },
+            }}
+            className="relative flex flex-col items-center px-2 text-center"
+          >
+            <span
+              className={`relative z-10 grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold tabular-nums ring-4 ring-white transition-colors duration-500 ${
+                i === lit ? 'bg-violet-600 text-white' : 'bg-white text-violet-700 shadow-sm ring-4'
+              }`}
+            >
+              <span className={i === lit ? '' : 'grid h-10 w-10 place-items-center rounded-full ring-1 ring-violet-200'}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+            </span>
+            <span className="mt-3 text-[13px] font-semibold leading-snug text-slate-900">
+              {stage.label}
+            </span>
+          </motion.li>
+        ))}
+      </motion.ol>
+
+      {/* -------------------------------- The cards ------------------------------- */}
+      <motion.ol
+        initial="hidden"
+        whileInView="show"
+        viewport={viewport}
+        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.07 } } }}
+        className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 md:mt-8"
+      >
+        {stages.map((stage, i) => (
+          <motion.li
+            key={stage.label}
+            variants={{
+              hidden: { opacity: 0, y: 18 },
+              show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: EASE_OUT } },
+            }}
+            whileHover={{ y: -4 }}
+            transition={CARD_SPRING}
+            className={`group relative h-full rounded-3xl p-5 sm:p-6 ring-1 transition-all duration-500 ${
+              i === lit
+                ? 'bg-gradient-to-br from-violet-50 via-white to-white ring-violet-200 shadow-lg shadow-violet-100'
+                : 'bg-white ring-slate-200/80'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {stage.icon && (
+                <span
+                  aria-hidden
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600 ring-1 ring-violet-200/70 transition-colors duration-200 group-hover:bg-violet-600 group-hover:text-white"
+                >
+                  <stage.icon className="h-5 w-5" />
+                </span>
+              )}
+              <span className="text-[12px] font-bold uppercase tracking-widest text-violet-600 tabular-nums">
+                Step {String(i + 1).padStart(2, '0')}
+              </span>
+            </div>
+            <p className="mt-3 text-[15px] font-medium text-slate-800 leading-relaxed">
+              {stage.detail}
+            </p>
+          </motion.li>
+        ))}
+      </motion.ol>
+    </div>
+  );
+}
+
+/**
+ * The routing rule: one message in, two ways out.
+ *
+ * **What this replaced.** A generic decision diagram with a violet question node and
+ * yes/no branches. It was unreadable — the colour said "this box is important" while the
+ * shape said "this is a flowchart", and neither said what the actual rule was. The words
+ * "Yes" and "No" made it worse, because the reader has to hold the question in their head to
+ * know what yes *means*.
+ *
+ * So the condition is written out on each branch instead ("If it is routine…", "If it needs
+ * judgment…"), the colour is spent on exactly one thing — the human track, which is the point
+ * of the section — and everything else is plain white with a hairline. No pulsing node, no
+ * filled violet block.
+ */
+function RoutingSplit() {
+  const TRACKS = [
+    {
+      icon: Bot,
+      when: 'If it is routine',
+      title: 'Automation replies',
+      body: 'A workflow you configured — or AI, where you have enabled it — answers and the customer is not left waiting.',
+      accent: false,
+    },
+    {
+      icon: UserRound,
+      when: 'If it needs judgment',
+      title: 'Your team takes over',
+      body: 'The conversation moves to a person with its history intact, so nobody asks the customer to start again.',
+      accent: true,
+    },
+  ];
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      {/* The single input. Deliberately plain: it is the thing that happens, not the point. */}
+      <Reveal className="mx-auto max-w-md rounded-2xl bg-white ring-1 ring-slate-200 px-5 py-4 text-center">
+        <p className="flex items-center justify-center gap-2.5 text-[15px] font-semibold text-slate-900">
+          <MessageSquare aria-hidden className="h-4 w-4 text-violet-600" />
+          A customer message arrives
+        </p>
+      </Reveal>
+
+      {/* The fork, drawn as two short legs rather than a curve — legible at any width. */}
+      <div aria-hidden className="relative mx-auto h-10 w-full max-w-2xl">
+        <span className="absolute left-1/2 top-0 h-4 w-px -translate-x-1/2 bg-slate-300" />
+        <span className="absolute left-1/4 right-1/4 top-4 h-px bg-slate-300" />
+        <span className="absolute left-1/4 top-4 h-6 w-px bg-slate-300" />
+        <span className="absolute right-1/4 top-4 h-6 w-px bg-violet-300" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+        {TRACKS.map((track, i) => (
+          <Reveal key={track.title} delay={i * 0.1} className="h-full">
+            <div
+              className={`h-full rounded-3xl p-6 ring-1 ${
+                track.accent
+                  ? 'bg-white ring-violet-300 shadow-lg shadow-violet-100'
+                  : 'bg-slate-50/70 ring-slate-200'
+              }`}
+            >
+              <p
+                className={`text-[11px] font-bold uppercase tracking-widest ${
+                  track.accent ? 'text-violet-600' : 'text-slate-500'
+                }`}
+              >
+                {track.when}
+              </p>
+              <IconTitle
+                icon={track.icon}
+                as="p"
+                tone={track.accent ? 'violet' : 'slate'}
+                className="mt-3 text-lg font-bold text-slate-900"
+              >
+                {track.title}
+              </IconTitle>
+              <p className="mt-3 text-[15px] text-slate-700 leading-relaxed">{track.body}</p>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const AUTOMATES = [
+  'Recurring messages',
+  'Routine enquiries',
+  'Follow-up workflows',
+  'Notifications',
+  'Reminders',
+  'Campaign communication',
+] as const;
+
+const PEOPLE = [
+  'Complex enquiries',
+  'Sales discussions',
+  'Customer issues',
+  'Negotiations',
+  'High-value opportunities',
+  'Human support',
+] as const;
+
+/**
+ * Automation on one side, people on the other, and a visible boundary between them.
+ *
+ * **What this replaced and why.** It was two white boxes each containing a tick list. The
+ * lists were correct and the section still failed to make its point, because the point is
+ * not "here are twelve things" — it is that there is a *line*, that automation stops at it,
+ * and that crossing it is deliberate. So the boundary is now a real element with the
+ * handover drawn on it, the two sides are visually different weights, and the items are
+ * chips rather than ticks (a tick implies a feature you get; these are categories of work).
+ *
+ * Both lists are the original copy, unchanged and complete.
+ */
+function Handoff() {
+  return (
+    <div className="relative grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-16">
+      {/* The boundary. Only drawn where there are two columns for it to sit between. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-0 bottom-0 hidden -translate-x-1/2 lg:flex lg:flex-col lg:items-center"
+      >
+        <span className="flex-1 w-px bg-gradient-to-b from-transparent via-slate-200 to-slate-200" />
+        <motion.span
+          initial={{ scale: 0.6, opacity: 0 }}
+          whileInView={{ scale: 1, opacity: 1 }}
+          viewport={viewport}
+          transition={{ duration: 0.5, ease: EASE_OUT }}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-violet-600 ring-1 ring-violet-200 shadow-sm"
+        >
+          <ArrowRight className="h-4 w-4" strokeWidth={3} />
+        </motion.span>
+        <span className="flex-1 w-px bg-gradient-to-b from-slate-200 via-slate-200 to-transparent" />
+      </div>
+
+      <Reveal className="rounded-3xl bg-white ring-1 ring-slate-200 p-6 sm:p-8">
+        <IconTitle icon={Bot} as="p" tone="slate" className="text-lg font-bold text-slate-900">
+          ZunoPilot can automate:
+        </IconTitle>
+        <ul className="mt-5 flex flex-wrap gap-2">
+          {AUTOMATES.map((entry) => (
+            <li
+              key={entry}
+              className="rounded-full bg-slate-50 px-3.5 py-2 text-[14px] font-medium text-slate-700 ring-1 ring-slate-200"
+            >
+              {entry}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-6 text-[14px] text-slate-600 leading-relaxed">
+          Work that is the same every time, so a person adding nothing to it is a person
+          being wasted on it.
+        </p>
+      </Reveal>
+
+      <Reveal
+        delay={0.1}
+        className="rounded-3xl bg-gradient-to-br from-violet-50 via-white to-white ring-1 ring-violet-200 p-6 sm:p-8 shadow-lg shadow-violet-100"
+      >
+        <IconTitle icon={UserRound} as="p" className="text-lg font-bold text-slate-900">
+          Your team can focus on:
+        </IconTitle>
+        <ul className="mt-5 flex flex-wrap gap-2">
+          {PEOPLE.map((entry) => (
+            <li
+              key={entry}
+              className="rounded-full bg-white px-3.5 py-2 text-[14px] font-semibold text-violet-700 ring-1 ring-violet-200"
+            >
+              {entry}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-6 text-[14px] text-slate-700 leading-relaxed">
+          Conversations where judgment, tone or a decision is the actual product — the ones
+          worth having a person on.
+        </p>
+      </Reveal>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                    Copy                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -505,39 +760,49 @@ const CAPABILITIES = [
 const CHOOSER: readonly (readonly [string, string, string?])[] = [
   ['Automate repetitive WhatsApp communication', 'WhatsApp Business Automation', '/features/whatsapp-automation'],
   ['Add AI to customer interactions', 'AI WhatsApp Automation', '/features/ai-whatsapp-automation'],
-  ['Give multiple employees access to conversations', 'Shared WhatsApp Portal', '/features/shared-whatsapp-portal'],
   ['Control customer-facing business numbers', 'WhatsApp Number Masking', '/features/whatsapp-number-masking'],
   ['Communicate with customers through campaigns', 'WhatsApp Campaigns', '/features/whatsapp-campaigns'],
   ['Let multiple agents manage conversations', 'WhatsApp Team Inbox', '/features/whatsapp-team-inbox'],
-  ['Connect WhatsApp with business systems', 'WhatsApp Business API', '/whatsapp-business-api'],
+  ['Connect WhatsApp with business systems', 'WhatsApp Business API', '/features/whatsapp-business-api'],
 ];
 
-const CONNECTED_FLOW = [
-  'Customer sends a WhatsApp message',
-  'Automation identifies the required workflow',
-  'AI assists with routine communication',
-  'Conversation reaches the appropriate team member',
-  'Team manages the customer interaction through the shared environment',
-  'Follow-up or another business action is triggered',
+/*
+ * The hub's headline diagram, and the one place on the site that reads left to right.
+ *
+ * It was a vertical chain, which is the right shape for "here are the stages of one thing"
+ * but the wrong one here: this section's claim is that the features are *connected*, and a
+ * column of cards with arrows between them reads as a checklist. A pipeline reads as a
+ * pipeline.
+ *
+ * Each node keeps the original sentence as its `detail`, so nothing was shortened to make
+ * the layout work — the short label is added above it, not instead of it.
+ */
+const CONNECTED_FLOW: readonly FlowNode[] = [
+  { icon: MessageSquare, label: 'Customer message', detail: 'Customer sends a WhatsApp message' },
+  { icon: Workflow, label: 'Workflow match', detail: 'Automation identifies the required workflow' },
+  { icon: Bot, label: 'AI assist', detail: 'AI assists with routine communication' },
+  { icon: UserRound, label: 'Right person', detail: 'Conversation reaches the appropriate team member' },
+  { icon: LayoutGrid, label: 'Shared workspace', detail: 'Team manages the customer interaction through the shared environment', active: true },
+  { icon: Repeat, label: 'Next action', detail: 'Follow-up or another business action is triggered' },
 ];
 
 const TEAMS = [
-  { title: 'Sales Teams', body: 'Use automation and shared conversations to manage enquiries, follow-ups, and customer interactions.' },
-  { title: 'Customer Support', body: 'Combine automated responses with team-based conversation management.' },
-  { title: 'Marketing Teams', body: 'Use campaigns and customer communication to support promotions and engagement.' },
-  { title: 'Operations', body: 'Automate recurring notifications, reminders, and operational communication.' },
-  { title: 'Business Owners', body: 'Create a more centralized approach to customer communication and team collaboration.' },
-  { title: 'Service & Field Teams', body: 'Keep customers informed before, during and after a visit without swapping personal numbers.' },
+  { icon: Target, title: 'Sales Teams', body: 'Use automation and shared conversations to manage enquiries, follow-ups, and customer interactions.' },
+  { icon: Headphones, title: 'Customer Support', body: 'Combine automated responses with team-based conversation management.' },
+  { icon: Megaphone, title: 'Marketing Teams', body: 'Use campaigns and customer communication to support promotions and engagement.' },
+  { icon: ClipboardList, title: 'Operations', body: 'Automate recurring notifications, reminders, and operational communication.' },
+  { icon: Building2, title: 'Business Owners', body: 'Create a more centralized approach to customer communication and team collaboration.' },
+  { icon: Wrench, title: 'Service & Field Teams', body: 'Keep customers informed before, during and after a visit without swapping personal numbers.' },
 ];
 
 
 const WHY_FEATURES = [
-  { title: 'Reduce Manual Work', body: "Automate repetitive communication that would otherwise consume your team's time." },
-  { title: 'Improve Response Consistency', body: 'Use structured workflows to create a more predictable customer communication experience.' },
-  { title: 'Support Team Collaboration', body: 'Give multiple users a shared environment for managing business conversations.' },
-  { title: 'Maintain Business Control', body: 'Move customer communication toward a centralized business-managed process.' },
-  { title: 'Prepare for Growth', body: 'Create workflows that can evolve as your customer base, team, and communication volume increase.' },
-  { title: 'Keep Customer Relationships', body: 'Conversations belong to the business, so a customer relationship survives a change of staff.' },
+  { icon: Clock, title: 'Reduce Manual Work', body: "Automate repetitive communication that would otherwise consume your team's time." },
+  { icon: Repeat, title: 'Improve Response Consistency', body: 'Use structured workflows to create a more predictable customer communication experience.' },
+  { icon: Users, title: 'Support Team Collaboration', body: 'Give multiple users a shared environment for managing business conversations.' },
+  { icon: ShieldCheck, title: 'Maintain Business Control', body: 'Move customer communication toward a centralized business-managed process.' },
+  { icon: TrendingUp, title: 'Prepare for Growth', body: 'Create workflows that can evolve as your customer base, team, and communication volume increase.' },
+  { icon: HeartHandshake, title: 'Keep Customer Relationships', body: 'Conversations belong to the business, so a customer relationship survives a change of staff.' },
 ];
 
 const FEATURES_FAQS = [

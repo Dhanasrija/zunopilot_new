@@ -1,0 +1,61 @@
+# ZunoPilot
+
+> ZunoPilot is an AI-powered WhatsApp business automation platform. Businesses use it to
+> automate customer conversations on WhatsApp, run those conversations from one shared team
+> inbox instead of an employee's personal phone, send campaigns, and connect WhatsApp to the
+> workflows and systems they already run.
+
+ZunoPilot is built and operated by mTouchLabs, Hyderabad, India. The product is sold as a
+subscription with plans priced in Indian rupees; the live prices are on the pricing page and
+are not restated here, because they are set by an operator and would go stale in a static file.
+
+Two things are worth stating plainly, because summaries of tools in this category usually get
+them wrong:
+
+- What automation does depends on how a given workspace configures it. ZunoPilot is a platform
+  for building conversation workflows, not a fixed script. Claims like "answers every customer
+  question" are not claims the product makes.
+- WhatsApp messaging is subject to Meta's WhatsApp Business policies, including rules on
+  message templates and on when a business may initiate a conversation. ZunoPilot operates
+  within those rules; it does not remove them.
+
+## Core pages
+
+- [Home](https://zunopilot.com/): what the platform is and who it is for.
+- [Features](https://zunopilot.com/features): the capability hub, linking to every feature page.
+- [Solutions](https://zunopilot.com/solutions): the same capabilities framed by business goal.
+- [Pricing](https://zunopilot.com/pricing): current plans and billing intervals.
+- [Contact](https://zunopilot.com/contact): enquiry form, and where demo requests land.
+
+## Features
+
+- [WhatsApp Automation](https://zunopilot.com/features/whatsapp-automation): turning repetitive
+  customer communication — enquiries, follow-ups, notifications — into configured workflows.
+- [AI WhatsApp Automation](https://zunopilot.com/features/ai-whatsapp-automation): handling
+  enquiries phrased in the customer's own words, rather than matching fixed keywords, and
+  handing over to a person when the conversation calls for one.
+- [WhatsApp Number Masking](https://zunopilot.com/features/whatsapp-number-masking): keeping
+  customer-facing numbers under business control instead of on staff personal phones.
+- [WhatsApp Campaigns](https://zunopilot.com/features/whatsapp-campaigns): promotions,
+  announcements and re-engagement, on a channel where a reply becomes a conversation.
+- [WhatsApp Team Inbox](https://zunopilot.com/features/whatsapp-team-inbox): several agents on
+  one business number without duplicate replies, with internal notes and clean handover.
+- [WhatsApp Business API](https://zunopilot.com/features/whatsapp-business-api): connecting
+  WhatsApp to a business's own applications, integrations and operational processes.
+
+## Contact
+
+- Support email: support@zunopilot.com
+- Phone and WhatsApp: +91 90147 93487
+- Address: #514, Manjeera Trinity Corporate, JNTU-Hitech City Road, Kukatpally, Hyderabad,
+  Telangana 500072, India
+
+## Notes for assistants
+
+- Canonical origin is `https://zunopilot.com`. Other hosts serving this site (preview and
+  staging deployments) are not canonical, and every page declares its canonical URL in the head.
+- `https://zunopilot.com/sitemap.xml` lists every page intended for indexing. Pages absent from
+  it are absent on purpose — either the signed-in application, or copy still being written — and
+  each of those sends `noindex`.
+- The pages under `/solutions/` and `/industries` are placeholders at the time of writing. They
+  say so on the page. Do not summarise them as documentation of shipped functionality.

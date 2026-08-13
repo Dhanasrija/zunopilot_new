@@ -1,23 +1,23 @@
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
 import { useDocumentHead } from '@/lib/document-head';
-import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
-import { SIGNUP_LINK } from '@/lib/marketing-nav';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
-import { EASE_OUT } from '@/components/marketing/primitives';
+import { CtaPair, EASE_OUT } from '@/components/marketing/primitives';
 
 /*
  * The placeholder for a page that is planned, linked, and not written yet.
  *
- * **Why these routes exist at all.** The features and solutions hubs link to seven and
- * six children respectively; two of those thirteen have copy today. The alternative to
- * a page like this is thirteen minus two links that 404, on the two pages the site's
- * whole internal-linking structure is built around — which is worse for a visitor than
- * "we're writing this", and much worse for Google, because a hub whose outbound links
- * are broken is a hub Google stops trusting.
+ * **Why these routes exist at all.** The Solutions dropdown lists six children and the
+ * solutions hub links to the same six. The alternative to a page like this is six links
+ * that 404, on the page the site's internal-linking structure is built around — worse
+ * for a visitor than "we're writing this", and much worse for Google, because a hub
+ * whose outbound links are broken is a hub Google stops trusting.
+ *
+ * **Every feature page is real.** All six under `/features` have full copy and are in
+ * the sitemap; only the solutions tree is placeheld. If that changes, the list below is
+ * the only place to edit.
  *
  * **Every one of them is `noindex`.** A thin page that says "coming soon" competing in
  * search results for "whatsapp number masking" is a worse outcome than not appearing:
@@ -46,73 +46,22 @@ export interface ComingSoonPage {
   related: readonly { label: string; href: string }[];
 }
 
-const FEATURES_HUB = { label: 'All features', href: '/features' };
 const SOLUTIONS_HUB = { label: 'All solutions', href: '/solutions' };
 
+/**
+ * Written feature pages to send someone to instead.
+ *
+ * Three rather than the whole list: the point is one obvious next click, not a second
+ * navigation menu. These three are the ones a visitor who wanted a *solution* page is
+ * most likely to find useful — the capability behind it.
+ */
 const WRITTEN_FEATURES = [
   { label: 'WhatsApp Automation', href: '/features/whatsapp-automation' },
   { label: 'AI WhatsApp Automation', href: '/features/ai-whatsapp-automation' },
+  { label: 'All features', href: '/features' },
 ];
 
 export const COMING_SOON: readonly ComingSoonPage[] = [
-  {
-    path: '/features/shared-whatsapp-portal',
-    title: 'Shared WhatsApp Portal',
-    blurb:
-      'A centralized workspace where authorized team members manage business conversations '
-      + 'together, instead of customer communication living on one employee’s phone. The full '
-      + 'page is being written.',
-    parent: FEATURES_HUB,
-    related: WRITTEN_FEATURES,
-  },
-  {
-    path: '/features/whatsapp-number-masking',
-    title: 'WhatsApp Number Masking',
-    blurb:
-      'How businesses keep greater control over customer-facing numbers while authorized users '
-      + 'continue to manage conversations through the platform. The full page is being written.',
-    parent: FEATURES_HUB,
-    related: WRITTEN_FEATURES,
-  },
-  {
-    path: '/features/whatsapp-campaigns',
-    title: 'WhatsApp Campaigns',
-    blurb:
-      'Organizing customer communication for promotions, announcements, updates and '
-      + 're-engagement as part of a broader WhatsApp strategy. The full page is being written.',
-    parent: FEATURES_HUB,
-    related: WRITTEN_FEATURES,
-  },
-  {
-    path: '/features/whatsapp-team-inbox',
-    title: 'WhatsApp Team Inbox',
-    blurb:
-      'Keeping multi-agent conversations organized so nothing is missed, duplicated, or handled '
-      + 'by the wrong person. The full page is being written.',
-    parent: FEATURES_HUB,
-    related: WRITTEN_FEATURES,
-  },
-  {
-    path: '/whatsapp-business-api',
-    title: 'WhatsApp Business API',
-    blurb:
-      'Connecting WhatsApp with your applications, integrations and operational processes for '
-      + 'scalable business messaging. The full page is being written.',
-    parent: FEATURES_HUB,
-    related: WRITTEN_FEATURES,
-  },
-  {
-    path: '/industries',
-    title: 'WhatsApp Automation by Industry',
-    blurb:
-      'How restaurants, ecommerce, real estate, education and service businesses each use '
-      + 'WhatsApp automation. The full page is being written.',
-    parent: { label: 'Back to home', href: '/' },
-    related: [
-      { label: 'All features', href: '/features' },
-      { label: 'All solutions', href: '/solutions' },
-    ],
-  },
   {
     path: '/solutions/lead-management',
     title: 'WhatsApp Lead Management',
@@ -157,6 +106,18 @@ export const COMING_SOON: readonly ComingSoonPage[] = [
       + 'built around real customer moments. The full page is being written.',
     parent: SOLUTIONS_HUB,
     related: WRITTEN_FEATURES,
+  },
+  {
+    path: '/industries',
+    title: 'WhatsApp Automation by Industry',
+    blurb:
+      'How restaurants, ecommerce, real estate, education and service businesses each use '
+      + 'WhatsApp automation. The full page is being written.',
+    parent: { label: 'Back to home', href: '/' },
+    related: [
+      { label: 'All features', href: '/features' },
+      { label: 'All solutions', href: '/solutions' },
+    ],
   },
 ];
 
@@ -228,21 +189,9 @@ export default function ComingSoon() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.24, ease: EASE_OUT }}
-            className="mt-8 flex flex-col sm:flex-row gap-3 justify-center"
+            className="mt-8"
           >
-            <Link to={SIGNUP_LINK} className="w-full sm:w-auto">
-              <Button className="w-full sm:w-auto h-12 px-7 rounded-full bg-violet-600 hover:bg-violet-700 text-base font-semibold shadow-lg shadow-violet-300/60">
-                Start Free
-              </Button>
-            </Link>
-            <Link to={DEMO_REQUEST_LINK} className="w-full sm:w-auto">
-              <Button
-                variant="outline"
-                className="w-full sm:w-auto h-12 px-7 rounded-full border-2 border-violet-600 text-violet-600 hover:bg-violet-50 text-base font-semibold bg-transparent"
-              >
-                Book a Demo
-              </Button>
-            </Link>
+            <CtaPair />
           </motion.div>
 
           {/*

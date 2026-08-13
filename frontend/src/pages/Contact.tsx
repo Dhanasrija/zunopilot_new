@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth.store';
 import {
   digitsOnly, lettersOnly,
   validateName, validateEmail,
@@ -18,16 +17,10 @@ import {
 } from '@/lib/countries';
 import { INTERESTS, interestFromUrl } from '@/lib/enquiry';
 import { useDocumentHead } from '@/lib/document-head';
+import PublicHeader from '@/components/layout/PublicHeader';
 import { PAGE_HEADS } from '@/lib/page-heads';
 
 
-const NAV = [
-  { label: 'Home', href: '/#home' },
-  { label: 'Features', href: '/#features' },
-  { label: 'Pricing', href: '/#pricing' },
-  { label: 'Testimonial', href: '/#testimonial' },
-  { label: 'Contact Us', href: '/contact', active: true },
-];
 
 type Errors = Partial<Record<'fullName' | 'email' | 'phone' | 'interest' | 'message' | 'agree', string>>;
 
@@ -48,7 +41,6 @@ export default function Contact() {
   const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
-  const token = useAuthStore((s) => s.token);
 
   const setField = (k: keyof typeof form, v: any) => {
     setForm((f) => ({ ...f, [k]: v }));
@@ -145,48 +137,20 @@ export default function Contact() {
       className="min-h-screen bg-no-repeat bg-cover bg-center flex flex-col"
       style={{ backgroundImage: "url('/login-bg.png')" }}
     >
-      <header className="bg-transparent">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 lg:h-20 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/app-logo.png" alt="ZunoPilot" className="h-9 w-auto" />
-            <span className="text-xl font-bold tracking-tight text-slate-900">ZunoPilot</span>
-          </Link>
-
-          <nav className="hidden lg:flex items-center gap-8">
-            {NAV.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className={`text-[15px] font-medium transition-colors ${item.active ? 'text-violet-600' : 'text-slate-700 hover:text-slate-900'
-                  }`}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-3">
-            {token ? (
-              <Link to="/dashboard">
-                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">Go to Dashboard</Button>
-              </Link>
-            ) : (
-              <>
-                <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">Sign in</Link>
-                <Link to="/signup">
-                  <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">Start Free Trial</Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
+      <PublicHeader />
 
       <main className="flex-1 flex items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">
           <div className="text-center lg:text-left">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900">
-              Let's Start the<br />
+              {/*
+                The space before the `<br />` is load-bearing. Without it the heading's
+                `textContent` is "Let's Start theConversation" — which is what Google indexes
+                and what a screen reader announces, while the page looks perfectly fine
+                because the `<br />` does the visual separating. Same defect
+                `AnimatedHeading` uses U+00A0 to avoid; see the note in `marketing.test.tsx`.
+              */}
+              Let&rsquo;s Start the{' '}<br />
               <span className="text-violet-600">Conversation</span>
             </h1>
             <p className="mt-5 text-base sm:text-lg text-slate-600 max-w-md mx-auto lg:mx-0">

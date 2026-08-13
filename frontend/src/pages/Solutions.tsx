@@ -331,7 +331,7 @@ export default function Solutions() {
           <StepRail steps={JOURNEY_STAGES.slice(0, 3)} columns={3} />
           <StepRail steps={JOURNEY_STAGES.slice(3)} columns={3} />
         </div>
-        <p className="mt-8 text-center text-base text-slate-600 max-w-2xl mx-auto">
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
           This creates a more connected communication experience instead of treating every
           WhatsApp message as a separate task.
         </p>
@@ -441,7 +441,7 @@ export default function Solutions() {
               </span>
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-slate-900">{trigger}</p>
-                <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600">
                   <ArrowRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-violet-500" />
                   {outcome}
                 </p>
@@ -455,7 +455,7 @@ export default function Solutions() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={viewport}
           transition={{ duration: 0.5, ease: EASE_OUT }}
-          className="mt-10 text-center text-base text-slate-600 max-w-2xl mx-auto"
+          className="mt-10 text-center text-base text-slate-700 max-w-2xl mx-auto"
         >
           This makes WhatsApp a more useful part of your overall business process.
         </motion.p>
@@ -528,8 +528,7 @@ const COMBINATIONS = [
     items: [
       'WhatsApp automation',
       'AI assistance',
-      'Shared WhatsApp Portal',
-      'Team Inbox',
+      'WhatsApp Team Inbox',
       'Follow-up workflows',
     ],
   },

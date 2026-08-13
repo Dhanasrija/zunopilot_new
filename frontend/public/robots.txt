@@ -1,50 +1,101 @@
-# ZunoPilot — what crawlers may index.
+# robots.txt for zunopilot.com
 #
-# The Disallow list below is NOT about secrecy. Every path in it is behind authentication
-# and returns no data to an anonymous visitor. It is there because this is a single-page
-# app: /dashboard, /inbox and the rest all return HTTP 200 with the *same* HTML as the home
-# page, so without this a crawler would index two dozen duplicates of "/" under URLs that
-# show a login redirect to anyone who clicks them.
+# **This file did not exist.** Three places in the codebase already referred to it as though it
+# did — `public/sitemap.xml` says /login, /signup and /onboarding are `Disallow`ed here, and
+# `src/lib/document-head.ts` twice explains that the app's own routes are kept out of the index
+# "in robots.txt". None of that was true. With no robots.txt a crawler gets a 404, assumes
+# everything is fair game, and finds no sitemap unless it stumbles on the URL.
 #
-# Note this file ships to every environment it is deployed to, and it says "allow". A
-# publicly reachable staging host therefore needs `X-Robots-Tag: noindex` set at the host
-# level — a static file cannot tell where it is being served from.
+# What that cost, concretely: nothing was *blocked* — a missing robots.txt is permissive, so the
+# marketing pages were always crawlable — but the sitemap was never advertised, and the
+# authenticated app shell at /dashboard, /inbox and friends was crawlable. Those routes render a
+# redirect to /login for an anonymous visitor, so what Google could index there is a login page
+# duplicated across a dozen URLs.
+#
+# Rules below are deliberately narrow. The instinct with robots.txt is to disallow anything that
+# looks internal, and it is the wrong instinct: a `Disallow` on a page that is already noindexed
+# stops the crawler *reading* the noindex, so the URL can stay in the index as a bare link with
+# no title. Disallow is for "don't waste crawl budget here", not for "keep this out of Google".
 
 User-agent: *
 
-# The five genuinely public pages are allowed by omission: /, /pricing, /privacy, /terms
-# and /contact.
+# The public marketing site is fully crawlable. Stated explicitly rather than relied on, because
+# an `Allow` ahead of the `Disallow` block is what keeps a future broad rule from swallowing it.
+Allow: /$
+Allow: /features
+Allow: /solutions
+Allow: /pricing
+Allow: /contact
+Allow: /privacy
+Allow: /terms
 
-# Signing in is not a search result anyone wants, and an indexed login page competes with
-# the home page for the brand query.
-Disallow: /login
+# Rendering resources. **Never block these.** Google renders the page to index it, and this is a
+# client-rendered SPA — a disallowed /assets/ directory means Google sees an empty <div id="root">
+# and indexes a blank page. This line exists to make that mistake harder to make later.
+Allow: /assets/
+Allow: /*.css$
+Allow: /*.js$
+Allow: /og-image.png
+
+# **Not listed above, and not `Disallow`ed either: /industries and /solutions/<child>.**
+# Those six render a "coming soon" placeholder that sets `noindex, follow` in its own head, and
+# they are absent from sitemap.xml. Blocking them here would be the classic mistake — a crawler
+# that cannot fetch the page cannot read the `noindex`, so the URL can linger in the index as a
+# bare title-less link. They stay crawlable precisely so the noindex is seen and obeyed.
+
+# **`/login` is deliberately NOT disallowed**, and that is a change from what this file used
+# to say. Every "Get Started" on the site now points at it, so it is the most internally-linked
+# URL here. It sets `noindex, follow` in its own head — and per the note above, a `Disallow`
+# would stop the crawler *reading* that directive, leaving a heavily-linked URL that Google
+# knows about, cannot fetch, and may list as a bare title-less result. Crawlable + noindex is
+# what actually keeps it out.
+#
+# The rest stay blocked: they are not linked from anywhere public, so there is no noindex for a
+# crawler to miss, and blocking them saves the crawl.
 Disallow: /signup
 Disallow: /onboarding
+Disallow: /support-session
 
-# The authenticated app. See the note above: duplicates, not secrets.
+# The authenticated application. Every one of these renders a redirect to /login for an anonymous
+# crawler, so crawling them produces a dozen near-identical login pages and no value.
 Disallow: /dashboard
 Disallow: /inbox
 Disallow: /orders
-Disallow: /customers
+Disallow: /catalogue
 Disallow: /menu
-Disallow: /templates
-Disallow: /automation
+Disallow: /customers
+Disallow: /leads
+Disallow: /tickets
+Disallow: /campaigns
 Disallow: /workflows
 Disallow: /legacy-workflows
 Disallow: /assistants
 Disallow: /connectors
-Disallow: /analytics
-Disallow: /leads
-Disallow: /campaigns
-Disallow: /tickets
 Disallow: /team
 Disallow: /roles
-Disallow: /settings
 Disallow: /billing
-Disallow: /invoices
+Disallow: /automation
+Disallow: /knowledge
+Disallow: /templates
+Disallow: /analytics
 Disallow: /whatsapp
+Disallow: /settings
+Disallow: /invoices
 
-# A support engineer's consent link, which is single-use and tenant-specific.
-Disallow: /support-session
+# Tracking parameters. Every campaign link is a distinct URL to a crawler, and each one would be
+# a duplicate of the clean page. The canonical tag already collapses them — `PAGE_HEADS` builds
+# canonicals from a fixed path, never from `window.location` — so this is belt and braces against
+# crawl budget being spent on ?utm_source variants rather than a correctness fix.
+Disallow: /*?utm_
+Disallow: /*&utm_
+Disallow: /*?fbclid=
+Disallow: /*?gclid=
 
+# The sitemap. Absolute URL, as the specification requires.
 Sitemap: https://zunopilot.com/sitemap.xml
+
+# /llms.txt — a plain-language summary of what ZunoPilot is and where the canonical pages are,
+# for assistants that read a site rather than crawl it. Not part of the robots specification, so
+# no crawler is required to look; naming it here is how the ones that do find it. Explicitly
+# allowed for the same reason og-image.png is: so a future broad `Disallow` cannot swallow it.
+Allow: /llms.txt

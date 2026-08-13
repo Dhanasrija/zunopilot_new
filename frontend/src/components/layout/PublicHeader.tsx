@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
-import { PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
+import { CTA_LABEL, PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
 
 /**
  * The lightweight header for the legal pages and the 404.
@@ -16,6 +16,10 @@ import { PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
  * `lib/marketing-nav.ts`, which is the whole reason the module exists: adding
  * `/solutions` to the site should not be an edit anyone can forget to make here.
  */
+
+/** Same box as `SiteHeader`'s, so the two headers do not differ by four pixels. */
+const HEADER_CTA =
+  'rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 min-w-[9.5rem] text-sm shadow-md shadow-violet-200';
 
 export default function PublicHeader() {
   const token = useAuthStore((s) => s.token);
@@ -53,9 +57,7 @@ export default function PublicHeader() {
         <div className="flex items-center gap-3">
           {token ? (
             <Link to="/dashboard">
-              <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">
-                Go to Dashboard
-              </Button>
+              <Button className={HEADER_CTA}>Go to Dashboard</Button>
             </Link>
           ) : (
             <>
@@ -63,9 +65,7 @@ export default function PublicHeader() {
                 Sign in
               </Link>
               <Link to={SIGNUP_LINK}>
-                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">
-                  Start Free
-                </Button>
+                <Button className={HEADER_CTA}>{CTA_LABEL}</Button>
               </Link>
             </>
           )}

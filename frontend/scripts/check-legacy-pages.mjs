@@ -36,6 +36,7 @@ const LEGACY = [
   // most of their utilities come from `components/marketing/primitives.tsx`, so a token
   // narrowed in tailwind.config.js would break eight pages from one file rather than one.
   'src/components/marketing/primitives.tsx',
+  'src/components/marketing/motion-kit.tsx',
   'src/components/marketing/SiteHeader.tsx',
   'src/components/marketing/SiteFooter.tsx',
   'src/pages/Features.tsx',
@@ -46,6 +47,10 @@ const LEGACY = [
   'src/pages/ComingSoon.tsx',
   'src/pages/features/WhatsAppAutomation.tsx',
   'src/pages/features/AiWhatsAppAutomation.tsx',
+  'src/pages/features/NumberMasking.tsx',
+  'src/pages/features/Campaigns.tsx',
+  'src/pages/features/BusinessApi.tsx',
+  'src/pages/features/TeamInbox.tsx',
 ];
 
 /**

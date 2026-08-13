@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, beforeEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import Landing from './Landing';
@@ -7,10 +7,13 @@ import Features from './Features';
 import Solutions from './Solutions';
 import WhatsAppAutomation from './features/WhatsAppAutomation';
 import AiWhatsAppAutomation from './features/AiWhatsAppAutomation';
-import DetailPage from './DetailPage';
-import { DETAIL_PAGES } from '@/lib/marketing-content';
+import NumberMasking from './features/NumberMasking';
+import Campaigns from './features/Campaigns';
+import BusinessApi from './features/BusinessApi';
+import TeamInbox from './features/TeamInbox';
+import ComingSoon, { COMING_SOON } from './ComingSoon';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { FEATURE_LINKS, PRIMARY_NAV, SOLUTION_LINKS } from '@/lib/marketing-nav';
+import { FEATURE_LINKS, LEGAL_LINKS, PRIMARY_NAV, SOLUTION_LINKS } from '@/lib/marketing-nav';
 
 /*
  * The public website.
@@ -76,6 +79,10 @@ const HUBS: readonly [string, string, ReactNode, string][] = [
   ['solutions hub', '/solutions', <Solutions />, 'WhatsApp Business Solutions for Sales, Support & Customer Engagement'],
   ['whatsapp automation', '/features/whatsapp-automation', <WhatsAppAutomation />, 'WhatsApp Automation That Keeps Your Business Moving'],
   ['ai automation', '/features/ai-whatsapp-automation', <AiWhatsAppAutomation />, 'AI WhatsApp Automation for Smarter Customer Conversations'],
+  ['number masking', '/features/whatsapp-number-masking', <NumberMasking />, 'WhatsApp Number Masking for Business'],
+  ['campaigns', '/features/whatsapp-campaigns', <Campaigns />, 'WhatsApp Campaigns for More Effective Customer Outreach'],
+  ['business api', '/features/whatsapp-business-api', <BusinessApi />, 'WhatsApp Business API for Scalable Customer Communication'],
+  ['team inbox', '/features/whatsapp-team-inbox', <TeamInbox />, 'A WhatsApp Team Inbox That Keeps Agents Out of Each Other\u2019s Way'],
 ];
 
 /**
@@ -90,8 +97,8 @@ const HUBS: readonly [string, string, ReactNode, string][] = [
  */
 const ALL_PAGES: readonly [string, string, ReactNode, string][] = [
   ...HUBS,
-  ...DETAIL_PAGES.map((p) => [
-    p.headKey, p.path, <DetailPage />, p.h1.join(' '),
+  ...COMING_SOON.map((p) => [
+    `coming soon: ${p.path}`, p.path, <ComingSoon />, p.title,
   ] as [string, string, ReactNode, string]),
 ];
 
@@ -170,39 +177,16 @@ describe('FAQ structured data', () => {
     expect(faqGraphs()).toHaveLength(0);
   });
 
-  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path] as const))(
-    '%s carries its own FAQ graph',
-    (_key, path) => {
-      at(path, <DetailPage />);
-      expect(faqGraphs()).toHaveLength(1);
-      expect(faqGraphs()[0].mainEntity.length).toBeGreaterThanOrEqual(3);
-      cleanup();
-    },
-  );
+  it('a coming-soon page carries no FAQ graph', () => {
+    // It has no questions on it. Markup describing questions a page does not answer is a
+    // rich-result violation, and the placeholder is exactly where one would get copied in
+    // by accident.
+    at('/solutions/lead-management', <ComingSoon />);
+    expect(faqGraphs()).toHaveLength(0);
+  });
 });
 
-describe('breadcrumbs', () => {
-  const crumbGraph = () => [...document.querySelectorAll('script[type="application/ld+json"]')]
-    .map((node) => JSON.parse(node.textContent ?? '{}'))
-    .find((graph) => graph['@type'] === 'BreadcrumbList');
-
-  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path, p.crumbs.length] as const))(
-    '%s emits a BreadcrumbList ending at itself',
-    (_key, path, depth) => {
-      at(path, <DetailPage />);
-      const graph = crumbGraph();
-      expect(graph).toBeTruthy();
-      expect(graph.itemListElement).toHaveLength(depth);
-      expect(graph.itemListElement.at(-1).item).toBe(`https://zunopilot.com${path}`);
-      // Positions are 1-based and contiguous, which Google requires.
-      expect(graph.itemListElement.map((e: { position: number }) => e.position))
-        .toEqual(Array.from({ length: depth }, (_, i) => i + 1));
-      cleanup();
-    },
-  );
-});
-
-describe('**every page is indexable**', () => {
+describe('indexability', () => {
   beforeEach(() => {
     document.head.innerHTML = `
       <meta name="robots" content="index, follow, max-image-preview:large" />
@@ -211,10 +195,11 @@ describe('**every page is indexable**', () => {
     `;
   });
 
-  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path] as const))(
+  it.each(HUBS.map((h) => [h[0], h[1]] as const))(
     '%s canonicalises to itself and is not noindex',
-    (_key, path) => {
-      at(path, <DetailPage />);
+    (_name, path) => {
+      const entry = HUBS.find((h) => h[1] === path)!;
+      at(path, entry[2]);
 
       expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href'))
         .toBe(`https://zunopilot.com${path}`);
@@ -225,21 +210,286 @@ describe('**every page is indexable**', () => {
     },
   );
 
-  it('every detail page names a head that exists, and the two agree on the path', () => {
-    for (const page of DETAIL_PAGES) {
-      const head = PAGE_HEADS[page.headKey as keyof typeof PAGE_HEADS];
-      expect(head, `no PAGE_HEADS entry for "${page.headKey}"`).toBeTruthy();
-      expect(head.path).toBe(page.path);
+  /*
+   * **The placeholders must be the exact opposite, and that is the assertion worth having.**
+   *
+   * A "coming soon" page that ranks for "whatsapp lead management" is worse than no page:
+   * it burns the click and teaches the ranking system that the site does not answer the
+   * query. `noindex, follow` keeps the outbound links working while removing the page from
+   * results, and no canonical is emitted because there is nothing to canonicalise to.
+   */
+  it.each(COMING_SOON.map((p) => [p.path] as const))(
+    '%s is noindex and claims no canonical',
+    (path) => {
+      at(path, <ComingSoon />);
+
+      expect(document.querySelector('meta[name="robots"]')?.getAttribute('content'))
+        .toMatch(/noindex/);
+      // **No canonical tag at all**, not one pointing at the home page. `path: null` removes
+      // it. Canonicalising a placeholder to `/` would be the exact "this is a duplicate of the
+      // home page" signal that once dropped four real pages out of the index; canonicalising
+      // it to itself would ask Google to index the thing the `noindex` just refused.
+      expect(document.querySelector('link[rel="canonical"]')).toBeNull();
+
+      cleanup();
+    },
+  );
+
+  it('**no placeholder path has a head or a sitemap entry**', () => {
+    // The inverse of the check in `document-head.test.ts`, which proves every head is in the
+    // sitemap. This proves the placeholders are in neither — the two together are what stop
+    // an unwritten page being advertised for indexing.
+    const advertised = new Set(Object.values(PAGE_HEADS).map((h) => h.path));
+    for (const page of COMING_SOON) {
+      expect(advertised.has(page.path), `${page.path} should not have a PAGE_HEADS entry`)
+        .toBe(false);
     }
   });
 });
 
+describe('the workflow diagrams', () => {
+  /*
+   * Two different shapes, two different guarantees.
+   *
+   * **The hub is a pipeline now.** `/features` argues that the features are connected, and a
+   * vertical column of cards with arrows down the side reads as a checklist instead. So that
+   * section uses the horizontal variant, and what is worth pinning is that its connectors are
+   * *between* nodes — n stages, n-1 connectors, never a trailing one pointing at nothing.
+   *
+   * **The old drawn connector must not come back.** Before the current design there was a
+   * violet gradient rule with a dot at its end sitting between each pair of cards, which read
+   * as a stray purple mark rather than as "and then". Both assertions below name those exact
+   * classes, on both diagram shapes, because "it looks fine" is not something a test can see.
+   *
+   * The vertical chains still use a real down arrow, which the second test holds.
+   */
+  it('draw the hub as one continuous rail with a node per stage', () => {
+    const { container } = at('/features', <Features />);
+    const html = container.innerHTML;
+
+    // Nothing left of the drawn connector that used to sit between each pair of cards.
+    expect(html).not.toContain('from-violet-300');
+    expect(html).not.toContain('bg-violet-500');
+
+    // The stepper: one rail, six numbered nodes, and a detail card for each of them. The
+    // count matters — the six stages come from one array, and a layout that silently renders
+    // five of them is the kind of thing nobody notices in a screenshot.
+    const stepper = [...container.querySelectorAll('ol')]
+      .find((ol) => ol.className.includes('md:grid-cols-6'));
+    expect(stepper, 'no stepper on the features hub').toBeTruthy();
+    expect(stepper!.querySelectorAll(':scope > li').length).toBe(6);
+
+    const cards = [...container.querySelectorAll('ol')]
+      .find((ol) => ol.className.includes('lg:grid-cols-3') && ol !== stepper);
+    expect(cards, 'no detail cards under the stepper').toBeTruthy();
+    expect(cards!.querySelectorAll(':scope > li').length).toBe(6);
+    cleanup();
+  });
+
+  it('put exactly one arrow between each pair of steps in a vertical chain', () => {
+    // n steps means n-1 connectors — never a trailing arrow pointing at nothing.
+    // The automation page is picked because its worked example is the longest vertical
+    // chain on the site; a page without one would vacuously pass.
+    const { container } = at('/features/whatsapp-automation', <WhatsAppAutomation />);
+    const flow = [...container.querySelectorAll('ol')]
+      .find((ol) => ol.querySelector('svg.lucide-arrow-down'));
+
+    expect(flow, 'no flow chain rendered').toBeTruthy();
+    const steps = flow!.querySelectorAll(':scope > li').length;
+    expect(flow!.querySelectorAll('svg.lucide-arrow-down').length).toBe(steps - 1);
+    cleanup();
+  });
+});
+
+describe('the header dropdowns', () => {
+  /*
+   * **Two of them now, and the same assertions have to hold for both.**
+   *
+   * Solutions grew a dropdown after Features had one, and the failure mode with a second
+   * instance of an interactive component is that it is *nearly* the first: the panel opens
+   * but the parent stopped being a link, or the children render but the mobile drawer
+   * lists only one group's. Parameterising over the table is what makes adding a third
+   * dropdown a zero-line change to this suite.
+   */
+  const DROPDOWNS = [
+    ['Features', FEATURE_LINKS, '/features'],
+    ['Solutions', SOLUTION_LINKS, '/solutions'],
+  ] as const;
+
+  it('are exactly the two entries that declare children', () => {
+    expect(PRIMARY_NAV.filter((n) => n.children).map((n) => n.label))
+      .toEqual(['Features', 'Solutions']);
+  });
+
+  it.each(DROPDOWNS)('%s lists its own pages', (label, links) => {
+    const entry = PRIMARY_NAV.find((n) => n.label === label)!;
+    expect(entry.children).toEqual(links);
+  });
+
+  it.each(DROPDOWNS)(
+    '%s **stays closed until asked**, then lists every child with its own href',
+    (label, links) => {
+      const { container } = at('/', <Landing />);
+      const toggle = screen.getByRole('button', { name: new RegExp(`${label} menu`, 'i') });
+
+      // Closed by default, and it says so — a dropdown that lies about `aria-expanded`
+      // is invisible to a screen reader even when it works with a mouse.
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle.getAttribute('aria-haspopup')).toBe('true');
+
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+      // Every child is present, and points at its own page rather than at the hub.
+      const panel = toggle.closest('div')!;
+      for (const child of links) {
+        const anchors = [...panel.querySelectorAll(`a[href="${child.href}"]`)];
+        expect(anchors.length, `${child.label} is missing from the ${label} dropdown`)
+          .toBeGreaterThan(0);
+        expect(within(anchors[0] as HTMLElement).getByText(child.label)).toBeTruthy();
+      }
+      cleanup();
+    },
+  );
+
+  it.each(DROPDOWNS)('%s keeps the parent a real link to the hub', (_label, _links, hub) => {
+    // The whole point of the chevron being separate: the hub itself is a page, and a
+    // parent that only opens a menu makes it unreachable from the nav.
+    const { container } = at('/', <Landing />);
+    const nav = container.querySelector('nav')!;
+    expect(nav.querySelector(`a[href="${hub}"]`)).toBeTruthy();
+    cleanup();
+  });
+
+  it.each(DROPDOWNS)('%s closes on Escape', (label) => {
+    at('/', <Landing />);
+    const toggle = screen.getByRole('button', { name: new RegExp(`${label} menu`, 'i') });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    cleanup();
+  });
+
+  it('lists every child of both groups in the mobile drawer without needing hover', () => {
+    // Touch has no hover, so the drawer shows them outright.
+    const { container } = at('/', <Landing />);
+    fireEvent.click(screen.getByRole('button', { name: /^menu$/i }));
+    const drawer = container.querySelector('.lg\\:hidden.border-t')!;
+    for (const child of [...FEATURE_LINKS, ...SOLUTION_LINKS]) {
+      expect(
+        drawer.querySelector(`a[href="${child.href}"]`),
+        `${child.label} is missing from the mobile drawer`,
+      ).toBeTruthy();
+    }
+    cleanup();
+  });
+
+  /*
+   * **Testimonial and FAQ are gone from the bar.** Asserted by absence, because the
+   * request was specifically that they stop being top-level nav items and the regression
+   * would be someone re-adding them to `PRIMARY_NAV` without the cross-page consequence
+   * in mind — see the note on `PRIMARY_NAV` itself.
+   */
+  it('shows no Testimonial or FAQ entry', () => {
+    const labels = PRIMARY_NAV.map((n) => n.label);
+    expect(labels).not.toContain('Testimonial');
+    expect(labels).not.toContain('FAQ');
+    expect(labels).toEqual(['Home', 'Features', 'Solutions', 'Pricing', 'Contact Us']);
+  });
+});
+
+describe('the travelling highlight', () => {
+  /*
+   * The diagrams light one stage at a time and the lit stage moves. Two ways that breaks, both
+   * invisible in a screenshot taken at the wrong moment: every node lit at once (the condition
+   * inverted), or none lit (the index out of range). So this asserts the invariant that holds at
+   * every tick — exactly one.
+   *
+   * jsdom runs no timers here, so what is checked is the resting frame, which is also what a
+   * reader with reduced motion sees permanently. That makes it the frame most worth pinning.
+   */
+  it('lights exactly one stage of the connected-workflow stepper', () => {
+    const { container } = at('/features', <Features />);
+    const stepper = [...container.querySelectorAll('ol')]
+      .find((ol) => ol.className.includes('md:grid-cols-6'))!;
+
+    const lit = [...stepper.querySelectorAll(':scope > li')]
+      .filter((li) => li.innerHTML.includes('bg-violet-600'));
+
+    expect(lit.length, 'the stepper should light exactly one stage').toBe(1);
+    cleanup();
+  });
+});
+
+describe('icons sit before the title, not above it', () => {
+  /*
+   * The requirement is "icon immediately before the start of the title", and the failure
+   * mode is silent: an icon rendered as a sibling *above* the heading looks fine in
+   * isolation and only shows up as ragged heading baselines across a grid of cards.
+   *
+   * So this asserts the DOM relationship rather than the appearance — the icon has to be
+   * inside the heading element and the heading's first element child. A screenshot cannot
+   * tell those two layouts apart; this can.
+   */
+  it('renders the icon inside the heading, as its first child', () => {
+    const { container } = at('/features/whatsapp-team-inbox', <TeamInbox />);
+    const iconHeadings = [...container.querySelectorAll('h3')]
+      .filter((h) => h.querySelector('svg'));
+
+    expect(iconHeadings.length, 'no icon headings rendered').toBeGreaterThan(0);
+    for (const heading of iconHeadings) {
+      const first = heading.firstElementChild!;
+      expect(first.querySelector('svg'), 'the icon is not the first thing in the heading').toBeTruthy();
+      // And the title text still follows it, in the same heading.
+      expect(headingText(heading).length).toBeGreaterThan(2);
+    }
+    cleanup();
+  });
+});
+
+describe('the team inbox hub links to every sibling feature', () => {
+  // The ecosystem figure replaced a "related pages" list. A diagram whose spokes are not
+  // real links would be a downgrade for both navigation and crawling, so this pins that
+  // every one of the five is an anchor with its own href.
+  it('gives all five spokes a real anchor', () => {
+    const { container } = at('/features/whatsapp-team-inbox', <TeamInbox />);
+    for (const href of [
+      '/features/whatsapp-automation',
+      '/features/ai-whatsapp-automation',
+      '/features/whatsapp-campaigns',
+      '/features/whatsapp-number-masking',
+      '/features/whatsapp-business-api',
+    ]) {
+      expect(container.querySelector(`a[href="${href}"]`), `${href} is not linked`).toBeTruthy();
+    }
+    cleanup();
+  });
+});
+
 describe('the link graph has no dangling ends', () => {
+  /*
+   * Every route that exists: the bespoke feature pages, the two hubs, the legal and
+   * conversion pages, and the placeholders under `/solutions` and `/industries`.
+   *
+   * The bespoke half is written out rather than derived, because there is nothing to
+   * derive it from — those pages are components, not table rows. Which means this list
+   * is the thing that goes stale when a placeholder graduates to its own file, and the
+   * assertion below is what catches it.
+   */
+  const BESPOKE = [
+    '/features/whatsapp-automation',
+    '/features/ai-whatsapp-automation',
+    '/features/whatsapp-number-masking',
+    '/features/whatsapp-campaigns',
+    '/features/whatsapp-business-api',
+    '/features/whatsapp-team-inbox',
+  ];
   const ROUTES = new Set<string>([
     '/', '/features', '/solutions', '/pricing', '/contact', '/privacy', '/terms',
-    '/features/whatsapp-automation', '/features/ai-whatsapp-automation',
     '/signup', '/login',
-    ...DETAIL_PAGES.map((entry) => entry.path),
+    ...BESPOKE,
+    ...COMING_SOON.map((entry) => entry.path),
   ]);
 
   const linkTable = [
@@ -254,17 +504,30 @@ describe('the link graph has no dangling ends', () => {
     expect(ROUTES.has(target)).toBe(true);
   });
 
-  it('every "related pages" link on a detail page resolves', () => {
-    for (const page of DETAIL_PAGES) {
-      for (const link of page.related) {
+  it('every "in the meantime" link on a placeholder resolves', () => {
+    for (const page of COMING_SOON) {
+      for (const link of [...page.related, page.parent]) {
         expect(ROUTES.has(link.href), `${page.path} → ${link.href}`).toBe(true);
       }
     }
   });
 
-  it('the home page anchors the header points at all exist', () => {
+  /*
+   * **The header carries no fragment links any more, and that is now the assertion.**
+   *
+   * `Testimonial` and `FAQ` were `/#testimonial` and `/#faq` sitting between real routes,
+   * so on every page except the home page two of the seven nav items navigated to a
+   * different page and then scrolled. Both sections still exist on the home page; neither
+   * is a top-level destination. This fails if one is put back without the cross-page
+   * behaviour being thought about again.
+   */
+  it('the header links to routes only, never to home-page fragments', () => {
+    expect(PRIMARY_NAV.filter((n) => n.anchor)).toEqual([]);
+  });
+
+  it('the home page still has the sections the footer links to', () => {
     const { container } = at('/', <Landing />);
-    for (const entry of PRIMARY_NAV.filter((n) => n.anchor)) {
+    for (const entry of LEGAL_LINKS.filter((n) => n.anchor)) {
       const id = entry.href.replace('/#', '');
       expect(container.querySelector(`#${id}`), `#${id} is missing from the home page`).toBeTruthy();
     }

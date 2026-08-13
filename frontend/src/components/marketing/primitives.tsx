@@ -1,13 +1,13 @@
 import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Check, Plus } from 'lucide-react';
+import { ArrowDown, ArrowRight, Check, Plus } from 'lucide-react';
 import {
   motion, AnimatePresence, useScroll, useSpring, type Variants,
 } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useFaqSchema, type FaqEntry } from '@/lib/json-ld';
 import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
-import { SIGNUP_LINK } from '@/lib/marketing-nav';
+import { CTA_LABEL, SIGNUP_LINK } from '@/lib/marketing-nav';
 
 /*
  * The building blocks every marketing page is made of.
@@ -235,7 +235,7 @@ export function ScrollProgress() {
 export function Breadcrumbs({ crumbs }: { crumbs: readonly { name: string; path: string }[] }) {
   return (
     <nav aria-label="Breadcrumb" className="mb-6">
-      <ol className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-slate-500">
+      <ol className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-slate-600">
         {crumbs.map((crumb, i) => (
           <li key={crumb.path} className="flex items-center gap-2">
             {i < crumbs.length - 1 ? (
@@ -293,7 +293,7 @@ export function SectionHead({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={viewport}
           transition={{ duration: 0.6, ease: EASE_OUT }}
-          className="mt-4 space-y-3 text-base sm:text-lg text-slate-500 leading-relaxed"
+          className="mt-4 space-y-3 text-base sm:text-lg text-slate-600 leading-relaxed"
         >
           {lead}
         </motion.div>
@@ -389,7 +389,14 @@ export function CheckCards({
 export interface Tile {
   title: string;
   body?: string;
-  /** Optional lucide icon component, rendered above the title. */
+  /**
+   * Optional lucide icon, rendered **immediately before the title text** on the same row.
+   *
+   * It used to sit on its own line above the title. That is the easier layout and the
+   * worse one: it pushes the title down, so a grid of cards has its headings at
+   * inconsistent heights, and the icon ends up reading as decoration rather than as a
+   * label for the thing next to it.
+   */
   icon?: ComponentType<{ className?: string }>;
 }
 
@@ -424,18 +431,28 @@ export function TileGrid({
               {String(i + 1).padStart(2, '0')}
             </span>
           )}
-          {tile.icon && (
-            <motion.span
-              className="inline-grid place-items-center h-11 w-11 rounded-2xl bg-violet-100 text-violet-600 ring-1 ring-violet-200/70"
-              whileHover={{ rotate: -6, scale: 1.08 }}
-              transition={CARD_SPRING}
-            >
-              <tile.icon className="h-5 w-5" />
-            </motion.span>
-          )}
-          <h3 className={`${numbered || tile.icon ? 'mt-4' : ''} text-lg font-bold text-slate-900`}>{tile.title}</h3>
+          {/*
+            Icon and title on one row, icon first.
+
+            `items-start` with the badge nudged down by 2px rather than `items-center`,
+            because a two-line title with `items-center` drags the icon to the vertical
+            middle of the block and it stops looking attached to the first line.
+          */}
+          <h3
+            className={`${numbered ? 'mt-4' : ''} flex items-start gap-3 text-lg font-bold text-slate-900`}
+          >
+            {tile.icon && (
+              <span
+                aria-hidden
+                className="mt-0.5 inline-grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600 ring-1 ring-violet-200/70 transition-colors duration-200 group-hover:bg-violet-600 group-hover:text-white"
+              >
+                <tile.icon className="h-5 w-5" />
+              </span>
+            )}
+            <span className={tile.icon ? 'min-w-0 pt-1.5' : 'min-w-0'}>{tile.title}</span>
+          </h3>
           {tile.body && (
-            <p className="mt-2 text-sm text-slate-500 leading-relaxed">{tile.body}</p>
+            <p className="mt-2 text-sm text-slate-700 leading-relaxed">{tile.body}</p>
           )}
         </motion.div>
       ))}
@@ -448,6 +465,8 @@ export interface Step {
   kicker?: string;
   title: string;
   body: string;
+  /** Optional lucide icon, rendered immediately before the title text. */
+  icon?: ComponentType<{ className?: string }>;
 }
 
 /** The numbered "how it works" rail. */
@@ -471,16 +490,26 @@ export function StepRail({
         <motion.li
           key={step.index}
           variants={item}
-          whileHover={{ y: -6 }}
+          whileHover={{ y: -6, boxShadow: '0 20px 44px -20px rgb(96 73 231 / 0.28)' }}
           transition={CARD_SPRING}
-          className="relative h-full rounded-3xl bg-white ring-1 ring-slate-200/80 p-6"
+          className="group relative h-full rounded-3xl bg-white ring-1 ring-slate-200/80 p-6"
         >
-          <p className="text-sm font-semibold text-violet-600">
+          <p className="text-sm font-semibold text-violet-600 tabular-nums">
             {step.index}
             {step.kicker && <span className="text-slate-400"> — {step.kicker}</span>}
           </p>
-          <h3 className="mt-3 text-lg font-bold text-slate-900">{step.title}</h3>
-          <p className="mt-2 text-sm text-slate-500 leading-relaxed">{step.body}</p>
+          <h3 className="mt-3 flex items-start gap-2.5 text-lg font-bold text-slate-900">
+            {step.icon && (
+              <span
+                aria-hidden
+                className="mt-0.5 inline-grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600 ring-1 ring-violet-200/70 transition-colors duration-200 group-hover:bg-violet-600 group-hover:text-white"
+              >
+                <step.icon className="h-4 w-4" />
+              </span>
+            )}
+            <span className={step.icon ? 'min-w-0 pt-1' : 'min-w-0'}>{step.title}</span>
+          </h3>
+          <p className="mt-2 text-sm text-slate-700 leading-relaxed">{step.body}</p>
         </motion.li>
       ))}
     </motion.ol>
@@ -499,49 +528,58 @@ export function FlowChain({ steps, className = '' }: { steps: readonly string[];
       initial="hidden"
       whileInView="show"
       viewport={viewport}
-      variants={stagger(0.05, 0.14)}
-      className={`mx-auto max-w-2xl ${className}`}
+      variants={stagger(0.05, 0.12)}
+      className={`relative mx-auto max-w-2xl ${className}`}
     >
+      {/*
+        **A continuous rail behind the stages, rather than a mark between each pair.**
+
+        The earlier versions put something *between* consecutive cards — first a glyph,
+        then a gradient rule with a dot. Both read as punctuation dropped into a gap.
+        Drawing one line down the whole column and letting the numbered nodes sit on top of it
+        makes the sequence a single object, which is what a flow is.
+
+        The rail is `scaleY` from the top, so it costs one composited property and grows
+        as the section arrives.
+      */}
+      <motion.span
+        aria-hidden
+        variants={{
+          hidden: { scaleY: 0 },
+          show: { scaleY: 1, transition: { duration: 0.7, ease: EASE_OUT } },
+        }}
+        className="pointer-events-none absolute left-[19px] top-6 bottom-6 w-px origin-top bg-gradient-to-b from-violet-200 via-violet-300 to-violet-200"
+      />
+
       {steps.map((step, i) => (
-        <motion.li key={step} variants={fadeUp}>
-          <motion.div
-            whileHover={{ scale: 1.02, y: -2 }}
-            transition={CARD_SPRING}
-            className="flex items-center gap-4 rounded-2xl bg-white ring-1 ring-violet-100 px-5 py-4 shadow-sm shadow-violet-100/60"
-          >
-            <span className="grid place-items-center h-8 w-8 shrink-0 rounded-full bg-violet-600 text-white text-xs font-semibold">
+        <motion.li key={step} variants={fadeUp} className="relative pl-14 pb-3 last:pb-0">
+          {/* The node. Sits on the rail, so the rail appears to thread through it. */}
+          <span className="absolute left-0 top-1 grid h-10 w-10 place-items-center rounded-full bg-white ring-1 ring-violet-200 shadow-sm shadow-violet-100">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-violet-600 text-[11px] font-semibold text-white">
               {String(i + 1).padStart(2, '0')}
             </span>
-            <span className="text-[15px] font-medium text-slate-800 text-left">{step}</span>
+          </span>
+
+          <motion.div
+            whileHover={{ x: 4 }}
+            transition={CARD_SPRING}
+            className="rounded-2xl bg-white ring-1 ring-slate-200/80 px-5 py-3.5"
+          >
+            <span className="text-[15px] font-medium text-slate-800">{step}</span>
           </motion.div>
 
+          {/* A small down arrow on the rail between stages — the direction cue. */}
           {i < steps.length - 1 && (
-            /*
-              The connector, drawn rather than typed.
-              
-              A static "↓" glyph between the stages read as punctuation. Scaling a 1px
-              rule from its top edge as the step scrolls in makes the sequence look like
-              it is being traced, which is the whole point of showing a flow instead of
-              a list. `scaleY` on a transformed element, so it costs nothing per frame.
-            */
-            <div aria-hidden className="flex justify-center py-1.5">
-              <div className="relative h-6 w-px">
-                <motion.div
-                  className="absolute inset-0 origin-top bg-gradient-to-b from-violet-300 to-violet-500"
-                  variants={{
-                    hidden: { scaleY: 0 },
-                    show: { scaleY: 1, transition: { duration: 0.35, ease: EASE_OUT } },
-                  }}
-                />
-                <motion.span
-                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full bg-violet-500"
-                  variants={{
-                    hidden: { scale: 0, opacity: 0 },
-                    show: { scale: 1, opacity: 1, transition: { delay: 0.3, duration: 0.25 } },
-                  }}
-                />
-              </div>
-            </div>
+            <motion.span
+              aria-hidden
+              variants={{
+                hidden: { opacity: 0 },
+                show: { opacity: 1, transition: { duration: 0.3, delay: 0.15 } },
+              }}
+              className="absolute left-[13px] -bottom-1 text-violet-400"
+            >
+              <ArrowDown className="h-3.5 w-3.5" strokeWidth={3} />
+            </motion.span>
           )}
         </motion.li>
       ))}
@@ -574,7 +612,7 @@ export function MatchTable({
         <tbody>
           {rows.map(([left, right, href]) => (
             <tr key={left} className="border-t border-slate-100">
-              <td className="px-5 py-4 text-sm text-slate-600 align-top">{left}</td>
+              <td className="px-5 py-4 text-sm text-slate-700 align-top">{left}</td>
               <td className="px-5 py-4 text-sm font-medium text-slate-900 align-top">
                 {href
                   ? <Link to={href} className="text-violet-600 hover:text-violet-700 underline underline-offset-4">{right}</Link>
@@ -601,16 +639,39 @@ export function ArrowLink({ to, children }: { to: string; children: ReactNode })
   );
 }
 
-/** Start Free + Book a Demo, the pair that appears in every hero and every CTA band. */
+/**
+ * The width every primary CTA button is laid out at, on every page.
+ *
+ * **Why a fixed width and not padding.** The pair was `px-7` on both buttons, so each
+ * one was as wide as its own label — "Get Started" is nine glyphs narrower than
+ * "Book a Demo", and the two sat side by side visibly mismatched in the hero, in the
+ * CTA band above the footer, and on all nineteen pages that use them. Symmetric padding
+ * cannot fix that; only a shared track width can, because the labels differ.
+ *
+ * `min-w` rather than `w`, so a future longer label grows the button instead of
+ * overflowing it — and both buttons in a pair still match, because they share the floor
+ * and neither label is near it. Full width below `sm`, where the pair stacks and the
+ * question does not arise.
+ */
+const CTA_WIDTH = 'w-full sm:w-auto sm:min-w-[11.5rem]';
+
+/** The height and shape, shared for the same reason. */
+const CTA_SHAPE = `${CTA_WIDTH} h-12 px-7 rounded-full text-base font-semibold`;
+
+/** Solid violet. Exported so the header and one-off CTAs match without restating it. */
+export const CTA_PRIMARY = `${CTA_SHAPE} bg-violet-600 hover:bg-violet-700 shadow-lg shadow-violet-300/60`;
+
+/** Outlined. `border-2` is inside the same box, so the two buttons align to the pixel. */
+export const CTA_SECONDARY = `${CTA_SHAPE} border-2 border-violet-600 text-violet-600 hover:bg-violet-50 bg-transparent`;
+
+/** Get Started + Book a Demo, the pair that appears in every hero and every CTA band. */
 export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
   const justify = align === 'center' ? 'justify-center' : 'justify-start';
   return (
     <div className={`flex flex-col sm:flex-row gap-3 sm:gap-4 ${justify} items-stretch sm:items-center`}>
       <Link to={SIGNUP_LINK} className="w-full sm:w-auto">
         <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-          <Button className="w-full sm:w-auto h-12 px-7 rounded-full bg-violet-600 hover:bg-violet-700 text-base font-semibold shadow-lg shadow-violet-300/60">
-            Start Free
-          </Button>
+          <Button className={CTA_PRIMARY}>{CTA_LABEL}</Button>
         </motion.div>
       </Link>
       {/*
@@ -621,12 +682,7 @@ export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
       */}
       <Link to={DEMO_REQUEST_LINK} className="w-full sm:w-auto">
         <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto h-12 px-7 rounded-full border-2 border-violet-600 text-violet-600 hover:bg-violet-50 text-base font-semibold bg-transparent"
-          >
-            Book a Demo
-          </Button>
+          <Button variant="outline" className={CTA_SECONDARY}>Book a Demo</Button>
         </motion.div>
       </Link>
     </div>
@@ -663,7 +719,7 @@ export function PageHero({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.65, delay: 0.25, ease: EASE_OUT }}
-            className="mt-6 space-y-4 text-base sm:text-lg text-slate-600 leading-relaxed"
+            className="mt-6 space-y-4 text-base sm:text-lg text-slate-700 leading-relaxed"
           >
             {intro.map((para) => <p key={para}>{para}</p>)}
           </motion.div>
@@ -755,7 +811,7 @@ export function FaqSection({
                     transition={{ duration: 0.28, ease: EASE_OUT }}
                     className="overflow-hidden"
                   >
-                    <div className="px-5 sm:px-6 pb-5 sm:pb-6 pl-[60px] sm:pl-[68px] text-sm text-slate-600 leading-relaxed -mt-1">
+                    <div className="px-5 sm:px-6 pb-5 sm:pb-6 pl-[60px] sm:pl-[68px] text-sm text-slate-700 leading-relaxed -mt-1">
                       {faq.answer}
                     </div>
                   </motion.div>
@@ -800,7 +856,7 @@ export function CtaBand({
               whileInView={{ opacity: 1, y: 0 }}
               viewport={viewport}
               transition={{ duration: 0.6, ease: EASE_OUT }}
-              className="mt-4 space-y-2 text-sm sm:text-base text-slate-600"
+              className="mt-4 space-y-2 text-sm sm:text-base text-slate-700"
             >
               {body.map((line) => <p key={line}>{line}</p>)}
             </motion.div>

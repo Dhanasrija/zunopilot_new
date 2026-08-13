@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { MotionConfig } from 'framer-motion';
 import { queryClient } from '@/lib/query-client';
 import { Toaster } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -62,14 +63,20 @@ const WorkflowBuilder = lazy(() => import('@/pages/WorkflowBuilder'));
  * one page whose LCP actually matters. `Landing` itself stays eager, because it *is*
  * the landing page and a suspense flash there is the thing we are trying to avoid.
  *
- * `DetailPage` is lazy too. It resolves its own copy from `lib/marketing-content.ts` by
- * pathname, so nothing about that table needs to be imported here.
+ * `ComingSoon` is lazy too. It resolves its own copy from its own table by pathname, so
+ * nothing about that table needs to be imported here.
  */
 const Features = lazy(() => import('@/pages/Features'));
 const Solutions = lazy(() => import('@/pages/Solutions'));
 const WhatsAppAutomation = lazy(() => import('@/pages/features/WhatsAppAutomation'));
 const AiWhatsAppAutomation = lazy(() => import('@/pages/features/AiWhatsAppAutomation'));
-const DetailPage = lazy(() => import('@/pages/DetailPage'));
+const NumberMasking = lazy(() => import('@/pages/features/NumberMasking'));
+// Aliased: `Campaigns` above is the authenticated campaign manager. This is the
+// public marketing page for the same feature, and they are different components.
+const CampaignsFeature = lazy(() => import('@/pages/features/Campaigns'));
+const BusinessApi = lazy(() => import('@/pages/features/BusinessApi'));
+const TeamInbox = lazy(() => import('@/pages/features/TeamInbox'));
+const ComingSoon = lazy(() => import('@/pages/ComingSoon'));
 
 /** Full-height spinner, so a lazy marketing page does not collapse the layout while it loads. */
 const PageFallback = (
@@ -83,6 +90,20 @@ const page = (element: React.ReactNode) => <Suspense fallback={PageFallback}>{el
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      {/*
+        **One place where "prefers-reduced-motion" is honoured for the whole site.**
+
+        `reducedMotion="user"` makes framer-motion drop transform and layout animations for
+        anyone whose OS asks for reduced motion, while still applying opacity changes — so a
+        scroll-reveal still reveals, it simply does not slide. Doing this here rather than in
+        each component is the difference between a setting that works and a setting that
+        works on the sections somebody remembered.
+
+        It does not cover animations that loop forever, because framer shortening a transition
+        does not stop an infinite repeat. Those check `useReducedMotion()` themselves — see the
+        header of `components/marketing/motion-kit.tsx`.
+      */}
+      <MotionConfig reducedMotion="user">
       <BrowserRouter>
         <ScrollToTop />
         <PageViews />
@@ -91,49 +112,47 @@ export default function App() {
           <Route path="/" element={<Landing />} />
 
           {/*
-            The features and solutions trees — two hubs and thirteen detail pages.
+            The features tree — a hub and six detail pages.
 
-            The two longest detail pages have components of their own; the other eleven
-            share `DetailPage`, which renders from the copy in `lib/marketing-content.ts`.
-            Every one of them is a real, indexable page: there are no placeholder routes
-            here, because a placeholder at a URL a search term lands on is worse than no
-            page at all.
+            Every one of them is a real, indexable page with copy of its own: there are no
+            placeholder routes here, because a placeholder at a URL a search term lands on is
+            worse than no page at all.
 
             Paths are written out literally rather than nested, because
             `document-head.test.ts` greps this file for `path="<canonical>"` to prove the
-            canonical, the route and the sitemap agree — for all twenty public pages.
-            Nested relative segments would defeat that check.
+            canonical, the route and the sitemap agree — for every public page. Nested
+            relative segments would defeat that check.
           */}
           <Route path="/features" element={page(<Features />)} />
           <Route path="/features/whatsapp-automation" element={page(<WhatsAppAutomation />)} />
           <Route path="/features/ai-whatsapp-automation" element={page(<AiWhatsAppAutomation />)} />
+          <Route path="/features/whatsapp-number-masking" element={page(<NumberMasking />)} />
+          <Route path="/features/whatsapp-campaigns" element={page(<CampaignsFeature />)} />
+          <Route path="/features/whatsapp-business-api" element={page(<BusinessApi />)} />
+          <Route path="/features/whatsapp-team-inbox" element={page(<TeamInbox />)} />
           <Route path="/solutions" element={page(<Solutions />)} />
 
           {/*
-            **Written out one per line rather than mapped over `DETAIL_PAGES`, on purpose.**
+            **The solutions tree, and /industries, are placeholders.**
 
-            `document-head.test.ts` proves the canonical, the route and the sitemap agree
-            by searching this file for the literal `path="<canonical>"` of every entry in
-            `PAGE_HEADS`. A `.map()` produces the same routes at runtime and *no such
-            string in the source*, so the check silently passes on nothing — which is
-            exactly the class of bug it was written to catch. Eleven repetitive lines are
-            the price of keeping the assertion real.
+            The hub and the header dropdown both list these six, so the URLs have to
+            resolve — a dropdown with six dead links is worse than no dropdown. Each renders
+            `ComingSoon`, which sets `noindex, follow` and no canonical, and none of them
+            appears in `PAGE_HEADS` or `sitemap.xml`. That is deliberate and enforced:
+            `document-head.test.ts` asserts the heads table and the sitemap are the same
+            set, so promoting one of these to a real page means writing copy, adding a head
+            and adding a `<loc>` — the test names whichever step is missing.
 
-            `DETAIL_PAGES` is still the source of the copy and of `DETAIL_BY_PATH`; a route
-            added here without an entry there renders `NotFound`, and an entry there
-            without a route here fails the test above. Both directions are covered.
+            The written copy these pages *had* is not deleted; it is still in
+            `lib/marketing-content.ts` behind `pages/DetailPage.tsx`, ready to be routed
+            again when each page is finished.
           */}
-          <Route path="/features/shared-whatsapp-portal" element={page(<DetailPage />)} />
-          <Route path="/features/whatsapp-number-masking" element={page(<DetailPage />)} />
-          <Route path="/features/whatsapp-campaigns" element={page(<DetailPage />)} />
-          <Route path="/features/whatsapp-team-inbox" element={page(<DetailPage />)} />
-          <Route path="/whatsapp-business-api" element={page(<DetailPage />)} />
-          <Route path="/industries" element={page(<DetailPage />)} />
-          <Route path="/solutions/lead-management" element={page(<DetailPage />)} />
-          <Route path="/solutions/sales-automation" element={page(<DetailPage />)} />
-          <Route path="/solutions/customer-support" element={page(<DetailPage />)} />
-          <Route path="/solutions/marketing-automation" element={page(<DetailPage />)} />
-          <Route path="/solutions/customer-engagement" element={page(<DetailPage />)} />
+          <Route path="/industries" element={page(<ComingSoon />)} />
+          <Route path="/solutions/lead-management" element={page(<ComingSoon />)} />
+          <Route path="/solutions/sales-automation" element={page(<ComingSoon />)} />
+          <Route path="/solutions/customer-support" element={page(<ComingSoon />)} />
+          <Route path="/solutions/marketing-automation" element={page(<ComingSoon />)} />
+          <Route path="/solutions/customer-engagement" element={page(<ComingSoon />)} />
 
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/privacy" element={<Privacy />} />
@@ -253,6 +272,7 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
+      </MotionConfig>
       <Toaster richColors position="top-right" />
     </QueryClientProvider>
   );

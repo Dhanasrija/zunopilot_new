@@ -51,7 +51,14 @@ const SUMMARY = process.argv.includes('--summary');
 const ALLOW = {
   // §2.1's palette lives here as CSS custom properties, so hex/oklch literals are
   // the file's whole job.
-  hex: ['src/index.css'],
+  hex: [
+    'src/index.css',
+    // Not a colour. The registered office is at door number 514 and the address is written
+    // "#514, Manjeera Trinity Corporate…" — which `/#[0-9a-fA-F]{3,8}/` reads as a three-digit
+    // hex literal. The alternative was contorting the address to satisfy the regex, and a
+    // postal address is not a thing to contort. The file contains no styling at all.
+    'src/lib/contact.ts',
+  ],
   // §2.2 — WhatsApp green is permitted only where it reports WhatsApp's own state.
   waGreen: [
     // Defines the token.
@@ -91,6 +98,7 @@ const ALLOW = {
     // reason the eight marketing pages are eight entries here and not eight copies of the
     // same markup.
     'src/components/marketing/primitives.tsx',
+    'src/components/marketing/motion-kit.tsx',
     'src/components/marketing/SiteHeader.tsx',
     'src/components/marketing/SiteFooter.tsx',
     'src/pages/Features.tsx',
@@ -107,6 +115,10 @@ const ALLOW = {
     'src/pages/ComingSoon.tsx',
     'src/pages/features/WhatsAppAutomation.tsx',
     'src/pages/features/AiWhatsAppAutomation.tsx',
+    'src/pages/features/NumberMasking.tsx',
+    'src/pages/features/Campaigns.tsx',
+    'src/pages/features/BusinessApi.tsx',
+    'src/pages/features/TeamInbox.tsx',
   ],
 };
 

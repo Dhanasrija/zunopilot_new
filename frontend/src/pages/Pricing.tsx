@@ -2,16 +2,33 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCatalogue, type BillingInterval } from '@/lib/pricing';
 import { Disclosures, IntervalSwitch, PlanCard } from '@/components/billing/PlanGrid';
-import { Button } from '@/components/ui/button';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
+import { SIGNUP_LINK } from '@/lib/marketing-nav';
+import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
+import SiteHeader from '@/components/marketing/SiteHeader';
+import SiteFooter from '@/components/marketing/SiteFooter';
+import { CtaBand, PageHero, Section } from '@/components/marketing/primitives';
 
-// The public pricing page.
-//
-// Served from the same price records checkout charges from, so what a visitor
-// is quoted and what they are billed cannot drift. Quarterly is selected by
-// default because that is what the catalogue says the default is — not because
-// this page hardcoded it.
+/*
+ * The public pricing page.
+ *
+ * Served from the same price records checkout charges from, so what a visitor is quoted
+ * and what they are billed cannot drift. The interval shown is whatever the catalogue
+ * says the default is — not something this page hardcoded.
+ *
+ * **Why this looks like the rest of the site now.** It used to render a header of its
+ * own: a logo, "Sign in", and one button. So clicking "Pricing" in the nav *replaced*
+ * the nav — no Features, no Solutions, no Contact, no footer, no way back except the
+ * logo. It read as a different site, and on the one page a visitor arrives at when they
+ * are close to buying. It now mounts `SiteHeader` and `SiteFooter` like every other
+ * public page, and the header keeps its own "Pricing" entry highlighted while you are
+ * here, so the page is somewhere you are rather than somewhere you left the site for.
+ *
+ * The plan grid itself is unchanged and still shared with the signed-in billing screen —
+ * one component means the prices, the GST line and the plan features cannot disagree
+ * between the two places they are shown.
+ */
 
 export default function Pricing() {
   useDocumentHead(PAGE_HEADS.pricing);
@@ -25,33 +42,57 @@ export default function Pricing() {
   }, [data]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-50/40 to-background">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <Link to="/" className="text-lg font-semibold">ZunoPilot</Link>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" asChild><Link to="/login">Sign in</Link></Button>
-          <Button asChild className="bg-violet-600 hover:bg-violet-700">
-            <Link to="/signup">Start free trial</Link>
-          </Button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-white text-slate-900">
+      <SiteHeader />
 
-      <main className="mx-auto max-w-6xl px-6 pb-20">
-        <div className="mx-auto max-w-2xl text-center">
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Pricing that grows with the conversations
-          </h1>
-          <p className="mt-3 text-muted-foreground">
-            Every plan includes the assistant, the shared inbox and the workflow builder.
-            Pay for the size of your team and how much AI you use.
-          </p>
-        </div>
+      <PageHero
+        title={['Pricing That Grows', 'With the Conversations']}
+        intro={[
+          'Every plan includes the assistant, the shared team inbox and the workflow builder. '
+          + 'You pay for the size of your team and how much AI you use — not for access to the '
+          + 'features that make the platform worth having.',
+          'Prices are in rupees and GST is shown before you pay.',
+        ]}
+      />
 
-        {isLoading && <p className="mt-10 text-center text-sm text-muted-foreground">Loading prices…</p>}
+      <Section tone="tinted">
+        {isLoading && (
+          <p className="text-center text-sm text-slate-600">Loading prices…</p>
+        )}
+
+        {/*
+          **If the catalogue request fails, say so.**
+
+          Before, `isLoading` went false, `data` stayed undefined, and the page rendered a
+          blank band between the hero and the CTA — a pricing page with no prices and no
+          explanation, which reads as a broken product rather than a failed request. There is
+          no fallback price to show (that is the whole point of reading them from the
+          catalogue), so the honest thing is to name the problem and offer the route that does
+          not depend on this endpoint.
+        */}
+        {!isLoading && !data && (
+          <div className="mx-auto max-w-lg rounded-3xl bg-white p-6 text-center ring-1 ring-slate-200/80">
+            <p className="text-base font-semibold text-slate-900">
+              We could not load the current prices.
+            </p>
+            <p className="mt-2 text-[15px] leading-relaxed text-slate-600">
+              This is on our side, not yours. Reload the page in a moment, or get in touch and
+              we will send the plan comparison across.
+            </p>
+            <p className="mt-5">
+              <Link
+                to={DEMO_REQUEST_LINK}
+                className="text-[15px] font-semibold text-violet-600 hover:text-violet-700"
+              >
+                Talk to us about pricing &rarr;
+              </Link>
+            </p>
+          </div>
+        )}
 
         {data && (
           <>
-            <div className="mt-8 flex justify-center">
+            <div className="flex justify-center">
               <IntervalSwitch catalogue={data} value={interval} onChange={setInterval} />
             </div>
 
@@ -62,7 +103,10 @@ export default function Pricing() {
                   plan={plan}
                   interval={interval}
                   catalogue={data}
-                  onChoose={() => { window.location.href = '/signup'; }}
+                  // `SIGNUP_LINK` rather than a literal, so choosing a plan lands on the same
+                  // screen every other CTA on the site lands on. A full navigation rather than
+                  // a router push, because the sign-in flow reads a clean document.
+                  onChoose={() => { window.location.href = SIGNUP_LINK; }}
                   onContactSales={() => {
                     window.location.href = 'mailto:sales@zunopilot.com?subject=Enterprise%20plan';
                   }}
@@ -70,12 +114,22 @@ export default function Pricing() {
               ))}
             </div>
 
-            <div className="mt-8 rounded-xl border bg-muted/30 p-4">
+            <div className="mt-8 rounded-3xl bg-white ring-1 ring-slate-200/80 p-5">
               <Disclosures catalogue={data} />
             </div>
           </>
         )}
-      </main>
+      </Section>
+
+      <CtaBand
+        title={['Not Sure Which Plan', 'Fits Your Team?']}
+        body={[
+          'Tell us how your business handles WhatsApp today and we will walk you through what '
+          + 'the platform would look like for you.',
+        ]}
+      />
+
+      <SiteFooter />
     </div>
   );
 }

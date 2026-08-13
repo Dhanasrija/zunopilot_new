@@ -2,22 +2,25 @@ import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Star, ArrowRight, Check, Building2, GraduationCap, ShoppingBag, Stethoscope,
-  UtensilsCrossed, Wrench,
+  UtensilsCrossed, Wrench, AlarmClock, BarChart3, BellRing, Bot, Clock, Contact,
+  EyeOff, FileText, HeartHandshake, Headphones, HelpCircle, KeyRound, LayoutGrid,
+  Megaphone, MessageSquare, Plug, RefreshCw, Repeat, ShieldCheck, Sparkles, Target,
+  TrendingUp, UserPlus, Users, Workflow, Zap,
 } from 'lucide-react';
 import {
   motion, useScroll, useTransform, useReducedMotion,
 } from 'framer-motion';
 import { useCountUp } from '@/hooks/useCountUp';
-import { formatRupees, useCatalogue } from '@/lib/pricing';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
   AnimatedHeading, ArrowLink, CARD_SPRING, CheckCards, CheckList, CtaBand, CtaPair, EASE_OUT,
-  FaqSection, ScrollProgress, Section, SectionHead, StepRail, TileGrid, fadeUp, item,
-  scaleIn, stagger, viewport
+  FaqSection, ScrollProgress, Section, SectionHead, StepRail, TileGrid, fadeUp,
+  item, scaleIn, stagger, viewport
 } from '@/components/marketing/primitives';
+import { IconTitle, Reveal } from '@/components/marketing/motion-kit';
 
 /*
  * The home page.
@@ -32,13 +35,13 @@ import {
  * it properly. Those links are the whole point — a hub with no outbound links is just
  * a long page, and the detail pages are the ones the search terms actually match.
  *
- * **What was deliberately kept.** Stats, Testimonials and the pricing teaser are not
- * in the supplied copy, but removing them would take the only social proof and the
- * only route to a price off the page. They sit between the new bands rather than
- * replacing any of them.
+ * **What was deliberately kept.** Stats and Testimonials are not in the supplied copy, but
+ * removing them would take the only social proof off the page. They sit between the new bands
+ * rather than replacing any of them.
  *
- * The pricing teaser still reads its number from the same catalogue checkout charges
- * from — see the note on `PricingTeaser`. That constraint has not moved.
+ * **There is no pricing section here any more** — see the note further down where it used to be.
+ * `/pricing` is the only page that quotes a price, which is the arrangement that keeps the home
+ * page from drifting out of step with what checkout charges.
  */
 
 export default function Landing() {
@@ -51,7 +54,6 @@ export default function Landing() {
       <Hero />
       <WhyAutomate />
       <AiAutomation />
-      <SharedPortal />
       <NumberMasking />
       <Workflows />
       <Tools />
@@ -62,7 +64,6 @@ export default function Landing() {
       <WhyZunoPilot />
       <Testimonials />
       <BusinessApi />
-      <PricingTeaser />
       <FaqSection faqs={HOME_FAQS} />
       <CtaBand
         title={['Ready to Automate Your', 'Business on WhatsApp?']}
@@ -80,12 +81,6 @@ export default function Landing() {
 /*                                    Hero                                    */
 /* -------------------------------------------------------------------------- */
 
-const HERO_CHIPS = [
-  'AI Automation',
-  'WhatsApp Automation',
-  'Shared Portal',
-  'Number Masking',
-];
 
 function Hero() {
   const reduceMotion = useReducedMotion();
@@ -129,14 +124,14 @@ function Hero() {
 
           <motion.p
             variants={fadeUp}
-            className="mt-5 sm:mt-6 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto"
+            className="mt-5 sm:mt-6 text-base sm:text-lg text-slate-700 max-w-2xl mx-auto"
           >
             Automate customer conversations, lead follow-ups, support, campaigns, and
             everyday business communication with ZunoPilot.
           </motion.p>
           <motion.p
             variants={fadeUp}
-            className="mt-4 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto"
+            className="mt-4 text-base sm:text-lg text-slate-700 max-w-2xl mx-auto"
           >
             Bring AI-powered automation, a shared WhatsApp portal, team collaboration, and
             number masking together in one platform built for business communication.
@@ -146,19 +141,6 @@ function Hero() {
             <CtaPair />
           </motion.div>
 
-          <motion.ul
-            variants={fadeUp}
-            className="mt-7 flex flex-wrap items-center justify-center gap-2 sm:gap-3"
-          >
-            {HERO_CHIPS.map((chip) => (
-              <li
-                key={chip}
-                className="rounded-full bg-white/90 backdrop-blur-sm ring-1 ring-slate-200 px-4 py-1.5 text-sm font-medium text-slate-700"
-              >
-                {chip}
-              </li>
-            ))}
-          </motion.ul>
         </div>
 
         <motion.div
@@ -241,7 +223,7 @@ function WhyAutomate() {
             {MANUAL_REALITY.map((line) => (
               <li key={line} className="flex items-start gap-3">
                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
-                <span className="text-[15px] text-slate-600 leading-relaxed">{line}</span>
+                <span className="text-[15px] text-slate-700 leading-relaxed">{line}</span>
               </li>
             ))}
           </ul>
@@ -312,13 +294,18 @@ const AUTOMATED_REALITY = [
 /*                              The four pillars                               */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * Each tile names the icon that represents *its own* subject rather than a generic
+ * sparkle six times over. That is the difference between an icon that labels the card and
+ * decoration that happens to sit next to a heading.
+ */
 const AI_TILES = [
-  { title: 'Customer Enquiries', body: 'Handle common questions and routine interactions more efficiently.' },
-  { title: 'Lead Engagement', body: 'Respond to new enquiries and support consistent follow-ups.' },
-  { title: 'Customer Support', body: 'Automate routine interactions while allowing your team to take over when human assistance is needed.' },
-  { title: 'Follow-Ups', body: 'Create workflows that keep conversations moving after the initial interaction.' },
-  { title: 'Customer Engagement', body: 'Maintain timely communication with customers through automated workflows.' },
-  { title: 'Campaign Communication', body: 'Reach customers with relevant business messages and campaigns.' },
+  { icon: HelpCircle, title: 'Customer Enquiries', body: 'Handle common questions and routine interactions more efficiently.' },
+  { icon: Target, title: 'Lead Engagement', body: 'Respond to new enquiries and support consistent follow-ups.' },
+  { icon: Headphones, title: 'Customer Support', body: 'Automate routine interactions while allowing your team to take over when human assistance is needed.' },
+  { icon: Repeat, title: 'Follow-Ups', body: 'Create workflows that keep conversations moving after the initial interaction.' },
+  { icon: HeartHandshake, title: 'Customer Engagement', body: 'Maintain timely communication with customers through automated workflows.' },
+  { icon: Megaphone, title: 'Campaign Communication', body: 'Reach customers with relevant business messages and campaigns.' },
 ];
 
 function AiAutomation() {
@@ -349,52 +336,11 @@ function AiAutomation() {
   );
 }
 
-const PORTAL_TILES = [
-  { title: 'Centralized Conversations', body: 'Keep customer communication accessible from one workspace.' },
-  { title: 'Team Access', body: 'Give authorized users access to the conversations they need.' },
-  { title: 'Conversation Management', body: 'Organize and manage customer interactions more efficiently.' },
-  { title: 'Team Collaboration', body: 'Allow sales, support, and service teams to work from the same environment.' },
-  { title: 'Better Visibility', body: 'Give your team a clearer view of ongoing customer conversations.' },
-  { title: 'Continuity as Teams Change', body: 'Keep customer conversations with the business when someone changes role or leaves.' },
-];
-
-function SharedPortal() {
-  return (
-    <Section tone="tinted">
-      <SectionHead
-        eyebrow="One Shared WhatsApp Portal for Your Entire Team"
-        title={['Bring Your Business', 'Conversations Into One Place']}
-        lead={(
-          <>
-            <p>
-              When customer conversations are spread across individual phones, teams can lose
-              visibility and important follow-ups can be missed.
-            </p>
-            <p>
-              ZunoPilot gives authorized team members a shared WhatsApp workspace to manage
-              business conversations from one centralized portal.
-            </p>
-          </>
-        )}
-      />
-      <p className="mt-10 text-center text-base font-semibold text-slate-900">
-        Work together more efficiently
-      </p>
-      <div className="mt-5">
-        <TileGrid tiles={PORTAL_TILES} />
-      </div>
-      <div className="mt-10 text-center">
-        <ArrowLink to="/features/shared-whatsapp-portal">Explore Shared WhatsApp Portal</ArrowLink>
-      </div>
-    </Section>
-  );
-}
-
 const MASKING_TILES = [
-  { title: 'Reduce Unnecessary Number Exposure', body: 'Keep business communication within your defined workflow.' },
-  { title: 'Centralize Communication', body: 'Move customer interactions into a business-managed environment.' },
-  { title: 'Control Team Access', body: 'Give authorized users access without making individual phones the center of your workflow.' },
-  { title: 'Maintain Business Continuity', body: 'Keep customer communication connected to your business as your team changes.' },
+  { icon: EyeOff, title: 'Reduce Unnecessary Number Exposure', body: 'Keep business communication within your defined workflow.' },
+  { icon: Building2, title: 'Centralize Communication', body: 'Move customer interactions into a business-managed environment.' },
+  { icon: KeyRound, title: 'Control Team Access', body: 'Give authorized users access without making individual phones the center of your workflow.' },
+  { icon: ShieldCheck, title: 'Maintain Business Continuity', body: 'Keep customer communication connected to your business as your team changes.' },
 ];
 
 function NumberMasking() {
@@ -431,12 +377,12 @@ function NumberMasking() {
 }
 
 const WORKFLOW_TILES = [
-  { title: 'Lead Follow-Ups', body: 'Stay connected with prospects without relying entirely on manual reminders.' },
-  { title: 'Customer Enquiries', body: 'Streamline responses to common questions and incoming requests.' },
-  { title: 'Notifications', body: 'Send important business updates through automated workflows.' },
-  { title: 'Reminders', body: 'Keep customers informed about appointments, orders, services, and other activities.' },
-  { title: 'Customer Re-Engagement', body: 'Reconnect with customers through timely communication.' },
-  { title: 'Campaigns', body: 'Reach customers with promotions, announcements, and relevant updates.' },
+  { icon: UserPlus, title: 'Lead Follow-Ups', body: 'Stay connected with prospects without relying entirely on manual reminders.' },
+  { icon: MessageSquare, title: 'Customer Enquiries', body: 'Streamline responses to common questions and incoming requests.' },
+  { icon: BellRing, title: 'Notifications', body: 'Send important business updates through automated workflows.' },
+  { icon: AlarmClock, title: 'Reminders', body: 'Keep customers informed about appointments, orders, services, and other activities.' },
+  { icon: RefreshCw, title: 'Customer Re-Engagement', body: 'Reconnect with customers through timely communication.' },
+  { icon: Megaphone, title: 'Campaigns', body: 'Reach customers with promotions, announcements, and relevant updates.' },
 ];
 
 function Workflows() {
@@ -466,16 +412,24 @@ function Workflows() {
 /*                                   Tools                                     */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * Nine tools, not eight.
+ *
+ * **`WhatsApp Business API` is the added one**, and it was the obvious gap: it is the only
+ * item here with its own feature page that the home page never named, and it is what the
+ * other eight sit on top of. Nine also fills the three-column grid exactly, so the last
+ * row is no longer two cards and a hole.
+ */
 const TOOL_TILES = [
-  { title: 'AI-Powered Automation', body: 'Use AI to streamline repetitive customer communication.' },
-  { title: 'WhatsApp Automation', body: 'Create workflows for everyday business interactions.' },
-  { title: 'Shared WhatsApp Portal', body: 'Give your team one centralized place to manage conversations.' },
-  { title: 'Number Masking', body: 'Create greater control over business number exposure.' },
-  { title: 'Team Inbox', body: 'Allow authorized users to manage customer conversations together.' },
-  { title: 'Customer Management', body: 'Keep customer information and communication organized.' },
-  { title: 'WhatsApp Campaigns', body: 'Create targeted communication for customer engagement.' },
-  { title: 'Message Templates', body: 'Use structured messages for recurring business communication.' },
-  { title: 'Analytics', body: 'Understand communication activity and team performance.' },
+  { icon: Sparkles, title: 'AI-Powered Automation', body: 'Use AI to streamline repetitive customer communication.' },
+  { icon: Workflow, title: 'WhatsApp Automation', body: 'Create workflows for everyday business interactions.' },
+  { icon: ShieldCheck, title: 'Number Masking', body: 'Create greater control over business number exposure.' },
+  { icon: Users, title: 'Team Inbox', body: 'Allow authorized users to manage customer conversations together.' },
+  { icon: Contact, title: 'Customer Management', body: 'Keep customer information and communication organized.' },
+  { icon: Megaphone, title: 'WhatsApp Campaigns', body: 'Create targeted communication for customer engagement.' },
+  { icon: FileText, title: 'Message Templates', body: 'Use structured messages for recurring business communication.' },
+  { icon: BarChart3, title: 'Analytics', body: 'Understand communication activity and team performance.' },
+  { icon: Plug, title: 'WhatsApp Business API', body: 'Connect WhatsApp with the software and workflows your business already runs on.' },
 ];
 
 function Tools() {
@@ -581,7 +535,7 @@ function StatCard({
       <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
         <span ref={ref}>{display}</span>
       </div>
-      <div className="text-sm sm:text-base text-slate-500">{label}</div>
+      <div className="text-sm sm:text-base text-slate-600">{label}</div>
     </motion.div>
   );
 }
@@ -634,31 +588,37 @@ function HowItWorks() {
 
 const JOURNEY = [
   {
+    icon: Target,
     title: 'Lead Management',
     body: 'Capture enquiries, engage prospects, and create consistent follow-up workflows.',
     href: '/solutions/lead-management',
   },
   {
+    icon: TrendingUp,
     title: 'Sales',
     body: 'Give sales teams a centralized environment to manage enquiries and customer conversations.',
     href: '/solutions/sales-automation',
   },
   {
+    icon: Headphones,
     title: 'Customer Support',
     body: 'Automate routine interactions while giving support teams a shared workspace.',
     href: '/solutions/customer-support',
   },
   {
+    icon: Megaphone,
     title: 'Marketing',
     body: 'Engage customers through campaigns, promotions, announcements, and automated communication.',
     href: '/solutions/marketing-automation',
   },
   {
+    icon: BellRing,
     title: 'Notifications',
     body: 'Automate confirmations, reminders, alerts, updates, and other important messages.',
     href: '/features/whatsapp-automation',
   },
   {
+    icon: HeartHandshake,
     title: 'Customer Engagement',
     body: 'Stay connected with customers through timely and relevant WhatsApp communication.',
     href: '/solutions/customer-engagement',
@@ -681,11 +641,22 @@ function CustomerJourney() {
           <motion.div key={entry.title} variants={item} whileHover={{ y: -6 }} transition={CARD_SPRING}>
             <Link
               to={entry.href}
-              className="group flex h-full flex-col rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 hover:ring-violet-200 transition-colors"
+              className="group relative flex h-full flex-col overflow-hidden rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 hover:ring-violet-200 transition-colors"
             >
-              <h3 className="text-lg font-bold text-slate-900">{entry.title}</h3>
-              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{entry.body}</p>
-              <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-violet-600">
+              {/*
+                A sheen that crosses the card on hover. One translated gradient behind
+                `overflow-hidden` — no blur, no filter, so it composites on the GPU and the
+                card does not repaint every frame.
+              */}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-violet-50 to-transparent transition-transform duration-700 group-hover:translate-x-full"
+              />
+              <IconTitle icon={entry.icon} className="relative text-lg font-bold text-slate-900">
+                {entry.title}
+              </IconTitle>
+              <p className="relative mt-3 text-sm text-slate-700 leading-relaxed">{entry.body}</p>
+              <span className="relative mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-violet-600">
                 Learn more
                 <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
               </span>
@@ -733,12 +704,12 @@ function Industries() {
 /* -------------------------------------------------------------------------- */
 
 const WHY = [
-  { title: 'AI + Automation', body: 'Combine AI-powered capabilities with business workflows to reduce repetitive communication.' },
-  { title: 'One Shared Workspace', body: 'Bring WhatsApp conversations and team communication together.' },
-  { title: 'Better Number Control', body: 'Use number masking to create a more controlled communication process.' },
-  { title: 'Less Manual Work', body: 'Automate recurring interactions and follow-ups.' },
-  { title: 'Better Team Collaboration', body: 'Give authorized team members access to the conversations they need.' },
-  { title: 'Built for Business Growth', body: 'Create WhatsApp workflows that can evolve as your team and customer communication grow.' },
+  { icon: Bot, title: 'AI + Automation', body: 'Combine AI-powered capabilities with business workflows to reduce repetitive communication.' },
+  { icon: LayoutGrid, title: 'One Shared Workspace', body: 'Bring WhatsApp conversations and team communication together.' },
+  { icon: ShieldCheck, title: 'Better Number Control', body: 'Use number masking to create a more controlled communication process.' },
+  { icon: Clock, title: 'Less Manual Work', body: 'Automate recurring interactions and follow-ups.' },
+  { icon: Users, title: 'Better Team Collaboration', body: 'Give authorized team members access to the conversations they need.' },
+  { icon: TrendingUp, title: 'Built for Business Growth', body: 'Create WhatsApp workflows that can evolve as your team and customer communication grow.' },
 ];
 
 function WhyZunoPilot() {
@@ -821,7 +792,7 @@ function TestimonialCard({
       <div className="mt-3 sm:mt-4 flex items-end justify-between gap-3">
         <div>
           <div className="font-semibold text-slate-900 text-[15px] sm:text-base">{name}</div>
-          <div className="text-xs sm:text-sm text-slate-500">{role}</div>
+          <div className="text-xs sm:text-sm text-slate-600">{role}</div>
         </div>
         {rating && (
           <div className="text-right shrink-0">
@@ -837,7 +808,7 @@ function TestimonialCard({
                 </motion.span>
               ))}
             </motion.div>
-            <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">4.9 out of 5.0</div>
+            <div className="text-[11px] sm:text-xs text-slate-600 mt-0.5">4.9 out of 5.0</div>
           </div>
         )}
       </div>
@@ -896,7 +867,7 @@ function BusinessApi() {
             )}
           />
           <div className="mt-8">
-            <ArrowLink to="/whatsapp-business-api">Explore WhatsApp Business API</ArrowLink>
+            <ArrowLink to="/features/whatsapp-business-api">Explore WhatsApp Business API</ArrowLink>
           </div>
         </div>
 
@@ -913,66 +884,19 @@ function BusinessApi() {
 /*                               Pricing teaser                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * A pointer to /pricing, not a second copy of it.
+/*
+ * **The pricing section was removed from this page.**
  *
- * The plans used to be listed here with their own hardcoded numbers — in US dollars,
- * while checkout charges rupees. Two places holding the same commercial facts is how a
- * visitor gets quoted one price and billed another, so the only number on this page is
- * read from the same catalogue the checkout charges from, and everything else lives on
- * the pricing page.
+ * It had a billing toggle, plan cards and trust indicators, all driven from the live catalogue —
+ * and it is gone at the owner's request, not because it broke. `/pricing` is the single place
+ * that quotes a price now, which is also the arrangement the original note here argued for: one
+ * page holding the commercial facts, and no second copy to drift out of step with checkout.
+ *
+ * If it comes back, take it from git rather than rewriting it: `useCatalogue`, `formatRupees` and
+ * `formatLimit` are still exported from `lib/pricing.ts`, and the rule that mattered was that
+ * every figure came from the catalogue and the section showed *no* amount when the catalogue had
+ * not resolved.
  */
-function PricingTeaser() {
-  const { data } = useCatalogue();
-
-  // The cheapest self-serve entry point, whatever the catalogue currently says.
-  const from = data?.plans
-    .filter((plan) => plan.selfServe && plan.prices.MONTHLY)
-    .map((plan) => plan.prices.MONTHLY!.amountPaise)
-    .sort((a, b) => a - b)[0];
-
-  return (
-    <section id="pricing" className="py-16 sm:py-20 lg:py-24 bg-white">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <AnimatedHeading
-          text="Simple, transparent Pricing"
-          className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900"
-        />
-        <p className="mt-4 text-slate-600 max-w-2xl mx-auto">
-          Every plan includes the assistant, the shared inbox and the workflow builder.
-          Pay for the size of your team and how much AI you use.
-        </p>
-
-        {from !== undefined && (
-          <p className="mt-8 text-slate-900">
-            <span className="text-5xl font-extrabold tracking-tight">{formatRupees(from)}</span>
-            {' '}
-            <span className="text-slate-500">per month, billed monthly</span>
-          </p>
-        )}
-
-        <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <Link
-            to="/pricing"
-            className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-7 py-3 text-white font-semibold hover:bg-violet-700 transition-colors"
-          >
-            See all plans <ArrowRight className="h-4 w-4" />
-          </Link>
-          <Link
-            to="/signup"
-            className="inline-flex items-center rounded-full border border-slate-300 px-7 py-3 font-semibold text-slate-700 hover:border-slate-400 transition-colors"
-          >
-            Start free trial
-          </Link>
-        </div>
-
-        <p className="mt-6 text-xs text-slate-500">
-          Quarterly and yearly billing work out cheaper. Prices exclude GST.
-        </p>
-      </div>
-    </section>
-  );
-}
 
 /* -------------------------------------------------------------------------- */
 /*                                    FAQ                                      */
@@ -1004,12 +928,6 @@ const HOME_FAQS = [
     answer:
       'AI can help businesses handle routine customer interactions, respond to common enquiries, '
       + 'support lead engagement, and streamline repetitive communication workflows.',
-  },
-  {
-    question: 'What is a Shared WhatsApp Portal?',
-    answer:
-      'A Shared WhatsApp Portal allows authorized team members to manage business conversations '
-      + 'through one centralized workspace rather than relying on separate individual devices.',
   },
   {
     question: 'What is WhatsApp Number Masking?',

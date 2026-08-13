@@ -56,26 +56,19 @@ export const PAGE_HEADS = {
       + 'routine questions, and connect AI with business workflows.',
   },
   /* ---------------------------- Feature detail ---------------------------- */
-  sharedPortal: {
-    path: '/features/shared-whatsapp-portal',
-    title: 'Shared WhatsApp Portal for Teams | ZunoPilot',
-    description:
-      'Manage business WhatsApp conversations from one shared portal. Give your team access, '
-      + 'keep follow-ups visible, and stop relying on individual phones.',
-  },
   numberMasking: {
     path: '/features/whatsapp-number-masking',
     title: 'WhatsApp Number Masking for Business | ZunoPilot',
     description:
-      'Reduce exposure of business and personal WhatsApp numbers. Keep customer conversations '
-      + 'in a business-managed environment your authorized team can work from.',
+      'Protect employee contact information and manage customer-facing WhatsApp communication '
+      + "with ZunoPilot's business number masking solution.",
   },
   campaigns: {
     path: '/features/whatsapp-campaigns',
-    title: 'WhatsApp Campaign Software for Business | ZunoPilot',
+    title: 'WhatsApp Campaigns for Business | ZunoPilot',
     description:
-      'Run WhatsApp campaigns for promotions, announcements, updates and re-engagement, with '
-      + 'replies landing in the same shared workspace as your other conversations.',
+      'Plan and manage WhatsApp campaigns for customer outreach, product updates, lead '
+      + 'engagement, events, and relevant business communication with ZunoPilot.',
   },
   teamInbox: {
     path: '/features/whatsapp-team-inbox',
@@ -85,56 +78,38 @@ export const PAGE_HEADS = {
       + 'Shared visibility, internal notes, clean handover and human takeover.',
   },
   businessApi: {
-    path: '/whatsapp-business-api',
-    title: 'WhatsApp Business API for Companies | ZunoPilot',
+    path: '/features/whatsapp-business-api',
+    title: 'WhatsApp Business API for Business | ZunoPilot',
     description:
-      'Connect WhatsApp with your software, workflows and integrations for scalable business '
-      + 'messaging, automated notifications and multi-agent customer communication.',
+      'Connect WhatsApp with business workflows, customer messaging, automation, AI, and team '
+      + "communication using ZunoPilot's WhatsApp Business API solution.",
   },
-  industries: {
-    path: '/industries',
-    title: 'WhatsApp Automation by Industry | ZunoPilot',
+  /*
+   * **`/login` is here but is not a public page**, which is why it carries `path: null`
+   * and `noindex`. It is in this table rather than set inline because it is now the most
+   * internally-linked URL on the site — every "Get Started" on every page points at it —
+   * and a head that important should be reviewed next to the others rather than buried in
+   * a component. `document-head.test.ts` skips it for the route/sitemap cross-checks by
+   * looking only at entries with a non-null `path`.
+   */
+  login: {
+    path: null,
+    robots: 'noindex, follow',
+    title: 'Sign in to ZunoPilot',
     description:
-      'How restaurants, ecommerce, real estate, education and service businesses use WhatsApp '
-      + 'automation for enquiries, reminders, follow-ups and campaigns.',
+      'Sign in to your ZunoPilot workspace to manage WhatsApp conversations, campaigns, '
+      + 'automations and your team from one place.',
   },
 
-  /* ---------------------------- Solution detail --------------------------- */
-  leadManagement: {
-    path: '/solutions/lead-management',
-    title: 'WhatsApp Lead Management Software | ZunoPilot',
-    description:
-      'Capture WhatsApp enquiries, qualify prospects automatically and keep follow-ups on '
-      + 'schedule, so leads reach your sales team with context instead of going quiet.',
-  },
-  salesAutomation: {
-    path: '/solutions/sales-automation',
-    title: 'WhatsApp Sales Automation for Teams | ZunoPilot',
-    description:
-      'Automate the repeatable half of selling on WhatsApp: first responses, qualification and '
-      + 'follow-ups, so representatives work qualified opportunities.',
-  },
-  customerSupport: {
-    path: '/solutions/customer-support',
-    title: 'WhatsApp Customer Support Software | ZunoPilot',
-    description:
-      'Handle routine support requests with WhatsApp workflows and AI assistance, and escalate '
-      + 'to agents with the full conversation history attached.',
-  },
-  marketingAutomation: {
-    path: '/solutions/marketing-automation',
-    title: 'WhatsApp Marketing Automation | ZunoPilot',
-    description:
-      'Reach customers with WhatsApp promotions, announcements and re-engagement campaigns, on '
-      + 'a channel where a reply becomes a conversation.',
-  },
-  customerEngagement: {
-    path: '/solutions/customer-engagement',
-    title: 'WhatsApp Customer Engagement Platform | ZunoPilot',
-    description:
-      'Stay connected after the first sale with WhatsApp reminders, updates, follow-ups and '
-      + 're-engagement built around real customer moments.',
-  },
+  /*
+   * **The solutions tree and /industries are absent on purpose.**
+   *
+   * Those six routes render `pages/ComingSoon.tsx`, which sets its own head inline with
+   * `robots: 'noindex, follow'` and no canonical. A head here would put them in the
+   * sitemap (the test asserts this table and the sitemap are the same set), and a sitemap
+   * entry is a request to index — which is the wrong request for a page that says "being
+   * written". Add the head and the `<loc>` together, when the copy exists.
+   */
 
   pricing: {
     path: '/pricing',

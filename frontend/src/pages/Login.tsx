@@ -13,6 +13,8 @@ import {
 } from '@/lib/countries';
 import { Label } from '@/components/ui/label';
 import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
+import { useDocumentHead } from '@/lib/document-head';
+import { PAGE_HEADS } from '@/lib/page-heads';
 
 // Signing in.
 //
@@ -49,6 +51,23 @@ interface VerifyResult {
 }
 
 export default function Login() {
+  /*
+   * **`noindex, follow`, and no canonical.**
+   *
+   * Without this the page inherited index.html's tags: `index, follow` and a canonical
+   * pointing at the home page. That mattered little while the CTAs said "Start Free" and
+   * pointed at `/signup`; it matters now, because every "Get Started" on every marketing
+   * page links straight here, which makes `/login` the most internally-linked URL on the
+   * site. A heavily-linked URL that says "index me" and canonicalises somewhere else is
+   * exactly the shape Search Console files under "Alternate page with proper canonical
+   * tag" — and if Google disagrees about the canonical, it indexes a sign-in form.
+   *
+   * `follow` is kept so the links out of here still count. The matching half of this fix
+   * is in `public/robots.txt`: the `Disallow` was removed, because a crawler that cannot
+   * fetch the page cannot read the `noindex` either.
+   */
+  useDocumentHead(PAGE_HEADS.login);
+
   const navigate = useNavigate();
   const setSession = useAuthStore((s) => s.setSession);
 

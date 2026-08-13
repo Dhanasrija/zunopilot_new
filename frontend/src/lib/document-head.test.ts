@@ -41,9 +41,20 @@ const INDEX_HTML = projectFile('index.html');
 
 const heads = Object.entries(PAGE_HEADS);
 
+/**
+ * The subset that claims a canonical.
+ *
+ * `login` is in `PAGE_HEADS` for reviewability but is `path: null` — it is `noindex` and has
+ * no canonical, so "is it a route in App.tsx" and "is it in the sitemap" are the wrong
+ * questions to ask of it. Filtering on `path` rather than excluding it by name means a future
+ * `noindex` entry is handled without editing this file.
+ */
+const publicHeads = heads.filter((entry): entry is [string, typeof entry[1] & { path: string }] =>
+  entry[1].path !== null);
+
 describe('every page declares its own canonical', () => {
   it('**no two pages share one**, which is the whole defect', () => {
-    const paths = heads.map(([, head]) => head.path);
+    const paths = publicHeads.map(([, head]) => head.path);
     expect(new Set(paths).size).toBe(paths.length);
   });
 
@@ -55,13 +66,13 @@ describe('every page declares its own canonical', () => {
 });
 
 describe('the canonical, the route and the sitemap agree', () => {
-  it.each(heads)('%s is a real route in App.tsx', (_name, head) => {
+  it.each(publicHeads)('%s is a real route in App.tsx', (_name, head) => {
     // The nested app routes are relative, so a leading-slash path only appears for the public
     // ones — which is exactly the set this table should cover.
     expect(APP).toContain(`path="${head.path}"`);
   });
 
-  it.each(heads)('%s is advertised in sitemap.xml', (_name, head) => {
+  it.each(publicHeads)('%s is advertised in sitemap.xml', (_name, head) => {
     // **The cross-check that matters.** A page whose canonical is not in the sitemap, or a
     // sitemap entry whose page canonicalises elsewhere, is the contradiction that started this.
     expect(SITEMAP).toContain(`<loc>https://zunopilot.com${head.path}</loc>`);
@@ -70,7 +81,7 @@ describe('the canonical, the route and the sitemap agree', () => {
   it('covers every URL the sitemap advertises, with none left over', () => {
     const advertised = [...SITEMAP.matchAll(/<loc>https:\/\/zunopilot\.com([^<]*)<\/loc>/g)]
       .map((m) => m[1] || '/');
-    expect(advertised.sort()).toEqual(heads.map(([, h]) => h.path).sort());
+    expect(advertised.sort()).toEqual(publicHeads.map(([, h]) => h.path).sort());
   });
 });
 
