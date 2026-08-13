@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { useBreadcrumbSchema } from '@/lib/json-ld';
 import type { FaqEntry } from '@/lib/json-ld';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
@@ -686,11 +685,6 @@ function FitGrid({
 /*                                    Copy                                     */
 /* -------------------------------------------------------------------------- */
 
-const CRUMBS = [
-  { name: 'Home', path: '/' },
-  { name: 'Features', path: '/features' },
-  { name: 'WhatsApp Business API', path: '/features/whatsapp-business-api' },
-];
 
 const GROWTH_NEEDS = [
   'Multiple people handling customer conversations',
@@ -1019,7 +1013,6 @@ const Lead = ({ children }: { children: ReactNode }) => (
 
 export default function BusinessApi() {
   useDocumentHead(PAGE_HEADS.businessApi);
-  useBreadcrumbSchema(CRUMBS);
 
   return (
     <div className="min-h-screen bg-white">
@@ -1027,7 +1020,6 @@ export default function BusinessApi() {
       <SiteHeader />
 
       <PageHero
-        crumbs={CRUMBS}
         title={['WhatsApp Business API for', 'Scalable Customer Communication']}
         intro={[
           'Connect your business to WhatsApp and build a more structured way to communicate with customers at scale.',

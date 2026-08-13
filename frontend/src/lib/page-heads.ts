@@ -101,15 +101,70 @@ export const PAGE_HEADS = {
       + 'automations and your team from one place.',
   },
 
+  /* ---------------------------- Solution detail --------------------------- */
   /*
-   * **The solutions tree and /industries are absent on purpose.**
+   * **These six are placeholders that are nonetheless indexable, by explicit decision.**
    *
-   * Those six routes render `pages/ComingSoon.tsx`, which sets its own head inline with
-   * `robots: 'noindex, follow'` and no canonical. A head here would put them in the
-   * sitemap (the test asserts this table and the sitemap are the same set), and a sitemap
-   * entry is a request to index — which is the wrong request for a page that says "being
-   * written". Add the head and the `<loc>` together, when the copy exists.
+   * The routes render `pages/ComingSoon.tsx`, not the full `DetailPage`. Normally a page
+   * that says "the full page is being written" should be `noindex` — a thin page ranking
+   * for "whatsapp lead management" burns the click and teaches the ranking system that the
+   * site does not answer the query, which is why they *were* `noindex` and absent from the
+   * sitemap.
+   *
+   * That was reversed on request: these URLs are to appear in `sitemap.xml`, and a sitemap
+   * entry is a request to index, so the `noindex` had to go with it — the two cannot both
+   * be true, and leaving both would only log "Submitted URL marked noindex" in Search
+   * Console while changing nothing.
+   *
+   * The mitigation, since they are being indexed: `ComingSoon` renders each page's real
+   * `intro` copy from `lib/marketing-content.ts` alongside the notice, so what gets indexed
+   * is a couple of hundred accurate words on the topic rather than sixty words of apology.
+   * The full pages are still written and still sitting in that file behind
+   * `pages/DetailPage.tsx` — routing them back is a one-line change per page and is the
+   * real fix.
    */
+  industries: {
+    path: '/industries',
+    title: 'WhatsApp Automation by Industry | ZunoPilot',
+    description:
+      'How restaurants, ecommerce, real estate, education and service businesses use WhatsApp '
+      + 'automation for enquiries, reminders, follow-ups and campaigns.',
+  },
+  leadManagement: {
+    path: '/solutions/lead-management',
+    title: 'WhatsApp Lead Management Software | ZunoPilot',
+    description:
+      'Capture WhatsApp enquiries, qualify prospects automatically and keep follow-ups on '
+      + 'schedule, so leads reach your sales team with context instead of going quiet.',
+  },
+  salesAutomation: {
+    path: '/solutions/sales-automation',
+    title: 'WhatsApp Sales Automation for Teams | ZunoPilot',
+    description:
+      'Automate the repeatable half of selling on WhatsApp: first responses, qualification and '
+      + 'follow-ups, so representatives work qualified opportunities.',
+  },
+  customerSupport: {
+    path: '/solutions/customer-support',
+    title: 'WhatsApp Customer Support Software | ZunoPilot',
+    description:
+      'Handle routine support requests with WhatsApp workflows and AI assistance, and escalate '
+      + 'to agents with the full conversation history attached.',
+  },
+  marketingAutomation: {
+    path: '/solutions/marketing-automation',
+    title: 'WhatsApp Marketing Automation | ZunoPilot',
+    description:
+      'Reach customers with WhatsApp promotions, announcements and re-engagement campaigns, on '
+      + 'a channel where a reply becomes a conversation.',
+  },
+  customerEngagement: {
+    path: '/solutions/customer-engagement',
+    title: 'WhatsApp Customer Engagement Platform | ZunoPilot',
+    description:
+      'Stay connected after the first sale with WhatsApp reminders, updates, follow-ups and '
+      + 're-engagement built around real customer moments.',
+  },
 
   pricing: {
     path: '/pricing',

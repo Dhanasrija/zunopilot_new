@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { useBreadcrumbSchema } from '@/lib/json-ld';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
@@ -499,15 +498,9 @@ function CommandCentre() {
   );
 }
 
-const CRUMBS = [
-  { name: 'Home', path: '/' },
-  { name: 'Features', path: '/features' },
-  { name: 'WhatsApp Campaigns', path: '/features/whatsapp-campaigns' },
-];
 
 export default function Campaigns() {
   useDocumentHead(PAGE_HEADS.campaigns);
-  useBreadcrumbSchema(CRUMBS);
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
@@ -515,7 +508,6 @@ export default function Campaigns() {
       <SiteHeader />
 
       <PageHero
-        crumbs={CRUMBS}
         title={['WhatsApp Campaigns for More', 'Effective Customer Outreach']}
         intro={[
           'Reach customers through WhatsApp with campaigns built around the right audience, message, and business objective.',

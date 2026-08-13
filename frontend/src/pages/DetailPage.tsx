@@ -3,7 +3,6 @@ import { ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { useBreadcrumbSchema } from '@/lib/json-ld';
 import { DETAIL_BY_PATH, type DetailPage as DetailPageData } from '@/lib/marketing-content';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
@@ -55,14 +54,14 @@ export default function DetailPage() {
  */
 function Detail({ data }: { data: DetailPageData }) {
   useDocumentHead(PAGE_HEADS[data.headKey as keyof typeof PAGE_HEADS]);
-  useBreadcrumbSchema(data.crumbs);
+  // Breadcrumbs (visible + schema) come from `PageBreadcrumbs` inside `PageHero`.
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <ScrollProgress />
       <SiteHeader />
 
-      <PageHero title={[...data.h1]} intro={data.intro} crumbs={data.crumbs} />
+      <PageHero title={[...data.h1]} intro={data.intro} />
 
       {/* What it does — the capability list. */}
       <Section tone="tinted">

@@ -82,6 +82,26 @@ const PAGE_METADATA: Record<string, Omit<SitemapEntry, 'path'>> = {
   '/features/whatsapp-team-inbox': { lastmod: '2026-08-12', changefreq: 'monthly', priority: 0.8 },
   '/features/whatsapp-business-api': { lastmod: '2026-08-12', changefreq: 'monthly', priority: 0.8 },
 
+  /*
+   * **The solutions tree and /industries are placeholders that are advertised anyway.**
+   *
+   * By explicit decision — see the header of `pages/ComingSoon.tsx`. They render a short page
+   * carrying each topic's real intro copy plus a notice that the full page is being written,
+   * and they are indexable because a sitemap entry is a request to index and the two have to
+   * agree.
+   *
+   * `priority` is 0.6 rather than the 0.8 the finished feature pages carry: within this site
+   * they genuinely are less important than a complete page, and that is the only thing the
+   * field claims. `changefreq: 'weekly'` because these are the pages actually being worked
+   * on — unlike `lastmod`, this one is a forecast, and for once it is an honest one.
+   */
+  '/industries': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+  '/solutions/lead-management': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+  '/solutions/sales-automation': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+  '/solutions/customer-support': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+  '/solutions/marketing-automation': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+  '/solutions/customer-engagement': { lastmod: '2026-08-13', changefreq: 'weekly', priority: 0.6 },
+
   '/pricing': { lastmod: '2026-08-13', changefreq: 'monthly', priority: 0.8 },
   '/contact': { lastmod: '2026-08-13', changefreq: 'monthly', priority: 0.6 },
 
@@ -93,11 +113,14 @@ const PAGE_METADATA: Record<string, Omit<SitemapEntry, 'path'>> = {
 /**
  * Every URL to advertise, in the order the site is structured.
  *
- * **Derived from `PAGE_HEADS`, filtered on `path !== null`.** That filter is the mechanism
- * that keeps the placeholders out: `/solutions/*` and `/industries` render `ComingSoon`,
- * which sets `noindex, follow` and no canonical, so they have no entry in `PAGE_HEADS` at
- * all — and `/login` has an entry with `path: null`, because it is `noindex` too. A sitemap
- * is a list of pages you are *asking* to be indexed, and neither group qualifies.
+ * **Derived from `PAGE_HEADS`, filtered on `path !== null`.** That filter is what keeps
+ * `noindex` pages out — today only `/login`, which has an entry with `path: null` so its
+ * title is reviewable next to the others without it being advertised. A sitemap is a list of
+ * pages you are *asking* to be indexed, and a sign-in form is not one.
+ *
+ * The placeholders under `/solutions` and `/industries` **are** in here, by explicit
+ * decision, and are indexable to match. See the header of `pages/ComingSoon.tsx` for what
+ * that trades away and the one-line change that fixes it properly.
  *
  * A page whose head exists but whose metadata is missing above throws here rather than
  * being emitted with invented values. Failing the build is the correct response: a sitemap
@@ -155,9 +178,9 @@ export const buildSitemapXml = (
     '  it for you). src/lib/sitemap.test.ts fails if this file and that module disagree, so a',
     '  hand-edit here does not survive CI.',
     '',
-    `  ${entries.length} URLs. Pages that set noindex are absent by construction: the placeholders`,
-    '  under /solutions and /industries have no PAGE_HEADS entry, and /login has one with a null',
-    '  path. A sitemap is a request to index, and neither group is asking.',
+    `  ${entries.length} URLs. Every page here is indexable — a sitemap entry is a request to index,`,
+    '  so anything sending noindex is excluded by construction (it has no PAGE_HEADS path).',
+    '  /login is the only such page today.',
     '-->',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
     urls,

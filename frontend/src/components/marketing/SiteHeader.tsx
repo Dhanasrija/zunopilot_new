@@ -279,10 +279,14 @@ export default function SiteHeader() {
               </motion.div>
             </Link>
           ) : (
+            /*
+              **One control, not two.** "Sign in" and "Get Started" both pointed at `/login` —
+              the same screen, because signing up and signing in are one flow here. Two
+              adjacent links to one destination is a choice the visitor has to think about and
+              cannot get wrong, which is the worst kind. Removed on request; `SIGNUP_LINK`
+              already resolves to the sign-in screen, so existing users lose nothing.
+            */
             <>
-              <Link to="/login" className="text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
-                Sign in
-              </Link>
               <Link to={SIGNUP_LINK}>
                 <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
                   <Button className={HEADER_CTA}>{CTA_LABEL}</Button>
@@ -358,9 +362,6 @@ export default function SiteHeader() {
                   </Link>
                 ) : (
                   <>
-                    <Link to="/login" onClick={() => setOpen(false)} className="px-3 py-2 text-slate-700">
-                      Sign in
-                    </Link>
                     <Link to={SIGNUP_LINK} onClick={() => setOpen(false)}>
                       <Button className="w-full rounded-full bg-violet-600 hover:bg-violet-700 h-11">
                         {CTA_LABEL}

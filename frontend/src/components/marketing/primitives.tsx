@@ -1,11 +1,12 @@
 import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowDown, ArrowRight, Check, Plus } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowDown, ArrowRight, Check, ChevronRight, Plus } from 'lucide-react';
 import {
   motion, AnimatePresence, useScroll, useSpring, type Variants,
 } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { useFaqSchema, type FaqEntry } from '@/lib/json-ld';
+import { useBreadcrumbSchema, useFaqSchema, type FaqEntry } from '@/lib/json-ld';
+import { crumbsForPath, type Crumb } from '@/lib/breadcrumbs';
 import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
 import { CTA_LABEL, SIGNUP_LINK } from '@/lib/marketing-nav';
 
@@ -232,10 +233,19 @@ export function ScrollProgress() {
  * wants both — the markup for the search result, the links for the person who arrived
  * on a detail page from a search result and needs a way up.
  */
-export function Breadcrumbs({ crumbs }: { crumbs: readonly { name: string; path: string }[] }) {
+export function Breadcrumbs({
+  crumbs, align = 'center',
+}: {
+  crumbs: readonly Crumb[];
+  align?: 'center' | 'left';
+}) {
   return (
     <nav aria-label="Breadcrumb" className="mb-6">
-      <ol className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-slate-600">
+      <ol
+        className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600 ${
+          align === 'center' ? 'justify-center' : 'justify-start'
+        }`}
+      >
         {crumbs.map((crumb, i) => (
           <li key={crumb.path} className="flex items-center gap-2">
             {i < crumbs.length - 1 ? (
@@ -245,12 +255,37 @@ export function Breadcrumbs({ crumbs }: { crumbs: readonly { name: string; path:
             ) : (
               <span className="text-slate-700 font-medium" aria-current="page">{crumb.name}</span>
             )}
-            {i < crumbs.length - 1 && <span aria-hidden className="text-slate-300">/</span>}
+            {i < crumbs.length - 1 && (
+              <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+            )}
           </li>
         ))}
       </ol>
     </nav>
   );
+}
+
+/**
+ * Breadcrumbs for whatever route is current, plus the matching `BreadcrumbList` graph.
+ *
+ * **Route-derived rather than prop-driven, which is the whole point.** Four pages used to
+ * pass a hand-written `crumbs` array to `PageHero` and fifteen passed nothing, so fifteen
+ * pages had no trail on screen and no structured data either. Reading the path means a page
+ * cannot forget — see the header of `lib/breadcrumbs.ts`.
+ *
+ * Renders nothing on the home page: a one-item trail reading "Home" on `/` is noise, and a
+ * single-element `BreadcrumbList` is not worth emitting.
+ */
+export function PageBreadcrumbs({ align = 'center' }: { align?: 'center' | 'left' }) {
+  const { pathname } = useLocation();
+  const crumbs = crumbsForPath(pathname);
+
+  // Always called, never conditionally — hooks cannot sit behind an early return. Passing an
+  // empty array makes `useBreadcrumbSchema` a no-op for the home page.
+  useBreadcrumbSchema(crumbs.length > 1 ? crumbs : []);
+
+  if (crumbs.length < 2) return null;
+  return <Breadcrumbs crumbs={crumbs} align={align} />;
 }
 
 /**
@@ -691,12 +726,10 @@ export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
 
 /** The hero shared by every page except the home page. */
 export function PageHero({
-  title, intro, crumbs, children,
+  title, intro, children,
 }: {
   title: string[];
   intro: readonly string[];
-  /** Rendered above the h1 on pages that sit under a hub. */
-  crumbs?: readonly { name: string; path: string }[];
   children?: ReactNode;
 }) {
   return (
@@ -708,7 +741,13 @@ export function PageHero({
       />
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 sm:pt-16 pb-14 sm:pb-20">
         <div className="max-w-4xl mx-auto text-center">
-          {crumbs && <Breadcrumbs crumbs={crumbs} />}
+          {/*
+            **Always, and derived from the route.** This used to be `{crumbs && …}` with the
+            array passed in per page, which meant a page that forgot the prop silently had no
+            trail and no `BreadcrumbList`. Now every page that uses `PageHero` gets both, and
+            the home page — which does not use this hero — is the only one with neither.
+          */}
+          <PageBreadcrumbs />
           <AnimatedHeading
             as="h1"
             trigger="mount"

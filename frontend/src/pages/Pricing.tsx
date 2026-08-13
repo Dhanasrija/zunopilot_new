@@ -8,7 +8,7 @@ import { SIGNUP_LINK } from '@/lib/marketing-nav';
 import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
-import { CtaBand, PageHero, Section } from '@/components/marketing/primitives';
+import { CtaBand, PageBreadcrumbs, Section } from '@/components/marketing/primitives';
 
 /*
  * The public pricing page.
@@ -45,17 +45,24 @@ export default function Pricing() {
     <div className="min-h-screen bg-white text-slate-900">
       <SiteHeader />
 
-      <PageHero
-        title={['Pricing That Grows', 'With the Conversations']}
-        intro={[
-          'Every plan includes the assistant, the shared team inbox and the workflow builder. '
-          + 'You pay for the size of your team and how much AI you use — not for access to the '
-          + 'features that make the platform worth having.',
-          'Prices are in rupees and GST is shown before you pay.',
-        ]}
-      />
+      {/*
+        **No hero.** It carried a headline, three lines of positioning and the Get Started /
+        Book a Demo pair — all of it above the fold, so the prices were pushed below it on
+        every laptop. Somebody on `/pricing` has already been sold the idea; they came for a
+        number. Removed on request, and the reasoning holds: the CTA band at the foot of the
+        page still catches anyone who reads to the end, and the header CTA never left.
 
-      <Section tone="tinted">
+        The `pt-` on the section below replaces the spacing the hero used to provide, so the
+        interval switch does not collide with the sticky header.
+      */}
+      <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
+        <PageBreadcrumbs align="left" />
+       <h1 className="mt-2 text-center text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+  ZunoPilot Pricing
+</h1>
+      </div>
+
+      <Section tone="tinted" className="pt-10 sm:pt-14">
         {isLoading && (
           <p className="text-center text-sm text-slate-600">Loading prices…</p>
         )}

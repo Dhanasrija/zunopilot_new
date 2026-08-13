@@ -1,4 +1,5 @@
 import PublicHeader from '@/components/layout/PublicHeader';
+import { PageBreadcrumbs } from '@/components/marketing/primitives';
 
 type LegalLayoutProps = {
   title: string;
@@ -40,6 +41,14 @@ export default function LegalLayout({
 
       {/* Content card */}
       <main className="flex-1 px-4 sm:px-6 lg:px-8 pb-12">
+        {/*
+          The legal pages had no trail and no `BreadcrumbList` — they are two of the fifteen
+          pages that were missing both. Left-aligned because this is a reading layout, not a
+          centred hero.
+        */}
+        <div className="mx-auto max-w-3xl pt-4">
+          <PageBreadcrumbs align="left" />
+        </div>
         <div className="max-w-4xl mx-auto">
           <article className="rounded-3xl bg-white/95 backdrop-blur shadow-xl shadow-violet-200/40 ring-1 ring-slate-200 p-6 sm:p-10 prose prose-slate max-w-none">
             {children}

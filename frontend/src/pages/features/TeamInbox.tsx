@@ -1,185 +1,1114 @@
-import type { ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
-  Bot, Building2, ClipboardCheck, Clock, Eye, Headphones, Megaphone, MessageSquare,
-  NotebookPen, Plug, Repeat, ShieldCheck, Target, TrendingUp, UserCheck, Users, Workflow,
+  AlertTriangle, ArrowRight, Bot, Building2, CalendarClock, CheckCheck, ClipboardList,
+  Eye, Headphones, Megaphone, MessageSquare, Search, ShieldCheck, Sparkles, Target,
+  UserCheck, UserRound, Users, UsersRound, Workflow,
 } from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { useBreadcrumbSchema } from '@/lib/json-ld';
-import type { FaqEntry } from '@/lib/json-ld';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  ArrowLink, CARD_SPRING, CtaBand, EASE_OUT, FaqSection, PageHero, ScrollProgress,
-  Section, SectionHead, item, stagger, viewport,
+  ArrowLink, CARD_SPRING, CheckList, CtaBand, EASE_OUT, FaqSection, MatchTable, PageHero,
+  ScrollProgress, Section, SectionHead, TileGrid, item, stagger, viewport,
 } from '@/components/marketing/primitives';
-import { IconTitle, Reveal } from '@/components/marketing/motion-kit';
+import { ChipRow, GlowCard, IconTitle, Reveal } from '@/components/marketing/motion-kit';
 
 /*
  * /features/whatsapp-team-inbox
  *
- * **The design idea is people working on the same thing at once.** Every other feature page
- * draws a system: a pipeline, a stack, a routing path. This page is the one whose subject is
- * *humans*, so its figures have named agents in them — a live roster with presence, one
- * conversation card that visibly belongs to somebody, and a handover drawn as two lanes with
- * the conversation crossing between them.
+ * **The copy is supplied and reproduced exactly.** Every heading, paragraph, list item,
+ * table row and FAQ answer on this page is the client's text, unedited. Where it is broken
+ * across `title={['…', '…']}` arrays that is a line-break decision only — the words and
+ * their order are untouched. Two deliberate deviations, both to keep the site consistent
+ * with itself rather than with the brief:
  *
- * Where its siblings sit:
- *   • whatsapp-automation      — numbered rails and scenario cards
- *   • ai-whatsapp-automation   — quoted utterances, comparison table
- *   • whatsapp-number-masking  — paired contact-path diagrams
- *   • whatsapp-campaigns       — a horizontal pipeline and message mockups
- *   • whatsapp-business-api    — layered slabs and dark system flows
- *   • this page                — agent lanes, presence, and an assignment board
+ *   • The CTAs read "Get Started", not "Start Free". The site standardised on one label in
+ *     `lib/marketing-nav.ts` after "Start Free" / "Start free trial" / "Start Free Trial"
+ *     were found on the same site; `CtaPair` renders `CTA_LABEL` and this page uses
+ *     `CtaPair`, so it cannot drift back.
+ *   • Internal links carry no trailing slash. The brief writes `/solutions/lead-management/`;
+ *     every route, canonical and `<loc>` on this site is slash-free, and mixing the two
+ *     creates a redirect on an internal link. `ScrollToTop` normalises either form, so the
+ *     brief's links would work — they just would not match the canonical.
  *
- * The two people in the figures are named Priya and Arjun and are the same two people
- * throughout, which is not decoration: "someone else already replied" only lands if the
- * reader can see it is a *specific* someone. They are illustrative staff, not customers, and
- * no claim is attached to them.
+ * **The argument the page has to carry, and how the figures carry it.** The whole pitch is
+ * one shape: a conversation that belongs to *a person* versus a conversation that belongs to
+ * *the business*. Prose can assert that; it is much more convincing drawn. So the four
+ * custom figures below are all the same before/after in different clothes —
+ * `OwnershipSwitch` (individual vs team), `DuplicateReply` (what goes wrong without shared
+ * visibility), `HandoffTimeline` (a conversation surviving three owners), and
+ * `StructureShift` (the two topologies side by side). Everything else uses the shared
+ * primitives, so this reads as the same site as its five sibling pages.
  *
- * The related-pages section at the bottom is a deliberate exception to how the rest of the
- * site links out. Team Inbox is the page the other five converge on — automation and AI hand
- * conversations *to* people — so it is drawn as a hub with real links on every spoke rather
- * than as a list of two "see also" chips.
+ * Hedged throughout — "can", "where supported", "depending on your configuration" — because
+ * that is how the supplied copy is written, and correctly so: what this feature does depends
+ * on how a workspace is set up, and a product page is the wrong place to promise otherwise.
  */
 
-/* -------------------------------------------------------------------------- */
-/*                          Page-local design devices                          */
-/* -------------------------------------------------------------------------- */
-
-interface Agent { name: string; initials: string; role: string; online: boolean }
-
-const AGENTS: readonly Agent[] = [
-  { name: 'Priya', initials: 'PR', role: 'Support', online: true },
-  { name: 'Arjun', initials: 'AR', role: 'Support', online: true },
-  { name: 'Meera', initials: 'ME', role: 'Sales', online: true },
-  { name: 'Dev', initials: 'DV', role: 'Service', online: false },
+const FAQS = [
+  {
+    question: 'What is a WhatsApp Team Inbox?',
+    answer:
+      'A WhatsApp Team Inbox is a shared workspace that allows multiple authorized employees '
+      + 'to manage business WhatsApp conversations from a common environment.',
+  },
+  {
+    question: 'Can multiple employees use a WhatsApp Team Inbox?',
+    answer:
+      'Yes. A WhatsApp Team Inbox is designed for multiple authorized users who need to '
+      + 'participate in managing business WhatsApp conversations. Available access and '
+      + 'capabilities depend on the configured ZunoPilot and WhatsApp Business setup.',
+  },
+  {
+    question:
+      'What is the difference between a WhatsApp Team Inbox and a personal WhatsApp account?',
+    answer:
+      'A personal WhatsApp account is primarily designed around an individual user, while a '
+      + 'WhatsApp Team Inbox provides a business-oriented environment where multiple '
+      + 'authorized team members can participate in customer conversation management.',
+  },
+  {
+    question: 'Can WhatsApp conversations be assigned to team members?',
+    answer:
+      'Where supported by the configured ZunoPilot functionality, conversations can be '
+      + 'assigned or routed to appropriate team members so responsibility is clearer.',
+  },
+  {
+    question: 'How does a WhatsApp Team Inbox help customer support?',
+    answer:
+      'It gives support teams a shared environment for handling customer conversations, '
+      + 'coordinating responsibility, continuing existing discussions, and transferring '
+      + 'conversations when another employee needs to assist.',
+  },
+  {
+    question: 'Can sales teams use a WhatsApp Team Inbox?',
+    answer:
+      'Yes. Sales teams can use a shared inbox to manage incoming enquiries, coordinate '
+      + 'customer conversations, and allow another authorized representative to continue a '
+      + 'conversation when necessary.',
+  },
+  {
+    question: 'Can a customer conversation be transferred to another employee?',
+    answer:
+      'Where the configured workflow supports conversation assignment or handoff, another '
+      + 'authorized team member can take responsibility for continuing the customer '
+      + 'interaction.',
+  },
+  {
+    question: 'Does a shared WhatsApp inbox prevent duplicate replies?',
+    answer:
+      'Shared visibility can help reduce duplicate responses because team members can see '
+      + 'conversations and their handling status. The exact behavior depends on the features '
+      + 'available in the ZunoPilot setup.',
+  },
+  {
+    question: 'Can team members see previous WhatsApp conversations?',
+    answer:
+      'The conversation history available to team members depends on the configured ZunoPilot '
+      + 'and WhatsApp Business environment. The shared workspace is designed to help '
+      + 'authorized users work with relevant conversation context.',
+  },
+  {
+    question: 'Can managers monitor team conversations?',
+    answer:
+      'Where supported by the configured access and permissions, managers can have visibility '
+      + 'into business conversations to help coordinate customer communication and team '
+      + 'responsibilities.',
+  },
+  {
+    question: 'Is a WhatsApp Team Inbox the same as WhatsApp automation?',
+    answer:
+      'No. A Team Inbox is focused on people working together on customer conversations, '
+      + 'while WhatsApp automation is focused on automating suitable business processes and '
+      + 'recurring communication.',
+  },
+  {
+    question: 'Can AI work with a WhatsApp Team Inbox?',
+    answer:
+      'Yes. AI-assisted interactions can complement team-based communication where the '
+      + 'relevant ZunoPilot functionality is configured. AI can assist with suitable '
+      + 'conversations while employees handle interactions requiring human judgment.',
+  },
 ];
 
-/**
- * The roster: who is on, drawn as overlapping avatars.
- *
- * Presence is the one thing a shared inbox has that four phones do not, so it is stated
- * first and stated visually. The "on" dot pulses; the off-shift one does not, which is the
- * whole distinction the figure is making.
- */
-function Roster({ agents }: { agents: readonly Agent[] }) {
-  const reduce = useReducedMotion();
+export default function TeamInbox() {
+  useDocumentHead(PAGE_HEADS.teamInbox);
+
   return (
-    <div className="flex items-center gap-3">
-      <ul className="flex -space-x-2">
-        {agents.map((agent, i) => (
-          <motion.li
-            key={agent.name}
-            initial={{ opacity: 0, scale: 0.8 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={viewport}
-            transition={{ duration: 0.4, delay: i * 0.07, ease: EASE_OUT }}
-            whileHover={{ y: -3, zIndex: 10 }}
-            className="relative"
+    <div className="min-h-screen bg-white text-slate-900">
+      <ScrollProgress />
+      <SiteHeader />
+
+      <PageHero
+        title={['Give Your Team One Place to Work', 'on WhatsApp Conversations']}
+        intro={[
+          'Customer conversations become harder to manage when they are spread across individual employees.',
+          "ZunoPilot's WhatsApp Team Inbox gives customer-facing teams a shared workspace where authorized users can work with business WhatsApp conversations, coordinate responsibility, and keep customer interactions connected to the organization.",
+          'Instead of asking who has the customer chat, your team can work from a common inbox designed for collaborative WhatsApp communication.',
+        ]}
+      >
+        {/*
+          The hub link the internal-linking plan asks for in the introduction. Inside the hero
+          rather than in a paragraph of its own, so it is the first outbound link on the page
+          without interrupting the three-paragraph pitch above it.
+        */}
+        <p className="mt-8">
+          <ArrowLink to="/features">Explore all ZunoPilot Features</ArrowLink>
+        </p>
+      </PageHero>
+
+      {/* ------------------- When WhatsApp becomes a team job ------------------ */}
+      <Section tone="tinted">
+        <SectionHead
+          eyebrow="The problem"
+          title={['When WhatsApp Becomes', 'a Team Responsibility']}
+          lead={(
+            <>
+              <p>A business may begin with one person answering WhatsApp messages.</p>
+              <p>As enquiries increase, more people become involved.</p>
+              <p>
+                Sales may need to handle prospects. Support may need to resolve customer
+                issues. Operations may need to take over specific requests.
+              </p>
+              <p>Without a shared working environment, teams can face situations such as:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <FrictionGrid />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
+          A WhatsApp Team Inbox gives the organization a way to manage these challenges from a
+          shared workspace.
+        </p>
+      </Section>
+
+      {/* --------------------------- One shared view --------------------------- */}
+      <Section>
+        <SectionHead
+          title={['One Shared View for', 'Customer Conversations']}
+          lead={(
+            <>
+              <p>
+                Instead of keeping customer chats tied to individual employees, ZunoPilot
+                brings eligible business conversations into a team-oriented inbox.
+              </p>
+              <p>
+                Authorized users can work with the conversations relevant to their
+                responsibilities while maintaining visibility across the customer
+                communication process.
+              </p>
+              <p>This creates a simple distinction:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <OwnershipSwitch />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
+          That difference becomes increasingly valuable as customer communication grows.
+        </p>
+      </Section>
+
+      {/* ------------------------------ Definition ---------------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['What Is a WhatsApp Team Inbox?']}
+          lead={(
+            <>
+              <p>
+                A WhatsApp Team Inbox is a shared workspace that allows multiple authorized
+                team members to manage business WhatsApp conversations.
+              </p>
+              <p>
+                It provides a common environment for teams that need to see, organize, and
+                respond to customer messages.
+              </p>
+              <p>
+                Depending on the configured ZunoPilot setup, teams can use the inbox to
+                support activities such as:
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10 max-w-3xl mx-auto rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
+          <CheckList
+            items={[
+              'Viewing customer conversations',
+              'Managing conversation ownership',
+              'Assigning conversations',
+              'Coordinating team responses',
+              'Handling customer handoffs',
+              'Reviewing conversation context',
+              'Managing conversations across customer-facing teams',
+            ]}
+          />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
+          The exact capabilities depend on your ZunoPilot configuration and connected WhatsApp
+          Business environment.
+        </p>
+      </Section>
+
+      {/* ---------------------------- Clear owner ----------------------------- */}
+      <Section>
+        <SectionHead
+          title={['Give Every Conversation', 'a Clear Owner']}
+          lead={(
+            <>
+              <p>
+                One of the simplest ways to improve team coordination is to make
+                responsibility clear.
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <OwnerRouting />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            Instead of leaving responsibility unclear, your team can organize conversations
+            around the people or teams responsible for handling them.
+          </p>
+          <p>This helps reduce the question:</p>
+          <p className="text-lg font-semibold text-slate-900">
+            &ldquo;Is anyone taking care of this customer?&rdquo;
+          </p>
+        </div>
+      </Section>
+
+      {/* ------------------------------ Handoffs ------------------------------ */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Make Customer', 'Handoffs Easier']}
+          lead={(
+            <>
+              <p>
+                A customer conversation doesn&rsquo;t always remain with the same employee.
+              </p>
+              <p>A sales enquiry may become a support issue.</p>
+              <p>A support request may need help from operations.</p>
+              <p>
+                An employee may be unavailable and another team member may need to continue
+                the conversation.
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <HandoffTimeline />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            A shared inbox provides a common place for the conversation to remain accessible
+            to authorized users during these transitions.
+          </p>
+          <p>
+            The customer can continue the discussion while the responsibility changes
+            internally.
+          </p>
+        </div>
+      </Section>
+
+      {/* -------------------------- Duplicate replies ------------------------- */}
+      <Section>
+        <SectionHead
+          title={['Reduce Duplicate Replies']}
+          lead={(
+            <>
+              <p>
+                Team communication becomes difficult when employees don&rsquo;t know what
+                others are doing.
+              </p>
+              <p>For example:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <DuplicateReply />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            Shared visibility can help teams coordinate their responses and understand which
+            conversations are already being handled.
+          </p>
+          <p>
+            This is especially useful when several employees work during the same period or
+            when customer enquiry volumes are high.
+          </p>
+        </div>
+      </Section>
+
+      {/* ------------------------------- Context ------------------------------ */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Keep the Conversation', 'Context With the Business']}
+          lead={(
+            <>
+              <p>
+                A customer may initially speak with a salesperson and later need help from
+                support.
+              </p>
+              <p>
+                The next employee shouldn&rsquo;t have to begin by asking the customer to
+                explain everything again.
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <ContextCarry />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            When relevant conversation history is available within the team&rsquo;s working
+            environment, authorized users can understand the previous discussion before
+            continuing.
+          </p>
+          <p>
+            This can make internal handoffs smoother and help create a more consistent
+            customer experience.
+          </p>
+        </div>
+      </Section>
+
+      {/* ------------------------- Organize around teams ---------------------- */}
+      <Section>
+        <SectionHead
+          title={['Organize Conversations', 'Around Your Teams']}
+          lead={(
+            <>
+              <p>Different businesses organize customer communication differently.</p>
+              <p>A company may have:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10 max-w-3xl mx-auto">
+          <ChipRow
+            className="justify-center"
+            chips={[
+              'Sales representatives',
+              'Customer support agents',
+              'Account managers',
+              'Operations staff',
+              'Service coordinators',
+              'Customer success teams',
+            ]}
+          />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            The Team Inbox can support a team-based approach to customer conversations,
+            allowing the organization to determine who should handle different types of
+            enquiries.
+          </p>
+          <p>
+            Instead of building the customer relationship around one employee, the business
+            can build a process around the team.
+          </p>
+        </div>
+      </Section>
+
+      {/* -------------------------------- Sales ------------------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          eyebrow="For sales teams"
+          title={['WhatsApp Team Inbox for Sales']}
+          lead={(
+            <>
+              <p>
+                Sales teams often receive enquiries from customers at different stages of the
+                buying journey.
+              </p>
+              <p>
+                One person may be unavailable. Another may specialize in a particular product.
+                A manager may need to review an important opportunity.
+              </p>
+              <p>
+                A shared inbox can give the sales team a common environment for managing these
+                conversations.
+              </p>
+              <p>For example:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <SalesRelay />
+        </div>
+
+        <div className="mt-8 text-center">
+          <p className="mx-auto max-w-2xl text-base text-slate-700">
+            This can make incoming WhatsApp enquiries easier to coordinate.
+          </p>
+          <p className="mt-5">
+            <ArrowLink to="/solutions/lead-management">Explore WhatsApp Lead Management</ArrowLink>
+          </p>
+        </div>
+      </Section>
+
+      {/* ------------------------------- Support ------------------------------ */}
+      <Section>
+        <SectionHead
+          eyebrow="For support teams"
+          title={['WhatsApp Team Inbox', 'for Customer Support']}
+          lead={(
+            <>
+              <p>Customer support conversations can involve multiple stages.</p>
+              <p>
+                A customer may start with a general question and later require assistance from
+                another team.
+              </p>
+              <p>
+                A shared inbox can help support teams work through these interactions without
+                requiring every customer conversation to remain with one person.
+              </p>
+              <p>
+                Teams can use the shared environment to organize customer requests, continue
+                existing discussions, and involve the appropriate person when additional
+                expertise is required.
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10 text-center">
+          <ArrowLink to="/solutions/customer-support">Explore Customer Support</ArrowLink>
+        </div>
+      </Section>
+
+      {/* --------------------- Fewer internal status pings -------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Keep Your Team Informed Without', 'Constant Internal Messages']}
+          lead={<p>Without shared visibility, employees may spend time asking each other:</p>}
+        />
+
+        <div className="mt-10">
+          <InternalPings />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            A shared inbox can reduce some of this internal coordination by putting relevant
+            conversation information in the same working environment.
+          </p>
+          <p>
+            Your team can spend more time dealing with customers and less time figuring out who
+            is responsible for each conversation.
+          </p>
+        </div>
+      </Section>
+
+      {/* ----------------------------- Continuity ----------------------------- */}
+      <Section>
+        <SectionHead
+          title={['Support Business Continuity', 'When People Change']}
+          lead={<p>Customer relationships shouldn&rsquo;t disappear when an employee changes roles.</p>}
+        />
+
+        <div className="mt-10">
+          <TileGrid
+            columns={2}
+            tiles={[
+              { icon: CalendarClock, title: 'People take leave.', body: '' },
+              { icon: Workflow, title: 'Responsibilities move between departments.', body: '' },
+              { icon: UsersRound, title: 'Teams grow.', body: '' },
+              { icon: UserRound, title: 'Employees leave.', body: '' },
+            ]}
+          />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>
+            A team inbox can help reduce dependence on one person being the only holder of a
+            customer conversation.
+          </p>
+          <p>
+            When the business maintains access to the appropriate conversation context, another
+            authorized team member can take responsibility when required.
+          </p>
+        </div>
+      </Section>
+
+      {/* ------------------------- Manager visibility ------------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Give Managers', 'Better Visibility']}
+          lead={(
+            <>
+              <p>
+                Team leaders often need to understand the state of customer communication
+                without asking every employee for individual updates.
+              </p>
+              <p>
+                A shared inbox can provide a common environment for authorized managers and
+                team members to understand which conversations are active and where attention
+                may be required.
+              </p>
+              <p>This can help businesses identify:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10 max-w-3xl mx-auto rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
+          <CheckList
+            items={[
+              'Conversations waiting for a response',
+              'Active customer discussions',
+              'Handoffs between team members',
+              'Areas where additional support may be needed',
+              'Customer communication that requires attention',
+            ]}
+          />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
+          The goal is better visibility without turning every customer conversation into a
+          manual reporting exercise.
+        </p>
+      </Section>
+
+      {/* ------------------------- The structural shift ----------------------- */}
+      <Section>
+        <SectionHead
+          title={['From Individual Chats to', 'Team-Based Communication']}
+          lead={<p>A traditional approach may look like:</p>}
+        />
+
+        <div className="mt-10">
+          <StructureShift />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <p>The employee still provides the personal interaction.</p>
+          <p>
+            But the organization has a stronger communication framework around that
+            interaction.
+          </p>
+          <p>
+            This can be particularly valuable for businesses where WhatsApp is an important
+            customer service or sales channel.
+          </p>
+        </div>
+      </Section>
+
+      {/* --------------------------- Works alongside -------------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Connect Your Team Inbox', 'With Other ZunoPilot Features']}
+          lead={(
+            <p>
+              The Team Inbox can work alongside other ZunoPilot capabilities without changing
+              its primary purpose.
+            </p>
+          )}
+        />
+
+        <div className="mt-10">
+          <CompanionFeatures />
+        </div>
+      </Section>
+
+      {/* ------------------------------ The table ----------------------------- */}
+      <Section>
+        <SectionHead
+          title={['What a WhatsApp Team Inbox', 'Can Help Your Business Manage']}
+        />
+
+        <div className="mt-10 max-w-4xl mx-auto">
+          <MatchTable
+            head={['Challenge', 'Team Inbox approach']}
+            rows={[
+              ['Several employees handle WhatsApp', 'Shared access for authorized users'],
+              ['Nobody knows who owns a conversation', 'Clearer responsibility'],
+              ['Two employees answer the same customer', 'Better team visibility'],
+              ['Employee becomes unavailable', 'Easier handoff'],
+              ['Customer repeats previous information', 'Conversation context can remain available'],
+              ['Managers need visibility', 'Common working environment'],
+              ['Customer volume increases', 'More structured conversation management'],
+              ['Sales and support need to collaborate', 'Conversations can move between responsible teams'],
+            ]}
+          />
+        </div>
+      </Section>
+
+      {/* ------------------------------ Is it for you ------------------------- */}
+      <Section tone="tinted">
+        <SectionHead
+          title={['Is a WhatsApp Team Inbox', 'Right for Your Business?']}
+          lead={(
+            <>
+              <p>
+                A shared inbox becomes particularly useful when WhatsApp is no longer a
+                one-person communication channel.
+              </p>
+              <p>Consider a team inbox if:</p>
+            </>
+          )}
+        />
+
+        <div className="mt-10 max-w-3xl mx-auto rounded-3xl bg-white ring-1 ring-slate-200/80 p-6 sm:p-8">
+          <CheckList
+            items={[
+              'Multiple employees answer customer WhatsApp messages.',
+              'Customers are contacting different employees about the same business.',
+              'Your team struggles to identify conversation ownership.',
+              'Customers sometimes receive duplicate responses.',
+              'Conversations need to move between departments.',
+              'Managers need better visibility into customer interactions.',
+              'Employees need to take over conversations from one another.',
+              'WhatsApp is becoming an important sales or support channel.',
+            ]}
+          />
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          {/*
+            The copy tells some readers this is not for them. Kept verbatim, and worth keeping:
+            a product page that names who should not buy is the reason the rest of it is
+            believed. It is also the honest answer for a one-person business.
+          */}
+          <p>
+            For a business with only one person managing a small number of conversations, a
+            team inbox may not be necessary.
+          </p>
+          <p>For growing customer-facing teams, it can provide a more organized way to work.</p>
+        </div>
+
+        <div className="mt-8 text-center">
+          <ArrowLink to="/pricing">See ZunoPilot Pricing</ArrowLink>
+        </div>
+      </Section>
+
+      {/* ------------------------ Connected experience ------------------------ */}
+      <Section>
+        <SectionHead
+          title={['WhatsApp Team Inbox for a More', 'Connected Customer Experience']}
+          lead={(
+            <>
+              <p>Customers don&rsquo;t see your internal team structure.</p>
+              <p>
+                They simply expect the business to know what they previously discussed and
+                provide a useful response.
+              </p>
+              <p>
+                A shared inbox helps your organization work toward that experience by giving
+                authorized employees a common environment for managing customer conversations.
+              </p>
+            </>
+          )}
+        />
+
+        <div className="mt-10">
+          <ClosingTriad />
+        </div>
+
+        <p className="mt-8 text-center text-base text-slate-700 max-w-2xl mx-auto">
+          That&rsquo;s the purpose of a team-based WhatsApp inbox.
+        </p>
+      </Section>
+
+      <FaqSection faqs={FAQS} />
+
+      <CtaBand
+        title={['Bring Your WhatsApp', 'Team Together']}
+        body={[
+          'Give your sales, support, and customer-facing employees a shared environment for '
+          + 'managing business WhatsApp conversations.',
+          "With ZunoPilot's WhatsApp Team Inbox, your team can work with greater visibility, "
+          + 'clearer responsibility, and easier conversation handoffs.',
+        ]}
+      />
+
+      <SiteFooter />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  Figures                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The five things that go wrong without a shared workspace.
+ *
+ * A `TileGrid` would have been the cheap choice, but these are *symptoms*, not features —
+ * so they get the warning tone and an amber icon rather than the violet capability styling
+ * used everywhere else on the page. Reading the page top to bottom, the colour flips from
+ * amber to violet exactly where the problem section ends, which does more than another
+ * heading would.
+ */
+function FrictionGrid() {
+  const PROBLEMS = [
+    { icon: CheckCheck, text: 'Two employees responding to the same customer' },
+    { icon: AlertTriangle, text: 'Messages waiting because nobody knows who owns them' },
+    { icon: Search, text: 'Employees searching for previous conversation details' },
+    { icon: MessageSquare, text: 'Customers repeating information after a handoff' },
+    { icon: Eye, text: 'Managers having limited visibility into active conversations' },
+  ];
+
+  return (
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.08)}
+      className="mx-auto grid max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+    >
+      {PROBLEMS.map((problem) => (
+        <motion.li
+          key={problem.text}
+          variants={item}
+          whileHover={{ y: -4 }}
+          transition={CARD_SPRING}
+          className="flex h-full items-start gap-3 rounded-2xl bg-white px-5 py-4 ring-1 ring-amber-200/80"
+        >
+          <span
+            aria-hidden
+            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-200"
           >
-            <span
-              title={`${agent.name} — ${agent.role}`}
-              className="grid h-10 w-10 place-items-center rounded-full bg-violet-100 text-[12px] font-bold text-violet-700 ring-2 ring-white"
-            >
-              {agent.initials}
+            <problem.icon className="h-[18px] w-[18px]" />
+          </span>
+          <span className="text-[15px] leading-snug text-slate-800">{problem.text}</span>
+        </motion.li>
+      ))}
+    </motion.ul>
+  );
+}
+
+/**
+ * Individual messaging versus a team inbox, as two panels.
+ *
+ * The copy states the distinction in four lines and the distinction is the page's entire
+ * thesis, so it gets a figure rather than a paragraph. Left panel muted and singular, right
+ * panel violet with three avatars — the asymmetry *is* the argument, and it survives being
+ * screenshotted without the surrounding prose.
+ */
+function OwnershipSwitch() {
+  return (
+    <div className="mx-auto grid max-w-4xl grid-cols-1 items-stretch gap-5 md:grid-cols-2">
+      <Reveal>
+        <div className="flex h-full flex-col rounded-3xl bg-slate-50 p-6 ring-1 ring-slate-200">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            Individual messaging
+          </p>
+          <div aria-hidden className="mt-5 flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-200 text-slate-600">
+              <UserRound className="h-5 w-5" />
             </span>
-            <span
-              aria-hidden
-              className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
-                agent.online ? 'bg-violet-600' : 'bg-slate-300'
-              }`}
-            />
-            {agent.online && !reduce && (
-              <motion.span
-                aria-hidden
-                initial={{ opacity: 0.6, scale: 1 }}
-                animate={{ opacity: 0, scale: 2.2 }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut', delay: i * 0.4 }}
-                className="pointer-events-none absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-500"
-              />
-            )}
-          </motion.li>
-        ))}
-      </ul>
-      <p className="text-[13px] font-medium text-slate-700">
-        <span className="font-bold text-slate-900">3 agents on</span>
-        {' · '}
-        1 off shift
-      </p>
+            <span className="h-px flex-1 bg-slate-300" />
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-white text-slate-500 ring-1 ring-slate-200">
+              <MessageSquare className="h-5 w-5" />
+            </span>
+          </div>
+          <p className="mt-5 text-[15px] leading-relaxed text-slate-700">
+            &rarr; One employee manages the conversation.
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.12}>
+        <div className="flex h-full flex-col rounded-3xl bg-white p-6 ring-1 ring-violet-300 shadow-lg shadow-violet-100">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-violet-600">
+            Team inbox
+          </p>
+          <div aria-hidden className="mt-5 flex items-center gap-3">
+            <span className="flex -space-x-2">
+              {[Users, Headphones, Building2].map((Icon, i) => (
+                <motion.span
+                  key={i}
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  viewport={viewport}
+                  transition={{ delay: 0.2 + i * 0.09, ...CARD_SPRING }}
+                  className="grid h-11 w-11 place-items-center rounded-full bg-violet-600 text-white ring-2 ring-white"
+                >
+                  <Icon className="h-5 w-5" />
+                </motion.span>
+              ))}
+            </span>
+            <span className="h-px flex-1 bg-violet-200" />
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-violet-200">
+              <MessageSquare className="h-5 w-5" />
+            </span>
+          </div>
+          <p className="mt-5 text-[15px] leading-relaxed text-slate-700">
+            &rarr; The business can coordinate who manages the conversation.
+          </p>
+        </div>
+      </Reveal>
     </div>
   );
 }
 
 /**
- * One customer conversation, as the team sees it.
+ * Three kinds of conversation, three owners.
  *
- * The point of the figure is the *chrome around* the message, not the message: who owns it,
- * that somebody is typing, that there is a note nobody outside the team can read. A screenshot
- * of a chat would have shown none of that, because none of it is in the chat.
+ * The copy is three "might belong to" pairs. Rendered as three cards with the conversation
+ * type above and the owning team below, so the mapping is read in one pass instead of three.
  */
-function ConversationCard() {
-  const reduce = useReducedMotion();
-  return (
-    <Reveal className="rounded-3xl bg-white ring-1 ring-slate-200 shadow-lg shadow-violet-100/60 overflow-hidden">
-      {/* Header: the customer, and who has it. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-3.5">
-        <div className="flex items-center gap-3">
-          <span aria-hidden className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-[11px] font-bold text-slate-600">
-            RK
-          </span>
-          <div>
-            <p className="text-sm font-bold text-slate-900">Ravi Kumar</p>
-            <p className="text-[12px] text-slate-600">WhatsApp · returning customer</p>
-          </div>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white">
-          <UserCheck aria-hidden className="h-3.5 w-3.5" />
-          Assigned to Priya
-        </span>
-      </div>
+function OwnerRouting() {
+  const ROUTES = [
+    { icon: Target, when: 'A new conversation might belong to:', owner: 'Sales' },
+    { icon: Headphones, when: 'An existing customer issue might belong to:', owner: 'Support' },
+    { icon: ClipboardList, when: 'A service-related request might belong to:', owner: 'Operations' },
+  ];
 
-      {/* The conversation. Two bubbles, deliberately not WhatsApp green. */}
-      <div className="space-y-3 px-5 py-5">
-        <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-slate-100 px-4 py-3">
-          <p className="text-[14px] text-slate-800">Hi, I still haven&rsquo;t received my order from Tuesday.</p>
+  return (
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.1)}
+      className="mx-auto grid max-w-5xl grid-cols-1 gap-5 md:grid-cols-3"
+    >
+      {ROUTES.map((route) => (
+        <motion.li key={route.owner} variants={item} className="h-full">
+          <GlowCard className="flex h-full flex-col rounded-3xl bg-white p-6 ring-1 ring-slate-200">
+            <p className="text-[15px] leading-snug text-slate-600">{route.when}</p>
+            <span aria-hidden className="mt-4 block h-px w-full bg-slate-100" />
+            <IconTitle
+              icon={route.icon}
+              as="p"
+              className="mt-4 text-xl font-bold text-slate-900"
+            >
+              {route.owner}
+            </IconTitle>
+          </GlowCard>
+        </motion.li>
+      ))}
+    </motion.ul>
+  );
+}
+
+/**
+ * One conversation, three owners, one thread.
+ *
+ * A vertical rail rather than the shared `FlowChain`, because the point is not that these
+ * are sequential steps in a process — it is that the *same* conversation stays put while the
+ * label on the left changes. So the thread is a continuous line down the middle and the
+ * owners hang off it; nothing about the conversation moves.
+ */
+function HandoffTimeline() {
+  const STAGES = [
+    { owner: 'Sales', icon: Target, note: 'A sales enquiry may become a support issue.' },
+    { owner: 'Support', icon: Headphones, note: 'A support request may need help from operations.' },
+    { owner: 'Operations', icon: ClipboardList, note: 'Another team member may need to continue the conversation.' },
+  ];
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <Reveal>
+        <p className="mb-5 text-center text-[13px] font-semibold uppercase tracking-widest text-violet-600">
+          One conversation
+        </p>
+      </Reveal>
+
+      <motion.ol
+        initial="hidden"
+        whileInView="show"
+        viewport={viewport}
+        variants={stagger(0.1, 0.14)}
+        className="relative space-y-4 pl-10"
+      >
+        {/*
+          The thread itself. `scaleY` from the top so it draws downward as the section
+          arrives — the one animation on this figure that carries meaning rather than
+          decoration, because a line being drawn reads as continuity.
+        */}
+        <motion.span
+          aria-hidden
+          initial={{ scaleY: 0 }}
+          whileInView={{ scaleY: 1 }}
+          viewport={viewport}
+          transition={{ duration: 0.9, ease: EASE_OUT }}
+          style={{ originY: 0 }}
+          className="absolute left-[15px] top-2 bottom-2 w-0.5 rounded-full bg-gradient-to-b from-violet-400 to-violet-200"
+        />
+
+        {STAGES.map((stage) => (
+          <motion.li key={stage.owner} variants={item} className="relative">
+            <span
+              aria-hidden
+              className="absolute -left-10 top-4 grid h-8 w-8 place-items-center rounded-full bg-violet-600 text-white ring-4 ring-white"
+            >
+              <stage.icon className="h-4 w-4" />
+            </span>
+            <div className="rounded-2xl bg-white px-5 py-4 ring-1 ring-slate-200">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-violet-600">
+                Now with {stage.owner}
+              </p>
+              <p className="mt-1.5 text-[15px] leading-snug text-slate-700">{stage.note}</p>
+            </div>
+          </motion.li>
+        ))}
+      </motion.ol>
+    </div>
+  );
+}
+
+/**
+ * The duplicate-reply failure, played out.
+ *
+ * Two employees, one customer, two messages. Shown as an actual thread because the harm is
+ * something the *customer* experiences — a diagram of internal state would describe the
+ * cause and hide the consequence. The second bubble is the one that should not exist, so it
+ * is the only element on the page outlined in amber.
+ */
+function DuplicateReply() {
+  const reduce = useReducedMotion();
+
+  return (
+    <div className="mx-auto grid max-w-5xl grid-cols-1 items-center gap-5 lg:grid-cols-[1fr_auto_1fr]">
+      {/* What each employee sees. */}
+      <motion.ul
+        initial="hidden"
+        whileInView="show"
+        viewport={viewport}
+        variants={stagger(0, 0.12)}
+        className="space-y-4"
+      >
+        {[
+          { who: 'Employee A', act: 'replies to the customer.', icon: UserCheck },
+          { who: 'Employee B', act: 'sees the same unanswered message and sends another response.', icon: UserRound },
+        ].map((row) => (
+          <motion.li
+            key={row.who}
+            variants={item}
+            className="flex items-start gap-3 rounded-2xl bg-white px-5 py-4 ring-1 ring-slate-200"
+          >
+            <span
+              aria-hidden
+              className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"
+            >
+              <row.icon className="h-[18px] w-[18px]" />
+            </span>
+            <p className="text-[15px] leading-snug text-slate-800">
+              <span className="font-semibold text-slate-900">{row.who}:</span> {row.act}
+            </p>
+          </motion.li>
+        ))}
+      </motion.ul>
+
+      <Reveal delay={0.2}>
+        <span
+          aria-hidden
+          className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-amber-200 lg:rotate-0"
+        >
+          <ArrowRight className="h-5 w-5" />
+        </span>
+      </Reveal>
+
+      {/* What the customer gets. */}
+      <Reveal delay={0.3}>
+        <div className="rounded-3xl bg-white p-5 ring-1 ring-amber-300">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600">
+            What the customer sees
+          </p>
+          <div className="mt-4 space-y-2">
+            <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-slate-100 px-3.5 py-2.5">
+              <p className="text-[14px] leading-snug text-slate-800">
+                Thanks for getting in touch — happy to help with that.
+              </p>
+            </div>
+            <motion.div
+              initial={{ opacity: 0, x: -8 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={viewport}
+              transition={{ delay: 0.45, duration: 0.4 }}
+              className="max-w-[85%] rounded-2xl rounded-br-sm bg-amber-50 px-3.5 py-2.5 ring-1 ring-amber-200"
+            >
+              <p className="text-[14px] leading-snug text-slate-800">
+                Hi! Thanks for getting in touch — how can I help?
+              </p>
+            </motion.div>
+          </div>
+          <p className="mt-4 text-[13px] font-medium text-amber-700">
+            {/* A gentle pulse, because this is the line the figure exists to deliver. */}
+            <motion.span
+              animate={reduce ? undefined : { opacity: [0.65, 1, 0.65] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              The customer now receives two messages from the same business.
+            </motion.span>
+          </p>
         </div>
-        <div className="ml-auto max-w-[85%] rounded-2xl rounded-tr-sm bg-violet-600 px-4 py-3">
-          <p className="text-[14px] text-white">
-            Thanks for checking in, Ravi — let me pull up that order now.
+      </Reveal>
+    </div>
+  );
+}
+
+/**
+ * The context that travels with the conversation instead of with the employee.
+ *
+ * A single panel listing what the *next* person can already see. Deliberately understated —
+ * the copy around it is hedged ("depends on the configured environment") and a triumphant
+ * figure here would overclaim.
+ */
+function ContextCarry() {
+  const CARRIED = [
+    { icon: MessageSquare, title: 'What was already discussed' },
+    { icon: ClipboardList, title: 'What the customer asked for' },
+    { icon: UserCheck, title: 'Who handled it before' },
+    { icon: ShieldCheck, title: 'What the business agreed to' },
+  ];
+
+  return (
+    <Reveal>
+      <div className="mx-auto max-w-3xl overflow-hidden rounded-3xl bg-white ring-1 ring-slate-200">
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-6 py-4">
+          <span
+            aria-hidden
+            className="grid h-9 w-9 place-items-center rounded-xl bg-violet-600 text-white"
+          >
+            <Users className="h-[18px] w-[18px]" />
+          </span>
+          <p className="text-[15px] font-semibold text-slate-900">
+            The next team member opens the conversation and can see
           </p>
         </div>
 
-        {/* Typing indicator: the thing that stops a second agent starting a duplicate reply. */}
-        <div className="flex items-center gap-2 pl-1">
-          <span aria-hidden className="flex gap-1">
-            {[0, 1, 2].map((d) => (
-              <motion.span
-                key={d}
-                animate={reduce ? undefined : { opacity: [0.25, 1, 0.25] }}
-                transition={{ duration: 1.1, repeat: Infinity, delay: d * 0.18 }}
-                className="h-1.5 w-1.5 rounded-full bg-violet-400"
-              />
-            ))}
-          </span>
-          <p className="text-[12px] font-medium text-slate-600">Priya is replying</p>
-        </div>
-      </div>
+        <motion.ul
+          initial="hidden"
+          whileInView="show"
+          viewport={viewport}
+          variants={stagger(0.1, 0.09)}
+          className="divide-y divide-slate-100"
+        >
+          {CARRIED.map((row) => (
+            <motion.li
+              key={row.title}
+              variants={item}
+              className="flex items-center gap-3 px-6 py-4"
+            >
+              <span aria-hidden className="text-violet-600"><row.icon className="h-[18px] w-[18px]" /></span>
+              <span className="text-[15px] text-slate-800">{row.title}</span>
+            </motion.li>
+          ))}
+        </motion.ul>
 
-      {/* The internal note. Dashed, because it is the one thing that never leaves the team. */}
-      <div className="border-t border-dashed border-violet-200 bg-violet-50/50 px-5 py-3.5">
-        <p className="flex items-start gap-2 text-[13px] text-slate-700">
-          <NotebookPen aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-violet-500" />
-          <span>
-            <span className="font-semibold text-slate-900">Internal note · Arjun:</span>
-            {' '}
-            Courier delay on this route — offer the replacement dispatch.
-            <span className="ml-1.5 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
-              not sent to customer
-            </span>
-          </span>
+        <p className="border-t border-slate-100 bg-white px-6 py-4 text-[14px] text-slate-600">
+          Rather than: &ldquo;Could you explain the whole thing again?&rdquo;
         </p>
       </div>
     </Reveal>
@@ -187,478 +1116,282 @@ function ConversationCard() {
 }
 
 /**
- * The handover, as two lanes with the conversation crossing between them.
+ * The sales relay, as the copy's four-arrow sequence.
  *
- * A left-to-right arrow would have said "then Arjun replied". Lanes say something more
- * specific and more useful: the conversation is one object, it was in one person's lane and
- * is now in another's, and its history came with it.
+ * Horizontal on desktop, stacked on mobile, with the connector rotating rather than
+ * disappearing — an arrow that points right in a vertical stack is the small wrongness that
+ * makes a diagram feel machine-generated.
  */
-function HandoverLanes() {
-  const reduce = useReducedMotion();
-  const lanes = [
+function SalesRelay() {
+  const STEPS = [
+    'New enquiry',
+    'Sales team sees the conversation',
+    'Appropriate representative takes responsibility',
+    'Customer receives a response',
+    'Another representative can continue when required',
+  ];
+
+  return (
+    <motion.ol
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.09)}
+      className="mx-auto flex max-w-6xl flex-col items-stretch gap-3 lg:flex-row lg:items-center"
+    >
+      {STEPS.map((step, i) => (
+        <motion.li key={step} variants={item} className="flex flex-1 items-center gap-3">
+          <div className="flex h-full w-full flex-col justify-center rounded-2xl bg-white px-4 py-4 text-center ring-1 ring-slate-200">
+            <span className="text-[11px] font-bold text-violet-600">
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span className="mt-1.5 text-[14px] font-medium leading-snug text-slate-800">
+              {step}
+            </span>
+          </div>
+          {i < STEPS.length - 1 && (
+            <ArrowRight
+              aria-hidden
+              className="h-5 w-5 shrink-0 rotate-90 text-violet-300 lg:rotate-0"
+            />
+          )}
+        </motion.li>
+      ))}
+    </motion.ol>
+  );
+}
+
+/**
+ * The four questions a team stops having to ask each other.
+ *
+ * Rendered as internal chat bubbles, because that is literally where these questions get
+ * asked — and showing them as messages makes the point that they are themselves work.
+ */
+function InternalPings() {
+  const QUESTIONS = [
+    'Did you reply to this customer?',
+    'Who is handling this?',
+    'Can you send me the previous messages?',
+    'Has this issue been resolved?',
+  ];
+
+  return (
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.1)}
+      className="mx-auto grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
+    >
+      {QUESTIONS.map((q, i) => (
+        <motion.li
+          key={q}
+          variants={item}
+          className={`rounded-2xl bg-slate-100 px-5 py-3.5 ${
+            i % 2 === 0 ? 'rounded-tl-sm' : 'rounded-tr-sm sm:ml-4'
+          }`}
+        >
+          <p className="text-[15px] text-slate-700">&ldquo;{q}&rdquo;</p>
+        </motion.li>
+      ))}
+    </motion.ul>
+  );
+}
+
+/**
+ * The two topologies, one above the other.
+ *
+ * The copy gives two arrow chains — `Customer → Employee → Customer` and
+ * `Customer → Business WhatsApp → Team Inbox → Responsible employee`. Set as monospaced
+ * chains so the difference in *length* is visible before either is read, which is the
+ * fastest way to make the structural point.
+ */
+function StructureShift() {
+  const Chain = ({ nodes, tone }: { nodes: readonly string[]; tone: 'muted' | 'brand' }) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {nodes.map((node, i) => (
+        <span key={node} className="flex items-center gap-2">
+          <span
+            className={`rounded-xl px-3.5 py-2 text-[13px] font-semibold ring-1 ${
+              tone === 'brand'
+                ? 'bg-violet-50 text-violet-700 ring-violet-200'
+                : 'bg-slate-100 text-slate-600 ring-slate-200'
+            }`}
+          >
+            {node}
+          </span>
+          {i < nodes.length - 1 && (
+            <ArrowRight
+              aria-hidden
+              className={`h-4 w-4 ${tone === 'brand' ? 'text-violet-400' : 'text-slate-300'}`}
+            />
+          )}
+        </span>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-5">
+      <Reveal>
+        <div className="rounded-3xl bg-slate-50 p-6 ring-1 ring-slate-200">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            A traditional approach
+          </p>
+          <div className="mt-4">
+            <Chain nodes={['Customer', 'Employee', 'Customer']} tone="muted" />
+          </div>
+          <p className="mt-4 text-[15px] leading-relaxed text-slate-700">
+            The entire relationship depends heavily on that employee.
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.14}>
+        <div className="rounded-3xl bg-white p-6 ring-1 ring-violet-300 shadow-lg shadow-violet-100">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-violet-600">
+            A team-based approach
+          </p>
+          <div className="mt-4">
+            <Chain
+              nodes={['Customer', 'Business WhatsApp', 'Team Inbox', 'Responsible employee']}
+              tone="brand"
+            />
+          </div>
+        </div>
+      </Reveal>
+    </div>
+  );
+}
+
+/**
+ * The four companion features, with their internal links.
+ *
+ * Cards rather than the shared `TileGrid`, because each one has to carry a link and
+ * `TileGrid`'s tiles are `cursor-default` by design. These are the page's main outbound
+ * links to its siblings, which is the reason the internal-linking plan lists them.
+ */
+function CompanionFeatures() {
+  const COMPANIONS = [
     {
-      agent: 'Priya · Support',
-      stage: 'Picks up the enquiry',
-      body: 'Answers the first question and records what the customer actually wants.',
-      icon: MessageSquare,
+      icon: Workflow,
+      title: 'WhatsApp Automation',
+      body: 'Use automation for suitable recurring processes while your team handles conversations that need human involvement.',
+      label: 'WhatsApp Automation',
+      href: '/features/whatsapp-automation',
     },
     {
-      agent: 'Arjun · Senior support',
-      stage: 'Takes it from here',
-      body: 'Opens the same conversation with the full history and the internal note already attached.',
-      icon: Repeat,
+      icon: Bot,
+      title: 'AI WhatsApp Automation',
+      body: 'Add AI assistance to appropriate customer interactions while keeping human team members available when required.',
+      label: 'AI WhatsApp Automation',
+      href: '/features/ai-whatsapp-automation',
+    },
+    {
+      icon: Megaphone,
+      title: 'WhatsApp Campaigns',
+      body: "When customers respond to campaign communication, those conversations can become part of the team's customer communication workflow.",
+      label: 'WhatsApp Campaigns',
+      href: '/features/whatsapp-campaigns',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'WhatsApp Number Masking',
+      body: 'Use number-management capabilities alongside team communication where supported by your ZunoPilot setup.',
+      label: 'WhatsApp Number Masking',
+      href: '/features/whatsapp-number-masking',
     },
   ];
 
   return (
-    <div className="relative grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-8">
-      {/* The crossing. Only drawn where there are two columns to cross between. */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-1/2 hidden h-px w-8 -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-gradient-to-r from-violet-300 via-violet-500 to-violet-300 md:block"
-      >
-        <motion.span
-          animate={reduce ? undefined : { x: ['-30%', '130%'] }}
-          transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }}
-          className="absolute top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-violet-600"
-        />
-      </span>
-
-      {lanes.map((lane, i) => (
-        <Reveal key={lane.agent} delay={i * 0.12} className="h-full">
-          <div
-            className={`h-full rounded-3xl p-6 ring-1 ${
-              i === 1 ? 'bg-violet-50/70 ring-violet-200' : 'bg-white ring-slate-200'
-            }`}
-          >
-            <p className="text-[11px] font-bold uppercase tracking-widest text-violet-600">
-              Lane {i + 1}
-            </p>
-            <p className="mt-2 text-sm font-bold text-slate-900">{lane.agent}</p>
-            <IconTitle icon={lane.icon} as="p" className="mt-4 text-base font-bold text-slate-900">
-              {lane.stage}
-            </IconTitle>
-            <p className="mt-3 text-[15px] text-slate-700 leading-relaxed">{lane.body}</p>
-          </div>
-        </Reveal>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The ecosystem: Team Inbox in the middle, the five sibling features around it.
- *
- * Replaces a "Related pages" list of chips. The reason it is worth the extra markup is that
- * it says something true about the product — automation, AI and campaigns all end up handing
- * a conversation to a person, and this is the page about that person. Every spoke is a real
- * link with descriptive anchor text, so it is navigation first and a diagram second.
- */
-function Ecosystem({
-  spokes,
-}: {
-  spokes: readonly { label: string; href: string; blurb: string; icon: ComponentType<{ className?: string }> }[];
-}) {
-  const reduce = useReducedMotion();
-  return (
-    <div className="relative mx-auto max-w-5xl">
-      <motion.ul
-        initial="hidden"
-        whileInView="show"
-        viewport={viewport}
-        variants={stagger(0.05, 0.07)}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 sm:gap-4"
-      >
-        {/* The hub, sitting in the middle cell on a three-column grid. */}
-        <motion.li variants={item} className="lg:order-2">
-          <div className="relative h-full overflow-hidden rounded-3xl bg-slate-900 p-6 text-center ring-1 ring-white/10">
-            <span
-              aria-hidden
-              className="pointer-events-none absolute -top-12 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-violet-500/25 blur-3xl"
-            />
-            {!reduce && (
-              <motion.span
-                aria-hidden
-                initial={{ opacity: 0.35, scale: 0.9 }}
-                animate={{ opacity: 0, scale: 1.5 }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
-                className="pointer-events-none absolute inset-6 rounded-full ring-1 ring-violet-400"
-              />
-            )}
-            <span aria-hidden className="relative mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-violet-600 text-white">
-              <Users className="h-6 w-6" />
-            </span>
-            <p className="relative mt-4 text-base font-bold text-white">WhatsApp Team Inbox</p>
-            <p className="relative mt-2 text-[13px] text-slate-300 leading-relaxed">
-              Where the other five end up: a person, holding one conversation, with the context
-              already attached.
-            </p>
-            <div className="relative mt-4">
-              <Roster agents={AGENTS.slice(0, 3)} />
-            </div>
-          </div>
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0, 0.08)}
+      className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2"
+    >
+      {COMPANIONS.map((c) => (
+        <motion.li key={c.href} variants={item} className="h-full">
+          <Link to={c.href} className="group block h-full">
+            <motion.div
+              whileHover={{ y: -6, boxShadow: '0 18px 40px -14px rgb(96 73 231 / 0.22)' }}
+              whileTap={{ scale: 0.99 }}
+              transition={CARD_SPRING}
+              className="flex h-full flex-col rounded-3xl bg-white p-6 ring-1 ring-slate-200"
+            >
+              <IconTitle icon={c.icon} as="h3" className="text-lg font-bold text-slate-900">
+                {c.title}
+              </IconTitle>
+              <p className="mt-3 flex-1 text-[15px] leading-relaxed text-slate-700">{c.body}</p>
+              <span className="mt-5 inline-flex items-center gap-2 text-[15px] font-semibold text-violet-600">
+                {c.label}
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </span>
+            </motion.div>
+          </Link>
         </motion.li>
+      ))}
 
-        {spokes.map((spoke, i) => (
-          <motion.li
-            key={spoke.href}
-            variants={item}
-            className={i < 2 ? 'lg:order-1' : 'lg:order-3'}
+      {/*
+        The API page is not one of the four the copy names, but the internal-linking plan asks
+        for it "if relevant" — and on a page about several people sharing one business number,
+        how that number connects to the rest of the business is relevant. One line, not a fifth
+        card, so it does not compete with the four the copy chose.
+      */}
+      <motion.li variants={item} className="sm:col-span-2">
+        <p className="rounded-2xl bg-slate-50 px-5 py-4 text-[15px] text-slate-700 ring-1 ring-slate-200">
+          Connecting WhatsApp to your own systems and integrations?{' '}
+          <Link
+            to="/features/whatsapp-business-api"
+            className="font-semibold text-violet-600 underline underline-offset-4 hover:text-violet-700"
           >
-            <Link to={spoke.href} className="group block h-full">
-              <motion.div
-                whileHover={{ y: -4, boxShadow: '0 20px 44px -20px rgb(96 73 231 / 0.3)' }}
-                transition={CARD_SPRING}
-                className="h-full rounded-3xl bg-white p-5 ring-1 ring-slate-200/80"
-              >
-                <IconTitle icon={spoke.icon} as="p" size="sm" className="text-[15px] font-bold text-slate-900">
-                  {spoke.label}
-                </IconTitle>
-                <p className="mt-3 text-[14px] text-slate-700 leading-relaxed">{spoke.blurb}</p>
-                <p className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-violet-600">
-                  Explore {spoke.label}
-                  <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-1">&rarr;</span>
-                </p>
-              </motion.div>
-            </Link>
-          </motion.li>
-        ))}
-      </motion.ul>
-    </div>
+            WhatsApp Business API
+          </Link>
+        </p>
+      </motion.li>
+    </motion.ul>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                    Copy                                     */
-/* -------------------------------------------------------------------------- */
-
-const CRUMBS = [
-  { name: 'Home', path: '/' },
-  { name: 'Features', path: '/features' },
-  { name: 'WhatsApp Team Inbox', path: '/features/whatsapp-team-inbox' },
-];
-
-/** What the inbox gives agents. Kept as the copy had it, one icon added per line. */
-const GIVES = [
-  { text: 'One place where every customer conversation is visible', icon: Eye },
-  { text: 'Clear ownership, so two people do not answer the same message', icon: UserCheck },
-  { text: 'Internal notes that stay internal', icon: NotebookPen },
-  { text: 'Handover with the conversation history intact', icon: Repeat },
-  { text: 'A way to escalate what needs a more senior person', icon: TrendingUp },
-  { text: 'Coverage across shifts without losing the thread', icon: Clock },
-] as const;
-
-const CHANGES = [
-  {
-    icon: UserCheck,
-    title: 'No Duplicate Replies',
-    body: 'A conversation someone is already handling is visible as such to everyone else.',
-  },
-  {
-    icon: Eye,
-    title: 'Nothing Falls Through',
-    body: 'An unanswered conversation is a state the team can see rather than something someone has to remember.',
-  },
-  {
-    icon: NotebookPen,
-    title: 'Internal Notes',
-    body: 'Context for the next agent, recorded on the conversation and never sent to the customer.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Human Takeover',
-    body: 'An agent can step into an automated conversation the moment judgment is needed.',
-  },
-  {
-    icon: Clock,
-    title: 'Shift Handover',
-    body: 'The next shift picks up conversations mid-flight instead of starting from the customer’s last message.',
-  },
-  {
-    icon: TrendingUp,
-    title: 'Team Performance in View',
-    body: 'Analytics show how conversations are being handled across the team.',
-  },
-] as const;
-
 /**
- * Who it is for.
+ * "One customer. One conversation. The right team member."
  *
- * Five of these came from the existing copy; **"Shift-Based Teams" is the sixth**, added
- * because the capability list already promises coverage across shifts and the audience list
- * did not name the teams that need it. It claims nothing the page did not already claim.
+ * Three short lines, so they get three panels and nothing else. The copy is already the
+ * figure; the only job here is to stop the browser setting it as one run of prose.
  */
-const DESIGNED_FOR = [
-  {
-    icon: Headphones,
-    title: 'Customer Support Teams',
-    body: 'Multiple agents answering the same queue of incoming requests.',
-  },
-  {
-    icon: Target,
-    title: 'Sales Teams',
-    body: 'Representatives sharing inbound enquiries and passing qualified ones on.',
-  },
-  {
-    icon: ClipboardCheck,
-    title: 'Service Teams',
-    body: 'Coordinating bookings, visits and follow-ups across staff.',
-  },
-  {
-    icon: Users,
-    title: 'Multi-Agent Operations',
-    body: 'Any business where more than two people answer customers.',
-  },
-  {
-    icon: Clock,
-    title: 'Shift-Based Teams',
-    body: 'Teams working in rotations, where the conversation has to outlive the shift that started it.',
-  },
-  {
-    icon: Building2,
-    title: 'Growing Businesses',
-    body: 'Teams adding agents faster than they can add process.',
-  },
-] as const;
-
-const SPOKES = [
-  {
-    label: 'WhatsApp Automation',
-    href: '/features/whatsapp-automation',
-    blurb: 'Handles the routine exchanges, then hands anything that needs a decision to the inbox.',
-    icon: Workflow,
-  },
-  {
-    label: 'AI WhatsApp Automation',
-    href: '/features/ai-whatsapp-automation',
-    blurb: 'Reads what the customer actually asked, so the agent who picks it up starts with context.',
-    icon: Bot,
-  },
-  {
-    label: 'WhatsApp Campaigns',
-    href: '/features/whatsapp-campaigns',
-    blurb: 'Starts the outreach; the replies arrive here as conversations rather than as a report.',
-    icon: Megaphone,
-  },
-  {
-    label: 'WhatsApp Number Masking',
-    href: '/features/whatsapp-number-masking',
-    blurb: 'Keeps the business number the customer-facing one, whichever agent is replying.',
-    icon: ShieldCheck,
-  },
-  {
-    label: 'WhatsApp Business API',
-    href: '/features/whatsapp-business-api',
-    blurb: 'The connection underneath, so conversations reach the systems the rest of the business runs on.',
-    icon: Plug,
-  },
-] as const;
-
-const FAQS: readonly FaqEntry[] = [
-  {
-    question: 'What is a WhatsApp team inbox?',
-    answer:
-      'A WhatsApp team inbox is a shared environment where multiple authorized agents manage '
-      + 'customer conversations together, with visibility over who is handling what.',
-  },
-  {
-    question: 'Can multiple agents reply from the same WhatsApp number?',
-    answer:
-      'Yes. Authorized team members can manage and collaborate on conversations connected to your '
-      + 'business WhatsApp from one shared workspace.',
-  },
-  {
-    question: 'How do you stop two agents answering the same customer?',
-    answer:
-      'Conversations are managed in one shared view, so a conversation another agent is already '
-      + 'handling is visible to the rest of the team rather than hidden on their device.',
-  },
-  {
-    question: 'Can a human take over from automation?',
-    answer:
-      'Yes. Automated and AI-assisted conversations can be handed to a team member when a '
-      + 'customer needs judgment, negotiation or detailed help.',
-  },
-  {
-    question: 'Are internal notes visible to customers?',
-    answer:
-      'No. Internal notes are for your team and are not sent to the customer.',
-  },
-];
-
-/* -------------------------------------------------------------------------- */
-/*                                   Page                                      */
-/* -------------------------------------------------------------------------- */
-
-export default function TeamInbox() {
-  useDocumentHead(PAGE_HEADS.teamInbox);
-  useBreadcrumbSchema(CRUMBS);
+function ClosingTriad() {
+  const LINES = [
+    { icon: UserRound, text: 'One customer.' },
+    { icon: MessageSquare, text: 'One conversation.' },
+    { icon: Sparkles, text: 'The right team member.' },
+  ];
 
   return (
-    <div className="min-h-screen bg-white">
-      <ScrollProgress />
-      <SiteHeader />
-
-      <PageHero
-        crumbs={CRUMBS}
-        title={['A WhatsApp Team Inbox That', 'Keeps Agents Out of Each Other’s Way']}
-        intro={[
-          'As your business grows, multiple employees need to respond to customers through WhatsApp. Without a structured approach, conversations get missed, answered twice, or handled by the wrong person.',
-          'The ZunoPilot Team Inbox gives authorized users a shared environment for managing customer conversations and coordinating who is responding to what.',
-        ]}
-      />
-
-      {/* --------------- The board: one conversation, a whole team ------------- */}
-      <Section tone="tinted">
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-14 items-start">
-          <div>
-            <SectionHead
-              align="left"
-              eyebrow="One conversation, seen by everyone"
-              title={['What Your Team Sees', 'Instead of Four Phones']}
-              lead={(
-                <p>
-                  The conversation is the same one the customer is having. What changes is
-                  everything around it — who owns it, who is already typing, and what the last
-                  agent knew.
-                </p>
-              )}
-            />
-            <div className="mt-6">
-              <Roster agents={AGENTS} />
-            </div>
-            <ul className="mt-8 space-y-3">
-              {GIVES.map((give) => (
-                <Reveal as="li" key={give.text} className="flex items-start gap-3">
-                  <span
-                    aria-hidden
-                    className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-violet-600 ring-1 ring-violet-200"
-                  >
-                    <give.icon className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-medium text-slate-800 leading-relaxed">
-                    {give.text}
-                  </span>
-                </Reveal>
-              ))}
-            </ul>
-          </div>
-          <ConversationCard />
-        </div>
-      </Section>
-
-      {/* ----------------- What changes when agents share one ------------------ */}
-      <Section>
-        <SectionHead
-          title={['What Changes When Agents', 'Share an Inbox']}
-          lead={(
-            <p>
-              Six things stop being somebody&rsquo;s job to remember and start being a state the
-              team can see.
-            </p>
-          )}
-        />
-        <motion.ul
-          initial="hidden"
-          whileInView="show"
-          viewport={viewport}
-          variants={stagger(0, 0.07)}
-          className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 sm:gap-5"
+    <motion.ul
+      initial="hidden"
+      whileInView="show"
+      viewport={viewport}
+      variants={stagger(0.05, 0.14)}
+      className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3"
+    >
+      {LINES.map((line) => (
+        <motion.li
+          key={line.text}
+          variants={item}
+          whileHover={{ y: -4 }}
+          transition={CARD_SPRING}
+          className="rounded-3xl bg-gradient-to-br from-violet-50 to-white p-6 text-center ring-1 ring-violet-200/80"
         >
-          {CHANGES.map((change) => (
-            <motion.li
-              key={change.title}
-              variants={item}
-              whileHover={{ y: -6, boxShadow: '0 22px 48px -20px rgb(96 73 231 / 0.3)' }}
-              transition={CARD_SPRING}
-              className="group h-full rounded-3xl bg-white p-6 ring-1 ring-slate-200/80"
-            >
-              <IconTitle icon={change.icon} className="text-lg font-bold text-slate-900">
-                {change.title}
-              </IconTitle>
-              <p className="mt-3 text-[15px] text-slate-700 leading-relaxed">{change.body}</p>
-            </motion.li>
-          ))}
-        </motion.ul>
-      </Section>
-
-      {/* --------------------------- The handover ----------------------------- */}
-      <Section tone="tinted">
-        <SectionHead
-          eyebrow="Handover without starting again"
-          title={['A Conversation Can Change Hands', 'Without Changing Story']}
-          lead={(
-            <p>
-              Escalation and shift change are the same problem: somebody new has to continue a
-              conversation they did not start.
-            </p>
-          )}
-        />
-        <div className="mt-10">
-          <HandoverLanes />
-        </div>
-        <p className="mt-8 mx-auto max-w-3xl text-center text-base font-medium text-slate-800 leading-relaxed">
-          The customer is not asked to repeat anything, because nothing about the conversation
-          was ever stored on one agent&rsquo;s phone.
-        </p>
-      </Section>
-
-      {/* ---------------------------- Designed for ---------------------------- */}
-      <Section>
-        <SectionHead title={['Designed For']} />
-        <motion.ul
-          initial="hidden"
-          whileInView="show"
-          viewport={viewport}
-          variants={stagger(0, 0.06)}
-          className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 sm:gap-5"
-        >
-          {DESIGNED_FOR.map((who) => (
-            <motion.li
-              key={who.title}
-              variants={item}
-              whileHover={{ y: -5 }}
-              transition={CARD_SPRING}
-              className="group h-full rounded-3xl bg-gradient-to-br from-violet-50 via-white to-white p-6 ring-1 ring-violet-200/70"
-            >
-              <IconTitle icon={who.icon} className="text-base font-bold text-slate-900">
-                {who.title}
-              </IconTitle>
-              <p className="mt-3 text-[15px] text-slate-700 leading-relaxed">{who.body}</p>
-            </motion.li>
-          ))}
-        </motion.ul>
-      </Section>
-
-      {/* --------------------------- The ecosystem ---------------------------- */}
-      <Section tone="tinted">
-        <SectionHead
-          eyebrow="Where the other features hand off"
-          title={['The Team Inbox Is Where', 'Everything Else Lands']}
-          lead={(
-            <p>
-              Automation, AI and campaigns all reach a point where a person should take over.
-              This is that point — so these five pages are worth reading next.
-            </p>
-          )}
-        />
-        <div className="mt-10">
-          <Ecosystem spokes={SPOKES} />
-        </div>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
-          <ArrowLink to="/solutions/customer-support">WhatsApp customer support</ArrowLink>
-          <ArrowLink to="/pricing">See pricing</ArrowLink>
-        </div>
-      </Section>
-
-      <FaqSection faqs={FAQS} />
-
-      <CtaBand
-        title={['Give Your Agents', 'One Inbox']}
-        body={['Coordinate customer conversations across your team instead of across their phones.']}
-      />
-
-      <SiteFooter />
-    </div>
+          <span
+            aria-hidden
+            className="mx-auto grid h-11 w-11 place-items-center rounded-2xl bg-violet-600 text-white"
+          >
+            <line.icon className="h-5 w-5" />
+          </span>
+          <p className="mt-4 text-lg font-bold text-slate-900">{line.text}</p>
+        </motion.li>
+      ))}
+    </motion.ul>
   );
 }

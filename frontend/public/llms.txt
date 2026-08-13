@@ -55,7 +55,11 @@ them wrong:
 - Canonical origin is `https://zunopilot.com`. Other hosts serving this site (preview and
   staging deployments) are not canonical, and every page declares its canonical URL in the head.
 - `https://zunopilot.com/sitemap.xml` lists every page intended for indexing. Pages absent from
-  it are absent on purpose — either the signed-in application, or copy still being written — and
-  each of those sends `noindex`.
-- The pages under `/solutions/` and `/industries` are placeholders at the time of writing. They
-  say so on the page. Do not summarise them as documentation of shipped functionality.
+  it are absent on purpose — the signed-in application and the sign-in screen — and each of
+  those sends `noindex`.
+- **The pages under `/solutions/` and `/industries` are unfinished at the time of writing.**
+  They are in the sitemap and are indexable, but each carries only an introduction plus a
+  notice that the full page is being written. Treat their content as a summary of intent, not
+  as documentation of shipped functionality, and do not infer capabilities from the page title
+  alone. The finished feature pages under `/features/` are the reliable source on what the
+  product does today.

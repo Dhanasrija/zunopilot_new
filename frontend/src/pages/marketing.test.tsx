@@ -13,6 +13,8 @@ import BusinessApi from './features/BusinessApi';
 import TeamInbox from './features/TeamInbox';
 import ComingSoon, { COMING_SOON } from './ComingSoon';
 import { PAGE_HEADS } from '@/lib/page-heads';
+import { SITEMAP_ENTRIES } from '@/lib/sitemap';
+import { DETAIL_BY_PATH } from '@/lib/marketing-content';
 import { FEATURE_LINKS, LEGAL_LINKS, PRIMARY_NAV, SOLUTION_LINKS } from '@/lib/marketing-nav';
 
 /*
@@ -82,7 +84,8 @@ const HUBS: readonly [string, string, ReactNode, string][] = [
   ['number masking', '/features/whatsapp-number-masking', <NumberMasking />, 'WhatsApp Number Masking for Business'],
   ['campaigns', '/features/whatsapp-campaigns', <Campaigns />, 'WhatsApp Campaigns for More Effective Customer Outreach'],
   ['business api', '/features/whatsapp-business-api', <BusinessApi />, 'WhatsApp Business API for Scalable Customer Communication'],
-  ['team inbox', '/features/whatsapp-team-inbox', <TeamInbox />, 'A WhatsApp Team Inbox That Keeps Agents Out of Each Other\u2019s Way'],
+  // Rewritten from supplied copy; the h1 is the client's wording verbatim.
+  ['team inbox', '/features/whatsapp-team-inbox', <TeamInbox />, 'Give Your Team One Place to Work on WhatsApp Conversations'],
 ];
 
 /**
@@ -211,39 +214,88 @@ describe('indexability', () => {
   );
 
   /*
-   * **The placeholders must be the exact opposite, and that is the assertion worth having.**
+   * **The placeholders are indexable too, which is a reversal worth pinning down.**
    *
-   * A "coming soon" page that ranks for "whatsapp lead management" is worse than no page:
-   * it burns the click and teaches the ranking system that the site does not answer the
-   * query. `noindex, follow` keeps the outbound links working while removing the page from
-   * results, and no canonical is emitted because there is nothing to canonicalise to.
+   * They were `noindex` and out of the sitemap — the safe choice for a page that says "being
+   * written". They are now advertised in `sitemap.xml` by explicit decision, and a sitemap
+   * entry is a request to index, so the `noindex` had to go: keeping both would only log
+   * "Submitted URL marked noindex" in Search Console while changing nothing. This asserts
+   * they are consistent in the new direction, because half-reverting is the failure mode —
+   * in the sitemap but still refusing to be indexed.
    */
   it.each(COMING_SOON.map((p) => [p.path] as const))(
-    '%s is noindex and claims no canonical',
+    '%s canonicalises to itself and is not noindex',
     (path) => {
       at(path, <ComingSoon />);
 
+      expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href'))
+        .toBe(`https://zunopilot.com${path}`);
       expect(document.querySelector('meta[name="robots"]')?.getAttribute('content'))
-        .toMatch(/noindex/);
-      // **No canonical tag at all**, not one pointing at the home page. `path: null` removes
-      // it. Canonicalising a placeholder to `/` would be the exact "this is a duplicate of the
-      // home page" signal that once dropped four real pages out of the index; canonicalising
-      // it to itself would ask Google to index the thing the `noindex` just refused.
-      expect(document.querySelector('link[rel="canonical"]')).toBeNull();
+        .not.toMatch(/noindex/);
 
       cleanup();
     },
   );
 
-  it('**no placeholder path has a head or a sitemap entry**', () => {
-    // The inverse of the check in `document-head.test.ts`, which proves every head is in the
-    // sitemap. This proves the placeholders are in neither — the two together are what stop
-    // an unwritten page being advertised for indexing.
-    const advertised = new Set(Object.values(PAGE_HEADS).map((h) => h.path));
+  it('**every placeholder path has a head and a sitemap entry**', () => {
+    // The other half of the same invariant, checked against the tables rather than the DOM.
+    const advertised = new Set(SITEMAP_ENTRIES.map((e) => e.path));
     for (const page of COMING_SOON) {
-      expect(advertised.has(page.path), `${page.path} should not have a PAGE_HEADS entry`)
-        .toBe(false);
+      const head = PAGE_HEADS[page.headKey];
+      expect(head, `no PAGE_HEADS entry for "${page.headKey}"`).toBeTruthy();
+      expect(head.path, `${page.headKey} head disagrees with its route`).toBe(page.path);
+      expect(advertised.has(page.path), `${page.path} is indexable but not in the sitemap`)
+        .toBe(true);
     }
+  });
+
+  /*
+   * **The mitigation, asserted.** Indexing a sixty-word "coming soon" page is what teaches a
+   * ranking system that a site does not answer a query. Each placeholder renders the finished
+   * page's real `intro` copy above the notice, so what gets indexed is a couple of hundred
+   * accurate words on the topic. If that regresses, these pages become thin again silently —
+   * they would still render, still be indexable, and still look fine.
+   */
+  it.each(COMING_SOON.map((p) => [p.path] as const))(
+    '%s carries real copy, not just the notice',
+    (path) => {
+      const { container } = at(path, <ComingSoon />);
+      const text = (container.querySelector('main')?.textContent ?? '').replace(/\s+/g, ' ');
+      const detail = DETAIL_BY_PATH.get(path)!;
+
+      /*
+       * **Presence of each section, not a word count.**
+       *
+       * A word-count floor was the first attempt and it was the wrong assertion twice over:
+       * the number had to be guessed, and it was tuned to the longest page, so `/industries`
+       * failed at 156 words while rendering everything correctly. What actually matters is
+       * that all three blocks of real copy reach the DOM — checking for one string from each
+       * says that precisely, and cannot be satisfied by any amount of boilerplate.
+       */
+      expect(text, `${path}: intro missing`).toContain(detail.intro[0].slice(0, 40));
+      expect(text, `${path}: capability list missing`).toContain(detail.listLabel);
+      expect(text, `${path}: benefit tiles missing`).toContain(detail.benefits[0].title);
+
+      // And a floor well under the shortest page (156) but well over the notice and nav on
+      // their own (~85), so a section silently dropping still fails even if the strings above
+      // are ever loosened.
+      const words = text.trim().split(' ').length;
+      expect(words, `${path} renders only ${words} words`).toBeGreaterThan(130);
+
+      cleanup();
+    },
+  );
+
+  it('a placeholder still emits breadcrumbs but no FAQ graph', () => {
+    // Breadcrumbs are true of the page regardless of how finished it is. FAQ markup would not
+    // be — there are no questions on screen, and structured data that does not match visible
+    // content is a rich-result violation.
+    at('/solutions/lead-management', <ComingSoon />);
+    const graphs = [...document.querySelectorAll('script[type="application/ld+json"]')]
+      .map((n) => JSON.parse(n.textContent ?? '{}'));
+    expect(graphs.some((g) => g['@type'] === 'BreadcrumbList')).toBe(true);
+    expect(graphs.some((g) => g['@type'] === 'FAQPage')).toBe(false);
+    cleanup();
   });
 });
 

@@ -60,10 +60,8 @@ export default function PublicHeader() {
               <Button className={HEADER_CTA}>Go to Dashboard</Button>
             </Link>
           ) : (
+            /* One control, not two — see the note in `marketing/SiteHeader.tsx`. */
             <>
-              <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
-                Sign in
-              </Link>
               <Link to={SIGNUP_LINK}>
                 <Button className={HEADER_CTA}>{CTA_LABEL}</Button>
               </Link>

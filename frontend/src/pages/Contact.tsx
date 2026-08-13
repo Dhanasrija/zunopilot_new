@@ -18,6 +18,7 @@ import {
 import { INTERESTS, interestFromUrl } from '@/lib/enquiry';
 import { useDocumentHead } from '@/lib/document-head';
 import PublicHeader from '@/components/layout/PublicHeader';
+import { PageBreadcrumbs } from '@/components/marketing/primitives';
 import { PAGE_HEADS } from '@/lib/page-heads';
 
 
@@ -138,6 +139,11 @@ export default function Contact() {
       style={{ backgroundImage: "url('/login-bg.png')" }}
     >
       <PublicHeader />
+
+      {/* Contact had no trail either — one of the fifteen. */}
+      <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6 lg:px-8">
+        <PageBreadcrumbs align="left" />
+      </div>
 
       <main className="flex-1 flex items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">

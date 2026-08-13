@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { useBreadcrumbSchema } from '@/lib/json-ld';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
@@ -98,15 +97,9 @@ function ContactPath({
 /*                                   Page                                      */
 /* -------------------------------------------------------------------------- */
 
-const CRUMBS = [
-  { name: 'Home', path: '/' },
-  { name: 'Features', path: '/features' },
-  { name: 'WhatsApp Number Masking', path: '/features/whatsapp-number-masking' },
-];
 
 export default function NumberMasking() {
   useDocumentHead(PAGE_HEADS.numberMasking);
-  useBreadcrumbSchema(CRUMBS);
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
@@ -114,7 +107,6 @@ export default function NumberMasking() {
       <SiteHeader />
 
       <PageHero
-        crumbs={CRUMBS}
         title={['WhatsApp Number Masking', 'for Business']}
         intro={[
           'When employees communicate with customers through personal or directly exposed phone numbers, the customer relationship can become tied to an individual rather than the organization.',

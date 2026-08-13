@@ -747,28 +747,39 @@ function Testimonials() {
         viewport={viewport}
         variants={stagger(0, 0.08)}
       >
-        <TestimonialCard
-          className="md:col-span-2" rating
-          quote='"ZunoPilot completely changed how we handle reservations. The keyword automatic replies answered 80% of our FAQs, and order triggers update customers instantly."'
-          name="Marco Rossi" role="Owner, Luigi's Italian Kitchen"
-        />
-        <TestimonialCard
-          className="md:col-span-1"
-          quote='"Running a multi-seat salon was messy with just one phone. The shared inbox lets our front desk and managers organize bookings seamlessly."'
-          name="Sarah Jenkins" role="Founder, Glow & Co. Salon"
-        />
-        <TestimonialImage src="/testimonial-1.png" alt="Sarah Jenkins" className="md:col-span-1" />
+        {/*
+          **Indian names and Indian businesses**, on request — and it is the right call beyond
+          the request. The site prices in rupees, shows GST, and lists a Hyderabad address; a
+          testimonial wall of Marco Rossi and Sarah Jenkins read as stock copy and quietly
+          told an Indian visitor that this product was built for somebody else. The cities and
+          business types are ones this product plausibly serves.
 
-        <TestimonialImage src="/testimonial-2.png" alt="Alex Tan" className="md:col-span-1" />
+          The two `TestimonialImage` alt texts are updated with them. Those files are stock
+          portraits, so the alt text names a person whose face may not match — worth replacing
+          the assets when real customer photos exist.
+        */}
+        <TestimonialCard
+          className="md:col-span-2" rating
+          quote='"ZunoPilot completely changed how we handle table bookings. The keyword replies answered most of our repeat questions, and order updates reach customers instantly."'
+          name="Rahul Deshmukh" role="Owner, Spice Route Kitchen, Pune"
+        />
         <TestimonialCard
           className="md:col-span-1"
-          quote='"The Catalog Menu sync and order tracking triggers have dropped our support volumes by 50%. Incredible ROI for our e-commerce boutique!"'
-          name="Alex Tan" role="Marketing Director, UrbanThread"
+          quote='"Running three salon branches from one phone was chaos. The shared inbox lets our front desk and managers handle bookings together."'
+          name="Ananya Iyer" role="Founder, Tresse Studio, Bengaluru"
+        />
+        <TestimonialImage src="/testimonial-1.png" alt="Ananya Iyer" className="md:col-span-1" />
+
+        <TestimonialImage src="/testimonial-2.png" alt="Vikram Nair" className="md:col-span-1" />
+        <TestimonialCard
+          className="md:col-span-1"
+          quote='"Catalogue sync and order-tracking updates cut our support volume by half. For a small ecommerce team, that is a real difference."'
+          name="Vikram Nair" role="Marketing Head, Kalaa Threads, Kochi"
         />
         <TestimonialCard
           className="md:col-span-2" rating
-          quote='"Our response time dropped by 70% after switching to ZunoPilot. The shared inbox and automation features helped our support team handle customer queries much faster."'
-          name="Priya Sharma" role="Customer Success Manager"
+          quote='"Our first-response time dropped sharply after moving to ZunoPilot. The shared inbox and automation let our support team clear customer queries much faster."'
+          name="Priya Sharma" role="Customer Success Manager, Hyderabad"
         />
       </motion.div>
     </Section>

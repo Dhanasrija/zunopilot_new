@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PAGE_HEADS } from './page-heads';
+import type { PageHead } from './document-head';
 import { SITEMAP_ENTRIES, SITE_ORIGIN, buildSitemapXml } from './sitemap';
 
 /*
@@ -94,17 +95,39 @@ describe('the entries', () => {
   });
 
   it('exclude every page that sets noindex', () => {
-    // Named explicitly rather than derived: these are the URLs a well-meaning edit would add
-    // back, because they are real routes that render real pages.
+    // Named explicitly rather than derived: these are the URLs a well-meaning edit would add,
+    // because they are real routes that render real pages.
+    const advertised = new Set(SITEMAP_ENTRIES.map((e) => e.path));
+    for (const path of ['/login', '/signup', '/onboarding', '/support-session', '/dashboard']) {
+      expect(advertised.has(path), `${path} is noindex and must not be advertised`).toBe(false);
+    }
+  });
+
+  it('**do include the /solutions placeholders**, which are indexable by decision', () => {
+    // The reversal, pinned. These render `pages/ComingSoon.tsx` and would normally be
+    // `noindex` — see that file's header. They are advertised on request, and the assertion
+    // that matters is that the two halves agree: a URL in here must not be sending noindex.
     const advertised = new Set(SITEMAP_ENTRIES.map((e) => e.path));
     for (const path of [
-      '/login', '/signup', '/onboarding',
       '/industries',
       '/solutions/lead-management', '/solutions/sales-automation',
       '/solutions/customer-support', '/solutions/marketing-automation',
       '/solutions/customer-engagement',
     ]) {
-      expect(advertised.has(path), `${path} is noindex and must not be advertised`).toBe(false);
+      expect(advertised.has(path), `${path} should be advertised`).toBe(true);
+    }
+  });
+
+  it('advertise nothing that PAGE_HEADS marks noindex', () => {
+    // The general form of the check above, so a future noindex page cannot be advertised even
+    // if nobody remembers to name it here.
+    // `PAGE_HEADS` is a `satisfies` object literal, so most entries have no `robots` key at
+    // all and the union type does not carry one. Widening to `PageHead` is the honest read:
+    // the field is optional on the interface, and absent means the site default.
+    const heads: PageHead[] = Object.values(PAGE_HEADS);
+    for (const entry of SITEMAP_ENTRIES) {
+      const head = heads.find((h) => h.path === entry.path);
+      expect(head?.robots ?? 'index, follow', `${entry.path}`).not.toMatch(/noindex/);
     }
   });
 

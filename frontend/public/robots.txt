@@ -24,6 +24,7 @@ User-agent: *
 Allow: /$
 Allow: /features
 Allow: /solutions
+Allow: /industries
 Allow: /pricing
 Allow: /contact
 Allow: /privacy
@@ -36,12 +37,6 @@ Allow: /assets/
 Allow: /*.css$
 Allow: /*.js$
 Allow: /og-image.png
-
-# **Not listed above, and not `Disallow`ed either: /industries and /solutions/<child>.**
-# Those six render a "coming soon" placeholder that sets `noindex, follow` in its own head, and
-# they are absent from sitemap.xml. Blocking them here would be the classic mistake — a crawler
-# that cannot fetch the page cannot read the `noindex`, so the URL can linger in the index as a
-# bare title-less link. They stay crawlable precisely so the noindex is seen and obeyed.
 
 # **`/login` is deliberately NOT disallowed**, and that is a change from what this file used
 # to say. Every "Get Started" on the site now points at it, so it is the most internally-linked
