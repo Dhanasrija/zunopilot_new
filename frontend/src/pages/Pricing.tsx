@@ -10,25 +10,6 @@ import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import { CtaBand, PageBreadcrumbs, Section } from '@/components/marketing/primitives';
 
-/*
- * The public pricing page.
- *
- * Served from the same price records checkout charges from, so what a visitor is quoted
- * and what they are billed cannot drift. The interval shown is whatever the catalogue
- * says the default is — not something this page hardcoded.
- *
- * **Why this looks like the rest of the site now.** It used to render a header of its
- * own: a logo, "Sign in", and one button. So clicking "Pricing" in the nav *replaced*
- * the nav — no Features, no Solutions, no Contact, no footer, no way back except the
- * logo. It read as a different site, and on the one page a visitor arrives at when they
- * are close to buying. It now mounts `SiteHeader` and `SiteFooter` like every other
- * public page, and the header keeps its own "Pricing" entry highlighted while you are
- * here, so the page is somewhere you are rather than somewhere you left the site for.
- *
- * The plan grid itself is unchanged and still shared with the signed-in billing screen —
- * one component means the prices, the GST line and the plan features cannot disagree
- * between the two places they are shown.
- */
 
 export default function Pricing() {
   useDocumentHead(PAGE_HEADS.pricing);
