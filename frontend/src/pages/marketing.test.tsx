@@ -76,7 +76,7 @@ const headingText = (el: Element | null): string =>
   (el?.textContent ?? '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
 
 const HUBS: readonly [string, string, ReactNode, string][] = [
-  ['home', '/', <Landing />, 'AI-Powered WhatsApp Business Automation'],
+  ['home', '/', <Landing />, 'Grow Your Business Faster with WhatsApp Automation'],
   ['features hub', '/features', <Features />, 'Powerful WhatsApp Automation Features for Your Business'],
   ['solutions hub', '/solutions', <Solutions />, 'WhatsApp Business Solutions for Sales, Support & Customer Engagement'],
   ['whatsapp automation', '/features/whatsapp-automation', <WhatsAppAutomation />, 'WhatsApp Automation That Keeps Your Business Moving'],
@@ -144,7 +144,16 @@ describe('**animated headings keep their spaces**', () => {
     expect(wordGapsIn(container).length).toBeGreaterThanOrEqual(wrappers.length - 2);
 
     // Every line break carries a separator, so the heading reads as one run.
-    const lines = heading.querySelectorAll('span.block');
+    /*
+     * Narrowed to the line spans `AnimatedHeading` emits — the ones that *contain* word wrappers.
+     *
+     * The home page's h1 is hand-written now (a static half plus a rotating link), and its layout
+     * spans are also `span.block`. Matching those made this assert that a phrase ending a sentence
+     * should end in a non-breaking space, which is not the invariant: the collapse bug this guards
+     * against only exists inside the word-splitting mechanism.
+     */
+    const lines = [...heading.querySelectorAll('span.block')]
+      .filter((el) => el.querySelector('span.inline-block.overflow-hidden'));
     if (lines.length > 1) {
       for (const line of [...lines].slice(0, -1)) {
         expect(line.textContent?.endsWith('\u00A0'), 'line break lost its separator').toBe(true);

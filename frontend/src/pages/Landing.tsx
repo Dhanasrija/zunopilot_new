@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Star, ArrowRight, Check, Building2, GraduationCap, ShoppingBag, Stethoscope,
@@ -8,7 +8,7 @@ import {
   TrendingUp, UserPlus, Users, Workflow, Zap,
 } from 'lucide-react';
 import {
-  motion, useScroll, useTransform, useReducedMotion,
+  motion, AnimatePresence, useScroll, useTransform, useReducedMotion,
 } from 'framer-motion';
 import { useCountUp } from '@/hooks/useCountUp';
 import { useDocumentHead } from '@/lib/document-head';
@@ -16,7 +16,7 @@ import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  AnimatedHeading, ArrowLink, CARD_SPRING, CheckCards, CheckList, CtaBand, CtaPair, EASE_OUT,
+  ArrowLink, CARD_SPRING, CheckCards, CheckList, CtaBand, CtaPair, EASE_OUT,
   FaqSection, ScrollProgress, Section, SectionHead, StepRail, TileGrid, fadeUp,
   item, scaleIn, stagger, viewport
 } from '@/components/marketing/primitives';
@@ -82,6 +82,101 @@ export default function Landing() {
 /* -------------------------------------------------------------------------- */
 
 
+/*
+ * The home page's rotating headline.
+ *
+ * **What is static and what is not.** "Grow Your Business Faster with" never changes and keeps the
+ * heading colour the hero already used (`text-slate-900`). Only the feature name after it rotates.
+ * It is all still one `<h1>`, so the page has exactly one top-level heading and it reads as a whole
+ * sentence at every moment — the first rendered frame is "Grow Your Business Faster with WhatsApp
+ * Automation", a real heading rather than a fragment, which is what a crawler indexes.
+ *
+ * **Colours come from the palette already on this page, not from anywhere new.** The hero uses two:
+ * `violet-600` for the accent and `slate-900` for headings. So the six are the violet accent itself
+ * plus five of its immediate cool-side neighbours — indigo, purple, fuchsia, blue, deeper violet.
+ * Every one clears roughly 5.5:1 on the near-white hero, so they pass AA as body text let alone at
+ * 34–60px. Deliberately avoided: warm hues, which would read as a different brand, and WhatsApp
+ * green, which the brand guidelines reserve for connection status.
+ *
+ * **No vertical layout shift.** The phrase sits on its own line inside a box whose height is fixed
+ * in `em` — two lines below `sm`, where the longest phrase wraps, one line above it — and the
+ * entering and leaving phrases are absolutely positioned inside that reserved height. So nothing
+ * below the heading can move as the text changes. Height rather than an invisible width-sizer on
+ * purpose: a hidden copy of the longest phrase holds the width, but it also lands in the `<h1>`'s
+ * text, so the heading reads "…Faster with WhatsApp Number MaskingWhatsApp Automation" to anything
+ * reading text instead of pixels. `aria-hidden` hides that from a screen reader and does nothing
+ * about a crawler or a copy-paste.
+ *
+ * **The phrase is a link, so the rotation pauses on hover and on focus.** A link whose destination
+ * changes underneath a pointer or a keyboard focus is a defect, not a flourish — whatever you are
+ * about to click is what you get.
+ *
+ * The timer is local to this file rather than reusing `useTravellingIndex` from the motion kit,
+ * because that hook has no pause and this is the only place that needs one. One file, one change.
+ */
+const HEADLINE_FEATURES = [
+  { label: 'WhatsApp Automation', href: '/features/whatsapp-automation', tone: 'text-violet-600' },
+  { label: 'AI WhatsApp Automation', href: '/features/ai-whatsapp-automation', tone: 'text-indigo-600' },
+  { label: 'WhatsApp Number Masking', href: '/features/whatsapp-number-masking', tone: 'text-purple-700' },
+  { label: 'WhatsApp Campaigns', href: '/features/whatsapp-campaigns', tone: 'text-fuchsia-700' },
+  { label: 'WhatsApp Team Inbox', href: '/features/whatsapp-team-inbox', tone: 'text-blue-700' },
+  { label: 'WhatsApp Business API', href: '/features/whatsapp-business-api', tone: 'text-violet-800' },
+] as const;
+
+function RotatingHeadline() {
+  const reduceMotion = useReducedMotion();
+  const [paused, setPaused] = useState(false);
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    // Never runs for a reader who asked for reduced motion: a headline that rewrites itself
+    // forever is exactly the ambient movement that setting exists to stop, and framer's
+    // `reducedMotion` cannot help here because this is a timer, not a transition.
+    if (reduceMotion || paused) return undefined;
+    const timer = window.setInterval(() => {
+      setIndex((prev) => (prev + 1) % HEADLINE_FEATURES.length);
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, [reduceMotion, paused]);
+
+  const current = HEADLINE_FEATURES[index];
+
+  return (
+    <motion.h1
+      variants={fadeUp}
+      className="text-[34px] leading-[1.15] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900"
+    >
+      <span className="block">Grow Your Business Faster with{'\u00A0'}</span>
+
+      <span
+        className="relative block min-h-[2.4em] sm:min-h-[1.2em]"
+        onPointerEnter={() => setPaused(true)}
+        onPointerLeave={() => setPaused(false)}
+        onFocus={() => setPaused(true)}
+        onBlur={() => setPaused(false)}
+      >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={current.href}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -14 }}
+            transition={{ duration: 0.42, ease: EASE_OUT }}
+            className="absolute inset-x-0 top-0 block"
+          >
+            <Link
+              to={current.href}
+              className={`${current.tone} rounded-md no-underline transition-opacity duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2`}
+            >
+              {current.label}
+            </Link>
+          </motion.span>
+        </AnimatePresence>
+      </span>
+    </motion.h1>
+  );
+}
+
 function Hero() {
   const reduceMotion = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
@@ -115,12 +210,7 @@ function Hero() {
         variants={stagger(0.05, 0.14)}
       >
         <div className="text-center max-w-4xl mx-auto">
-          <AnimatedHeading
-            as="h1"
-            trigger="mount"
-            className="text-[34px] leading-[1.15] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900"
-            lines={['AI-Powered WhatsApp', 'Business Automation']}
-          />
+          <RotatingHeadline />
 
           <motion.p
             variants={fadeUp}
