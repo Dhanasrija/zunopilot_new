@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
-import { CTA_LABEL, PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
+import { PRIMARY_NAV, GET_STARTED_LINK } from '@/lib/marketing-nav';
 
 /**
  * The lightweight header for the legal pages and the 404.
@@ -16,10 +16,6 @@ import { CTA_LABEL, PRIMARY_NAV, SIGNUP_LINK } from '@/lib/marketing-nav';
  * `lib/marketing-nav.ts`, which is the whole reason the module exists: adding
  * `/solutions` to the site should not be an edit anyone can forget to make here.
  */
-
-/** Same box as `SiteHeader`'s, so the two headers do not differ by four pixels. */
-const HEADER_CTA =
-  'rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 min-w-[9.5rem] text-sm shadow-md shadow-violet-200';
 
 export default function PublicHeader() {
   const token = useAuthStore((s) => s.token);
@@ -57,13 +53,19 @@ export default function PublicHeader() {
         <div className="flex items-center gap-3">
           {token ? (
             <Link to="/dashboard">
-              <Button className={HEADER_CTA}>Go to Dashboard</Button>
+              <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">
+                Go to Dashboard
+              </Button>
             </Link>
           ) : (
-            /* One control, not two — see the note in `marketing/SiteHeader.tsx`. */
             <>
-              <Link to={SIGNUP_LINK}>
-                <Button className={HEADER_CTA}>{CTA_LABEL}</Button>
+              <Link to="/login" className="hidden sm:inline-block text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
+                Sign in
+              </Link>
+              <Link to={GET_STARTED_LINK}>
+                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-4 sm:px-5 h-10 text-sm shadow-md shadow-violet-200">
+                  Get Started
+                </Button>
               </Link>
             </>
           )}

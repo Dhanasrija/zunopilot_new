@@ -87,17 +87,29 @@ export function Reveal({
  * `reducedMotion="user"` cannot help here: this is not a transition, it is a timer. A reader who
  * asked for stillness gets one node lit and no motion at all.
  */
-export function useTravellingIndex(count: number, intervalMs = 1500, fallback = 0): number {
+export function useTravellingIndex(
+  count: number,
+  intervalMs = 1500,
+  fallback = 0,
+  /**
+   * Hold the current index instead of advancing.
+   *
+   * Added for the home page's rotating headline, where the lit item is a **link**: a link that
+   * changes destination under a pointer or a keyboard focus is a genuine usability defect, not a
+   * flourish. Callers whose items are interactive should pass `paused` on hover and focus.
+   */
+  paused = false,
+): number {
   const reduce = useReducedMotion();
   const [index, setIndex] = useState(fallback);
 
   useEffect(() => {
-    if (reduce || count < 2) return undefined;
+    if (reduce || paused || count < 2) return undefined;
     const timer = window.setInterval(() => {
       setIndex((prev) => (prev + 1) % count);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [count, intervalMs, reduce]);
+  }, [count, intervalMs, reduce, paused]);
 
   return reduce ? fallback : index;
 }

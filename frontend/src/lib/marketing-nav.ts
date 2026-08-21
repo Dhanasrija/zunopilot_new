@@ -73,63 +73,39 @@ export const FEATURE_LINKS: readonly NavItem[] = [
   },
 ];
 
-/**
- * The solution pages, in the order the solutions hub lists them.
- *
- * Blurbs for the same reason `FEATURE_LINKS` has them: six nouns in a dropdown is a
- * list to read twice, six nouns with a line each is a list to choose from once.
- */
+/** The solution pages, in the order the solutions hub lists them. */
 export const SOLUTION_LINKS: readonly NavItem[] = [
-  {
-    label: 'Lead Management',
-    href: '/solutions/lead-management',
-    blurb: 'Capture enquiries and keep follow-up on schedule',
-  },
-  {
-    label: 'Sales Automation',
-    href: '/solutions/sales-automation',
-    blurb: 'Automate the repeatable half of selling',
-  },
-  {
-    label: 'Customer Support',
-    href: '/solutions/customer-support',
-    blurb: 'Routine requests handled, the rest escalated',
-  },
-  {
-    label: 'Marketing Automation',
-    href: '/solutions/marketing-automation',
-    blurb: 'Promotions and updates that start conversations',
-  },
-  {
-    label: 'Customer Engagement',
-    href: '/solutions/customer-engagement',
-    blurb: 'Stay connected after the first conversation',
-  },
-  {
-    label: 'Industry Solutions',
-    href: '/industries',
-    blurb: 'How each kind of business uses WhatsApp',
-  },
+  { label: 'Lead Management', href: '/solutions/lead-management' },
+  { label: 'Sales Automation', href: '/solutions/sales-automation' },
+  { label: 'Customer Support', href: '/solutions/customer-support' },
+  { label: 'Marketing Automation', href: '/solutions/marketing-automation' },
+  { label: 'Customer Engagement', href: '/solutions/customer-engagement' },
+  { label: 'Industry Solutions', href: '/industries' },
 ];
 
 /**
  * The header, and the "Menus" column in the footer.
  *
- * Declared *after* `FEATURE_LINKS` and `SOLUTION_LINKS` above, because the Features and
- * Solutions entries reference them as their dropdowns — a `const` cannot be read before
- * it is initialised.
- *
- * **Testimonial and FAQ are deliberately not here.** They were home-page fragments
- * (`/#testimonial`, `/#faq`) sitting between real routes, so on every page except the
- * home page two of the seven nav items navigated somewhere else entirely. Both sections
- * still exist on the home page and both are still reachable — FAQ from the footer's
- * Company column, testimonials by scrolling — they are simply not top-level destinations.
+ * Declared *after* `FEATURE_LINKS` and `SOLUTION_LINKS`, because both hub entries reference
+ * their list as a dropdown — a `const` cannot be read before it is initialised.
  */
 export const PRIMARY_NAV: readonly NavItem[] = [
   { label: 'Home', href: '/' },
   { label: 'Features', href: '/features', children: FEATURE_LINKS },
+  // Solutions now opens the same way Features does. Both hubs have real children, and a hub
+  // whose children are only reachable *from the hub* buries six indexable pages one click
+  // deeper than they need to be — for a visitor and for a crawler.
   { label: 'Solutions', href: '/solutions', children: SOLUTION_LINKS },
   { label: 'Pricing', href: '/pricing' },
+  /*
+   * **Testimonial and FAQ were removed from the bar.**
+   *
+   * Both were fragments of the home page rather than pages, so on any other route they meant
+   * "leave this page, go to `/`, then scroll" — a nav item that navigates away is a strange
+   * thing to put beside five real destinations. Both sections are still on the home page, still
+   * have their `#testimonial` and `#faq` anchors, and the FAQ is still linked from the footer,
+   * so nothing became unreachable.
+   */
   { label: 'Contact Us', href: '/contact' },
 ];
 
@@ -141,22 +117,20 @@ export const LEGAL_LINKS: readonly NavItem[] = [
 ];
 
 /**
- * The words on the primary call to action, in one place.
- *
- * It read "Start Free" in six components and "Start free trial" / "Start Free Trial" in
- * two more, which is three promises about the same button. "Get Started" is the one the
- * site makes now, and a constant is what stops the ninth component from inventing a
- * fourth.
- */
-export const CTA_LABEL = 'Get Started';
-
-/**
  * Where the primary CTA goes.
  *
- * **`/login`, not `/signup`.** Signing up and signing in are one flow — a phone number
- * either has an account or gets one — and `/signup` only ever `<Navigate>`d to `/login`.
- * Pointing at the redirect meant every CTA cost an extra client-side hop and showed
- * `/signup` in the address bar for a page that is the sign-in screen. The `/signup`
- * route stays, because ad landing pages and printed material name it.
+ * **Points at `/login` directly, and the label is "Get Started".** It used to say "Start Free"
+ * and point at `/signup`, which then redirected to `/login` — so every click paid for a redirect
+ * to reach the page it was always going to reach. Signing up and signing in are one flow here: a
+ * phone number either has an account or gets one, so there is no separate signup screen for the
+ * old URL to be worth preserving.
+ *
+ * `/signup` still exists as a route and still redirects, because it is the URL that appears in
+ * older copy and in anything already pasted into a browser.
  */
-export const SIGNUP_LINK = '/login';
+export const GET_STARTED_LINK = '/login';
+
+/**
+ * @deprecated Kept so nothing breaks mid-refactor; use `GET_STARTED_LINK`.
+ */
+export const SIGNUP_LINK = GET_STARTED_LINK;

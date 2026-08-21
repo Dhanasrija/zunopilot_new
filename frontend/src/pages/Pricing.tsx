@@ -1,34 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useCatalogue, type BillingInterval } from '@/lib/pricing';
 import { Disclosures, IntervalSwitch, PlanCard } from '@/components/billing/PlanGrid';
 import { useDocumentHead } from '@/lib/document-head';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { SIGNUP_LINK } from '@/lib/marketing-nav';
-import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
-import { CtaBand, PageBreadcrumbs, Section } from '@/components/marketing/primitives';
 
-/*
- * The public pricing page.
- *
- * Served from the same price records checkout charges from, so what a visitor is quoted
- * and what they are billed cannot drift. The interval shown is whatever the catalogue
- * says the default is — not something this page hardcoded.
- *
- * **Why this looks like the rest of the site now.** It used to render a header of its
- * own: a logo, "Sign in", and one button. So clicking "Pricing" in the nav *replaced*
- * the nav — no Features, no Solutions, no Contact, no footer, no way back except the
- * logo. It read as a different site, and on the one page a visitor arrives at when they
- * are close to buying. It now mounts `SiteHeader` and `SiteFooter` like every other
- * public page, and the header keeps its own "Pricing" entry highlighted while you are
- * here, so the page is somewhere you are rather than somewhere you left the site for.
- *
- * The plan grid itself is unchanged and still shared with the signed-in billing screen —
- * one component means the prices, the GST line and the plan features cannot disagree
- * between the two places they are shown.
- */
+// The public pricing page.
+//
+// Served from the same price records checkout charges from, so what a visitor
+// is quoted and what they are billed cannot drift. Quarterly is selected by
+// default because that is what the catalogue says the default is — not because
+// this page hardcoded it.
 
 export default function Pricing() {
   useDocumentHead(PAGE_HEADS.pricing);
@@ -42,64 +25,33 @@ export default function Pricing() {
   }, [data]);
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="min-h-screen bg-gradient-to-b from-violet-50/40 to-background">
+      {/*
+        **The site header, not a local one.**
+
+        This page used to render its own strip — a wordmark, "Sign in", "Start free trial" — so
+        clicking Pricing in the nav made the nav disappear, and the only way back to Features or
+        Solutions was the browser's back button. The pricing content below is untouched; what
+        changed is that the page now sits inside the same chrome as every other public page.
+      */}
       <SiteHeader />
 
-      {/*
-        **No hero.** It carried a headline, three lines of positioning and the Get Started /
-        Book a Demo pair — all of it above the fold, so the prices were pushed below it on
-        every laptop. Somebody on `/pricing` has already been sold the idea; they came for a
-        number. Removed on request, and the reasoning holds: the CTA band at the foot of the
-        page still catches anyone who reads to the end, and the header CTA never left.
+      <main className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="mx-auto max-w-2xl text-center">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            Pricing that grows with the conversations
+          </h1>
+          <p className="mt-3 text-muted-foreground">
+            Every plan includes the assistant, the shared inbox and the workflow builder.
+            Pay for the size of your team and how much AI you use.
+          </p>
+        </div>
 
-        The `pt-` on the section below replaces the spacing the hero used to provide, so the
-        interval switch does not collide with the sticky header.
-      */}
-      <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
-        <PageBreadcrumbs align="left" />
-       <h1 className="mt-2 text-center text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
-  ZunoPilot Pricing
-</h1>
-      </div>
-
-      <Section tone="tinted" className="pt-10 sm:pt-14">
-        {isLoading && (
-          <p className="text-center text-sm text-slate-600">Loading prices…</p>
-        )}
-
-        {/*
-          **If the catalogue request fails, say so.**
-
-          Before, `isLoading` went false, `data` stayed undefined, and the page rendered a
-          blank band between the hero and the CTA — a pricing page with no prices and no
-          explanation, which reads as a broken product rather than a failed request. There is
-          no fallback price to show (that is the whole point of reading them from the
-          catalogue), so the honest thing is to name the problem and offer the route that does
-          not depend on this endpoint.
-        */}
-        {!isLoading && !data && (
-          <div className="mx-auto max-w-lg rounded-3xl bg-white p-6 text-center ring-1 ring-slate-200/80">
-            <p className="text-base font-semibold text-slate-900">
-              We could not load the current prices.
-            </p>
-            <p className="mt-2 text-[15px] leading-relaxed text-slate-600">
-              This is on our side, not yours. Reload the page in a moment, or get in touch and
-              we will send the plan comparison across.
-            </p>
-            <p className="mt-5">
-              <Link
-                to={DEMO_REQUEST_LINK}
-                className="text-[15px] font-semibold text-violet-600 hover:text-violet-700"
-              >
-                Talk to us about pricing &rarr;
-              </Link>
-            </p>
-          </div>
-        )}
+        {isLoading && <p className="mt-10 text-center text-sm text-muted-foreground">Loading prices…</p>}
 
         {data && (
           <>
-            <div className="flex justify-center">
+            <div className="mt-8 flex justify-center">
               <IntervalSwitch catalogue={data} value={interval} onChange={setInterval} />
             </div>
 
@@ -110,10 +62,7 @@ export default function Pricing() {
                   plan={plan}
                   interval={interval}
                   catalogue={data}
-                  // `SIGNUP_LINK` rather than a literal, so choosing a plan lands on the same
-                  // screen every other CTA on the site lands on. A full navigation rather than
-                  // a router push, because the sign-in flow reads a clean document.
-                  onChoose={() => { window.location.href = SIGNUP_LINK; }}
+                  onChoose={() => { window.location.href = '/signup'; }}
                   onContactSales={() => {
                     window.location.href = 'mailto:sales@zunopilot.com?subject=Enterprise%20plan';
                   }}
@@ -121,20 +70,12 @@ export default function Pricing() {
               ))}
             </div>
 
-            <div className="mt-8 rounded-3xl bg-white ring-1 ring-slate-200/80 p-5">
+            <div className="mt-8 rounded-xl border bg-muted/30 p-4">
               <Disclosures catalogue={data} />
             </div>
           </>
         )}
-      </Section>
-
-      <CtaBand
-        title={['Not Sure Which Plan', 'Fits Your Team?']}
-        body={[
-          'Tell us how your business handles WhatsApp today and we will walk you through what '
-          + 'the platform would look like for you.',
-        ]}
-      />
+      </main>
 
       <SiteFooter />
     </div>

@@ -1,65 +1,80 @@
 # ZunoPilot
 
-> ZunoPilot is an AI-powered WhatsApp business automation platform. Businesses use it to
-> automate customer conversations on WhatsApp, run those conversations from one shared team
-> inbox instead of an employee's personal phone, send campaigns, and connect WhatsApp to the
-> workflows and systems they already run.
+> AI-powered WhatsApp business automation. ZunoPilot helps businesses automate customer
+> communication on WhatsApp — enquiries, follow-ups, notifications, reminders and campaigns —
+> and manage the conversations that need a person in a shared team inbox.
 
-ZunoPilot is built and operated by mTouchLabs, Hyderabad, India. The product is sold as a
-subscription with plans priced in Indian rupees; the live prices are on the pricing page and
-are not restated here, because they are set by an operator and would go stale in a static file.
+ZunoPilot is a WhatsApp Business automation platform. What it does depends on how a given
+workspace is configured; the pages below describe capabilities rather than guarantees, and
+anything involving WhatsApp Business messaging is subject to WhatsApp's own policies, consent
+requirements and template rules.
 
-Two things are worth stating plainly, because summaries of tools in this category usually get
-them wrong:
-
-- What automation does depends on how a given workspace configures it. ZunoPilot is a platform
-  for building conversation workflows, not a fixed script. Claims like "answers every customer
-  question" are not claims the product makes.
-- WhatsApp messaging is subject to Meta's WhatsApp Business policies, including rules on
-  message templates and on when a business may initiate a conversation. ZunoPilot operates
-  within those rules; it does not remove them.
-
-## Core pages
-
-- [Home](https://zunopilot.com/): what the platform is and who it is for.
-- [Features](https://zunopilot.com/features): the capability hub, linking to every feature page.
-- [Solutions](https://zunopilot.com/solutions): the same capabilities framed by business goal.
-- [Pricing](https://zunopilot.com/pricing): current plans and billing intervals.
-- [Contact](https://zunopilot.com/contact): enquiry form, and where demo requests land.
+Company: mTouchLabs, Hyderabad, India.
+Support: support@zunopilot.com · +91 90147 93487 · https://wa.me/919014793487
 
 ## Features
 
-- [WhatsApp Automation](https://zunopilot.com/features/whatsapp-automation): turning repetitive
-  customer communication — enquiries, follow-ups, notifications — into configured workflows.
-- [AI WhatsApp Automation](https://zunopilot.com/features/ai-whatsapp-automation): handling
-  enquiries phrased in the customer's own words, rather than matching fixed keywords, and
-  handing over to a person when the conversation calls for one.
-- [WhatsApp Number Masking](https://zunopilot.com/features/whatsapp-number-masking): keeping
-  customer-facing numbers under business control instead of on staff personal phones.
-- [WhatsApp Campaigns](https://zunopilot.com/features/whatsapp-campaigns): promotions,
-  announcements and re-engagement, on a channel where a reply becomes a conversation.
-- [WhatsApp Team Inbox](https://zunopilot.com/features/whatsapp-team-inbox): several agents on
-  one business number without duplicate replies, with internal notes and clean handover.
-- [WhatsApp Business API](https://zunopilot.com/features/whatsapp-business-api): connecting
-  WhatsApp to a business's own applications, integrations and operational processes.
+- [WhatsApp Automation](https://zunopilot.com/features/whatsapp-automation): Turn recurring
+  communication — enquiries, follow-ups, reminders, notifications — into configured workflows,
+  with a person taking over where judgment is needed.
+- [AI WhatsApp Automation](https://zunopilot.com/features/ai-whatsapp-automation): Assist
+  customer conversations with AI where the wording varies, identify what is being asked, and
+  hand to a team member when the conversation needs one.
+- [WhatsApp Number Masking](https://zunopilot.com/features/whatsapp-number-masking): Keep
+  customer-facing communication on a business number rather than on individual employees'
+  personal numbers, where the configured setup supports it.
+- [WhatsApp Campaigns](https://zunopilot.com/features/whatsapp-campaigns): Plan and send
+  eligible customer outreach — announcements, updates, event invitations, re-engagement — with
+  replies landing in the shared inbox as conversations.
+- [WhatsApp Team Inbox](https://zunopilot.com/features/whatsapp-team-inbox): Let several
+  authorized agents work one business WhatsApp number without duplicate replies, with internal
+  notes, clear ownership and handover that keeps the conversation history.
+- [WhatsApp Business API](https://zunopilot.com/features/whatsapp-business-api): Connect
+  WhatsApp with business systems and workflows for software-driven customer communication.
+- [All features](https://zunopilot.com/features): The hub, with the comparison of which
+  capability suits which requirement.
 
-## Contact
+## Solutions
 
-- Support email: support@zunopilot.com
-- Phone and WhatsApp: +91 90147 93487
-- Address: #514, Manjeera Trinity Corporate, JNTU-Hitech City Road, Kukatpally, Hyderabad,
-  Telangana 500072, India
+- [Lead Management](https://zunopilot.com/solutions/lead-management): Capture WhatsApp
+  enquiries, qualify them, and keep follow-ups on a schedule rather than in someone's memory.
+- [Sales Automation](https://zunopilot.com/solutions/sales-automation): Support prospect
+  conversations and sales follow-up on WhatsApp.
+- [Customer Support](https://zunopilot.com/solutions/customer-support): Handle routine requests
+  automatically and route the rest to an agent.
+- [Marketing Automation](https://zunopilot.com/solutions/marketing-automation): Campaigns,
+  templates and engagement workflows on WhatsApp.
+- [Customer Engagement](https://zunopilot.com/solutions/customer-engagement): Ongoing customer
+  communication and re-engagement.
+- [Industry Solutions](https://zunopilot.com/industries): How restaurants, ecommerce, real
+  estate, education, healthcare and service businesses use the same capabilities differently.
+- [All solutions](https://zunopilot.com/solutions): The hub.
 
-## Notes for assistants
+## Commercial
 
-- Canonical origin is `https://zunopilot.com`. Other hosts serving this site (preview and
-  staging deployments) are not canonical, and every page declares its canonical URL in the head.
-- `https://zunopilot.com/sitemap.xml` lists every page intended for indexing. Pages absent from
-  it are absent on purpose — the signed-in application and the sign-in screen — and each of
-  those sends `noindex`.
-- **The pages under `/solutions/` and `/industries` are unfinished at the time of writing.**
-  They are in the sitemap and are indexable, but each carries only an introduction plus a
-  notice that the full page is being written. Treat their content as a summary of intent, not
-  as documentation of shipped functionality, and do not infer capabilities from the page title
-  alone. The finished feature pages under `/features/` are the reliable source on what the
-  product does today.
+- [Pricing](https://zunopilot.com/pricing): Plans and billing periods. Prices are served from
+  the same catalogue that checkout charges from — no figure is published anywhere else on the
+  site, so any price quoted outside this page is not authoritative.
+- [Contact](https://zunopilot.com/contact): Enquiries and demo requests.
+
+## Legal
+
+- [Privacy Policy](https://zunopilot.com/privacy)
+- [Terms & Conditions](https://zunopilot.com/terms)
+
+## Notes for machine readers
+
+- Canonical host is `https://zunopilot.com` — no `www`, no trailing slash on paths other than
+  the home page.
+- `/login`, `/signup`, `/onboarding` and the authenticated application (`/dashboard`, `/inbox`,
+  `/campaigns`, `/settings` and similar) are not public content and are disallowed in
+  `robots.txt`.
+- The site is a client-rendered single-page application. Per-page `title`, `description`,
+  `canonical` and Open Graph tags are set at runtime; the static tags in the served HTML are the
+  home page's. `/sitemap.xml` lists every indexable page.
+- Feature and solution pages carry `FAQPage` and `BreadcrumbList` structured data matching the
+  questions and breadcrumbs visible on the page.
+- Capability claims on this site are deliberately hedged ("can", "where supported", "eligible")
+  because behaviour depends on a workspace's configuration and on WhatsApp Business
+  requirements. Please preserve that hedging when summarising; stating them as unconditional
+  guarantees would misrepresent the product.

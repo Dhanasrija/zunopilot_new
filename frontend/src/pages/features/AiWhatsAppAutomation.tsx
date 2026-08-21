@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
   AlarmClock, Bot, Brain, Building2, ClipboardList, Headphones, Languages, Megaphone,
-  MessageSquare, MoonStar, Plug, Rocket, Send, ShoppingCart, Target,
+  MessageSquare, MoonStar, Plug, Rocket, ScanLine, Send, ShoppingCart, Sparkles, Target,
   TrendingUp, UserRound, Users, Workflow, Zap,
 } from 'lucide-react';
 import { ArrowRight } from 'lucide-react';
@@ -11,7 +11,7 @@ import { PAGE_HEADS } from '@/lib/page-heads';
 import SiteHeader from '@/components/marketing/SiteHeader';
 import SiteFooter from '@/components/marketing/SiteFooter';
 import {
-  ArrowLink, CARD_SPRING, CheckList, CtaBand, FaqSection, FlowChain,
+  ArrowLink, CARD_SPRING, CheckList, CtaBand, EASE_OUT, FaqSection, FlowChain,
   PageHero, ScrollProgress, Section, SectionHead, TileGrid, item, stagger, viewport
 } from '@/components/marketing/primitives';
 import { Flow, IconTitle, Reveal } from '@/components/marketing/motion-kit';
@@ -50,39 +50,35 @@ export default function AiWhatsAppAutomation() {
         ]}
       />
 
-      {/* ------------------------------ The chatbot ---------------------------- */}
+      {/* ------------------------------- AI layer ------------------------------ */}
       <Section tone="tinted">
         <SectionHead
-          eyebrow="A chatbot that reads the question"
-          title={['Three Ways to Ask', 'One Thing. One Answer.']}
+          title={['Give Your WhatsApp', 'Conversations an AI Layer']}
           lead={(
             <>
               <p>
-                Traditional WhatsApp automation replies when a message matches a keyword it was
-                given. Real customers do not type keywords — they ask in their own words, leave
-                things out, and change their mind halfway through.
+                Traditional WhatsApp automation works well when a business can clearly define
+                every possible path. Real customer conversations are less predictable.
               </p>
-              <p>
-                Here is the same question arriving three ways, and the same chatbot handling all
-                three:
-              </p>
+              <p>A customer might ask:</p>
             </>
           )}
         />
 
         <div className="mt-10">
-          <ChatbotDemo />
-        </div>
-
-        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
+          <AiLayer />
+        </div>        <div className="mt-8 max-w-2xl mx-auto space-y-3 text-center text-base text-slate-700">
           <p>
-            No keyword was configured for &ldquo;cost?&rdquo; The chatbot worked out what was being
-            asked and answered from what your business has told it about pricing.
+            The words are different, but the customer may be looking for the same information.
           </p>
           <p>
-            You stay in control of the boundary: which questions the chatbot may answer, what it
-            is allowed to say, and the point at which the conversation should go to a person
-            instead.
+            AI can help businesses work with these natural variations instead of relying entirely
+            on rigid message patterns.
+          </p>
+          <p>
+            With ZunoPilot, AI can become part of your WhatsApp communication workflow, helping
+            your business respond to suitable customer interactions while maintaining control
+            over when automation should take over and when a person should step in.
           </p>
         </div>
       </Section>
@@ -527,155 +523,137 @@ export default function AiWhatsAppAutomation() {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The page's showpiece: three ways of asking the same thing, one layer, one intent.
+ * The page's showpiece: a conversation where the assistant plainly understands.
  *
- * **What it replaced.** Three quoted lines in a stack, followed by a paragraph explaining that
- * they mean the same thing. The words were doing all the work, which on the page whose subject
- * is *understanding* is the wrong way round — a reader should see the collapse happen.
+ * **What it replaced, and why.** It was an abstract diagram — three phrasings on the left, a dark
+ * "AI layer" panel with the words Language / Intent / Context stacked in it, one resolved intent
+ * on the right. It explained the mechanism to somebody who already knew what the mechanism was.
+ * A business owner reading a WhatsApp product does not want a systems diagram of an NLU pipeline;
+ * they want to see the thing working.
  *
- * So the three phrasings sit on the left, a scanning band crosses them, and one resolved intent
- * comes out on the right. The scan is a single translated gradient (transform only) and it stops
- * for anyone who asks for reduced motion — the resolved state is still fully readable without
- * it, because the animation is never what carries the meaning.
+ * So this is a chat. Three customers ask the same question three different ways, the assistant
+ * answers all three, and a small marker under each exchange names what it understood. The claim
+ * is identical and the evidence is now the conversation itself.
+ *
+ * Deliberately **not WhatsApp green** — the brand guidelines reserve that for connection status —
+ * so it reads as a messaging thread without borrowing Meta's colour. The typing indicator and the
+ * staggered arrival are the only motion, and both stop under reduced motion.
  */
-/**
- * The chatbot, shown as a chat.
- *
- * **Why this replaced a diagram.** The previous figure was three quoted phrasings, a dark
- * panel labelled "The AI layer" listing Language / Intent / Context, and a card reading
- * "One intent". It was an architecture diagram for a feature nobody buys architecturally:
- * "AI layer" is a phrase from a slide deck, and a visitor arriving from a search for
- * "whatsapp chatbot" had to translate it before they could tell whether the product does
- * the thing they came for. The concept — one chatbot, many phrasings, the same correct
- * answer — is best explained by showing the conversation, because the conversation is
- * literally the product.
- *
- * So: three WhatsApp threads side by side, each opening with a different wording of the
- * same question, each answered by the same bot with the same information. The wording
- * varies down the left; the answer does not. That is the whole claim, made without
- * asserting it.
- *
- * The bubbles are styled after WhatsApp — inbound white on the left, outbound tinted on
- * the right, with the tail on the outer corner — because the visitor already knows how to
- * read that layout and spends no attention learning this one. Deliberately *not* the
- * WhatsApp green: this is an illustration of ZunoPilot's product, and dressing it in
- * Meta's brand colour would imply an endorsement that does not exist.
- */
-function ChatbotDemo() {
+function AiLayer() {
   const reduce = useReducedMotion();
 
-  /**
-   * The three exchanges.
+  /*
+   * Three exchanges, same intent.
    *
-   * Same answer text in all three on purpose — a different reply per thread would make
-   * the figure about the *variety* of the answers, which is the opposite of the point.
+   * The replies are written the way a configured assistant would answer — pointing at the plan
+   * page rather than quoting a number — because a figure invented for a screenshot is a figure
+   * that goes stale and contradicts /pricing.
    */
-  const THREADS = [
-    { ask: 'How much is it?', note: 'Plain question' },
-    { ask: "What's the price for this?", note: 'Different words, same want' },
-    { ask: 'Cost?', note: 'One word, no context' },
+  const THREAD = [
+    {
+      from: 'Ravi',
+      ask: 'How much is it?',
+      reply: 'Happy to help — plans start on our pricing page, and I can walk you through what fits your team size.',
+      read: 'Asking about price',
+    },
+    {
+      from: 'Anita',
+      ask: "What's the price for this?",
+      reply: 'Same answer, different words — here is what each plan includes, and I can put you with someone if you would rather talk it through.',
+      read: 'Asking about price',
+    },
+    {
+      from: 'Sunil',
+      ask: 'Cost?',
+      reply: 'One word is enough — I can share the plans, or connect you to the team.',
+      read: 'Asking about price',
+    },
   ];
 
-  /*
-   * **No figure in the reply, deliberately.**
-   *
-   * A first draft had the bot quoting a monthly price. Prices live in the database and are
-   * changed by an operator — the same reason `index.html` carries no `offers` block and
-   * `/pricing` reads from the catalogue. A number written into an illustration on a feature
-   * page goes stale in silence, and a stale price in a picture of a chatbot answering a
-   * pricing question is a uniquely bad place for one. The reply demonstrates the behaviour
-   * without asserting a fact this file cannot keep true.
-   */
-  const REPLY =
-    'Happy to help. I can share the plan comparison and what each one includes — '
-    + 'shall I send it across?';
-
   return (
-    <div className="mx-auto max-w-5xl">
-      <motion.ul
-        initial="hidden"
-        whileInView="show"
+    <div className="mx-auto max-w-3xl">
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
         viewport={viewport}
-        variants={stagger(0, 0.15)}
-        className="grid grid-cols-1 gap-5 md:grid-cols-3"
+        transition={{ duration: 0.6, ease: EASE_OUT }}
+        className="overflow-hidden rounded-3xl bg-white ring-1 ring-slate-200 shadow-xl shadow-violet-100/70"
       >
-        {THREADS.map((thread, i) => (
-          <motion.li
-            key={thread.ask}
-            variants={item}
-            className="flex h-full flex-col overflow-hidden rounded-3xl bg-white ring-1 ring-slate-200 shadow-sm"
-          >
-            {/* Thread header — an avatar and a name, so it reads as a conversation. */}
-            <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-              <span
-                aria-hidden
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-violet-600 text-white"
-              >
-                <Bot className="h-4 w-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-slate-900">
-                  ZunoPilot assistant
+        {/* The chat header, so it reads as a conversation window rather than as a card. */}
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-3.5">
+          <span aria-hidden className="grid h-9 w-9 place-items-center rounded-full bg-violet-600 text-white">
+            <Bot className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-900">Your business on WhatsApp</p>
+            <p className="flex items-center gap-1.5 text-[12px] text-slate-600">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+              Assisted by AI · a person can step in at any point
+            </p>
+          </div>
+        </div>
+
+        {/* The thread. */}
+        <motion.ol
+          initial="hidden"
+          whileInView="show"
+          viewport={viewport}
+          variants={stagger(0.15, 0.35)}
+          className="space-y-6 px-5 py-6 sm:px-6"
+        >
+          {THREAD.map((turn) => (
+            <motion.li key={turn.ask} variants={item} className="space-y-2">
+              {/* Customer. */}
+              <div className="flex items-end gap-2">
+                <span
+                  aria-hidden
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-600"
+                >
+                  {turn.from.slice(0, 2).toUpperCase()}
                 </span>
-                <span className="block text-[11px] font-medium text-emerald-600">online</span>
-              </span>
-            </div>
-
-            {/* The exchange. */}
-            <div className="flex flex-1 flex-col gap-3 px-4 py-5">
-              <div className="max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-slate-100 px-3.5 py-2.5">
-                <p className="text-[15px] leading-snug text-slate-800">{thread.ask}</p>
-                <p className="mt-1 text-right text-[10px] text-slate-500">10:2{i} AM</p>
+                <div className="max-w-[78%] rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2.5">
+                  <p className="text-[15px] text-slate-800">{turn.ask}</p>
+                </div>
               </div>
 
-              {/*
-                A typing indicator between the two bubbles, so the reply reads as a response
-                rather than as a caption. It loops forever, which `MotionConfig` cannot
-                shorten — hence the explicit `useReducedMotion()` check. See the header of
-                `components/marketing/motion-kit.tsx`.
-              */}
-              <div className="flex items-center gap-1 self-start pl-1" aria-hidden>
-                {[0, 1, 2].map((dot) => (
-                  <motion.span
-                    key={dot}
-                    className="block h-1.5 w-1.5 rounded-full bg-slate-300"
-                    animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
-                    transition={{
-                      duration: 1.2,
-                      repeat: Infinity,
-                      ease: 'easeInOut',
-                      delay: dot * 0.18 + i * 0.1,
-                    }}
-                  />
-                ))}
-              </div>
+              {/* What it understood — a small marker, not a diagram. */}
+              <p className="ml-9 inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                <Sparkles aria-hidden className="h-3 w-3" />
+                Understood as: {turn.read}
+              </p>
 
-              <div className="max-w-[92%] self-end rounded-2xl rounded-br-sm bg-violet-600 px-3.5 py-2.5 shadow-sm shadow-violet-200">
-                <p className="text-[15px] leading-snug text-white">{REPLY}</p>
-                <p className="mt-1 text-right text-[10px] text-violet-200">10:2{i} AM</p>
+              {/* Assistant. */}
+              <div className="flex justify-end">
+                <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-violet-600 px-4 py-2.5">
+                  <p className="text-[15px] text-white">{turn.reply}</p>
+                </div>
               </div>
-            </div>
+            </motion.li>
+          ))}
 
-            {/* What was different about this one. */}
-            <p className="border-t border-slate-100 px-4 py-3 text-[13px] font-medium text-slate-500">
-              {thread.note}
+          {/* Still going — the thread does not end, which is the point about handover. */}
+          <motion.li variants={item} className="flex items-center gap-2 pl-9">
+            <span aria-hidden className="flex gap-1">
+              {[0, 1, 2].map((d) => (
+                <motion.span
+                  key={d}
+                  animate={reduce ? undefined : { opacity: [0.25, 1, 0.25] }}
+                  transition={{ duration: 1.1, repeat: Infinity, delay: d * 0.18 }}
+                  className="h-1.5 w-1.5 rounded-full bg-violet-400"
+                />
+              ))}
+            </span>
+            <p className="text-[12px] font-medium text-slate-600">
+              A team member can take over from here whenever the conversation needs one
             </p>
           </motion.li>
-        ))}
-      </motion.ul>
+        </motion.ol>
+      </motion.div>
 
-      {/*
-        The takeaway, stated once under all three rather than repeated in each card. It is
-        the only sentence in the figure that is an assertion, so it gets the emphasis and
-        the other twelve strings stay as evidence.
-      */}
-      <Reveal delay={0.2}>
-        <p className="mx-auto mt-6 max-w-2xl rounded-2xl bg-white px-5 py-4 text-center text-[15px] leading-relaxed text-slate-700 ring-1 ring-violet-200">
-          <span className="font-semibold text-slate-900">Same intent, three phrasings.</span>{' '}
-          The chatbot answers the request rather than the wording — and hands over to your team
-          the moment the conversation needs a person.
-        </p>
-      </Reveal>
+      <p className="mt-6 text-center text-[15px] text-slate-700 leading-relaxed">
+        Three customers, three ways of asking, one thing they wanted. That is the difference
+        between matching words and understanding a request.
+      </p>
     </div>
   );
 }

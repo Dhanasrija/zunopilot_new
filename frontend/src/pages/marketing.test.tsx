@@ -11,11 +11,11 @@ import NumberMasking from './features/NumberMasking';
 import Campaigns from './features/Campaigns';
 import BusinessApi from './features/BusinessApi';
 import TeamInbox from './features/TeamInbox';
-import ComingSoon, { COMING_SOON } from './ComingSoon';
+import DetailPage from './DetailPage';
+import { DETAIL_PAGES } from '@/lib/marketing-content';
 import { PAGE_HEADS } from '@/lib/page-heads';
-import { SITEMAP_ENTRIES } from '@/lib/sitemap';
-import { DETAIL_BY_PATH } from '@/lib/marketing-content';
-import { FEATURE_LINKS, LEGAL_LINKS, PRIMARY_NAV, SOLUTION_LINKS } from '@/lib/marketing-nav';
+import { FEATURE_LINKS, PRIMARY_NAV, SOLUTION_LINKS } from '@/lib/marketing-nav';
+import { CtaPair } from '@/components/marketing/primitives';
 
 /*
  * The public website.
@@ -76,7 +76,7 @@ const headingText = (el: Element | null): string =>
   (el?.textContent ?? '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
 
 const HUBS: readonly [string, string, ReactNode, string][] = [
-  ['home', '/', <Landing />, 'AI-Powered WhatsApp Business Automation'],
+  ['home', '/', <Landing />, 'Grow Your Business Faster with WhatsApp Automation'],
   ['features hub', '/features', <Features />, 'Powerful WhatsApp Automation Features for Your Business'],
   ['solutions hub', '/solutions', <Solutions />, 'WhatsApp Business Solutions for Sales, Support & Customer Engagement'],
   ['whatsapp automation', '/features/whatsapp-automation', <WhatsAppAutomation />, 'WhatsApp Automation That Keeps Your Business Moving'],
@@ -84,8 +84,7 @@ const HUBS: readonly [string, string, ReactNode, string][] = [
   ['number masking', '/features/whatsapp-number-masking', <NumberMasking />, 'WhatsApp Number Masking for Business'],
   ['campaigns', '/features/whatsapp-campaigns', <Campaigns />, 'WhatsApp Campaigns for More Effective Customer Outreach'],
   ['business api', '/features/whatsapp-business-api', <BusinessApi />, 'WhatsApp Business API for Scalable Customer Communication'],
-  // Rewritten from supplied copy; the h1 is the client's wording verbatim.
-  ['team inbox', '/features/whatsapp-team-inbox', <TeamInbox />, 'Give Your Team One Place to Work on WhatsApp Conversations'],
+  ['team inbox', '/features/whatsapp-team-inbox', <TeamInbox />, 'A WhatsApp Team Inbox That Keeps Agents Out of Each Other\u2019s Way'],
 ];
 
 /**
@@ -100,8 +99,8 @@ const HUBS: readonly [string, string, ReactNode, string][] = [
  */
 const ALL_PAGES: readonly [string, string, ReactNode, string][] = [
   ...HUBS,
-  ...COMING_SOON.map((p) => [
-    `coming soon: ${p.path}`, p.path, <ComingSoon />, p.title,
+  ...DETAIL_PAGES.map((p) => [
+    p.headKey, p.path, <DetailPage />, p.h1.join(' '),
   ] as [string, string, ReactNode, string]),
 ];
 
@@ -143,8 +142,17 @@ describe('**animated headings keep their spaces**', () => {
     // (Line-final wrappers are followed by the between-lines space on the parent.)
     expect(wordGapsIn(container).length).toBeGreaterThanOrEqual(wrappers.length - 2);
 
-    // Every line break carries a separator, so the heading reads as one run.
-    const lines = heading.querySelectorAll('span.block');
+    /*
+     * Every line break carries a separator, so the heading reads as one run.
+     *
+     * Narrowed to the line spans `AnimatedHeading` itself emits — the ones that *contain* word
+     * wrappers. The home page's h1 is now hand-written (a static half plus a rotating link), and
+     * its layout spans are also `span.block`; matching those made this assert that a phrase
+     * ending a sentence should end in a non-breaking space, which is not the invariant. The
+     * collapse bug this guards against only exists inside the word-splitting mechanism.
+     */
+    const lines = [...heading.querySelectorAll('span.block')]
+      .filter((el) => el.querySelector('span.inline-block.overflow-hidden'));
     if (lines.length > 1) {
       for (const line of [...lines].slice(0, -1)) {
         expect(line.textContent?.endsWith('\u00A0'), 'line break lost its separator').toBe(true);
@@ -180,16 +188,39 @@ describe('FAQ structured data', () => {
     expect(faqGraphs()).toHaveLength(0);
   });
 
-  it('a coming-soon page carries no FAQ graph', () => {
-    // It has no questions on it. Markup describing questions a page does not answer is a
-    // rich-result violation, and the placeholder is exactly where one would get copied in
-    // by accident.
-    at('/solutions/lead-management', <ComingSoon />);
-    expect(faqGraphs()).toHaveLength(0);
-  });
+  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path] as const))(
+    '%s carries its own FAQ graph',
+    (_key, path) => {
+      at(path, <DetailPage />);
+      expect(faqGraphs()).toHaveLength(1);
+      expect(faqGraphs()[0].mainEntity.length).toBeGreaterThanOrEqual(3);
+      cleanup();
+    },
+  );
 });
 
-describe('indexability', () => {
+describe('breadcrumbs', () => {
+  const crumbGraph = () => [...document.querySelectorAll('script[type="application/ld+json"]')]
+    .map((node) => JSON.parse(node.textContent ?? '{}'))
+    .find((graph) => graph['@type'] === 'BreadcrumbList');
+
+  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path, p.crumbs.length] as const))(
+    '%s emits a BreadcrumbList ending at itself',
+    (_key, path, depth) => {
+      at(path, <DetailPage />);
+      const graph = crumbGraph();
+      expect(graph).toBeTruthy();
+      expect(graph.itemListElement).toHaveLength(depth);
+      expect(graph.itemListElement.at(-1).item).toBe(`https://zunopilot.com${path}`);
+      // Positions are 1-based and contiguous, which Google requires.
+      expect(graph.itemListElement.map((e: { position: number }) => e.position))
+        .toEqual(Array.from({ length: depth }, (_, i) => i + 1));
+      cleanup();
+    },
+  );
+});
+
+describe('**every page is indexable**', () => {
   beforeEach(() => {
     document.head.innerHTML = `
       <meta name="robots" content="index, follow, max-image-preview:large" />
@@ -198,11 +229,10 @@ describe('indexability', () => {
     `;
   });
 
-  it.each(HUBS.map((h) => [h[0], h[1]] as const))(
+  it.each(DETAIL_PAGES.map((p) => [p.headKey, p.path] as const))(
     '%s canonicalises to itself and is not noindex',
-    (_name, path) => {
-      const entry = HUBS.find((h) => h[1] === path)!;
-      at(path, entry[2]);
+    (_key, path) => {
+      at(path, <DetailPage />);
 
       expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href'))
         .toBe(`https://zunopilot.com${path}`);
@@ -213,89 +243,12 @@ describe('indexability', () => {
     },
   );
 
-  /*
-   * **The placeholders are indexable too, which is a reversal worth pinning down.**
-   *
-   * They were `noindex` and out of the sitemap — the safe choice for a page that says "being
-   * written". They are now advertised in `sitemap.xml` by explicit decision, and a sitemap
-   * entry is a request to index, so the `noindex` had to go: keeping both would only log
-   * "Submitted URL marked noindex" in Search Console while changing nothing. This asserts
-   * they are consistent in the new direction, because half-reverting is the failure mode —
-   * in the sitemap but still refusing to be indexed.
-   */
-  it.each(COMING_SOON.map((p) => [p.path] as const))(
-    '%s canonicalises to itself and is not noindex',
-    (path) => {
-      at(path, <ComingSoon />);
-
-      expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href'))
-        .toBe(`https://zunopilot.com${path}`);
-      expect(document.querySelector('meta[name="robots"]')?.getAttribute('content'))
-        .not.toMatch(/noindex/);
-
-      cleanup();
-    },
-  );
-
-  it('**every placeholder path has a head and a sitemap entry**', () => {
-    // The other half of the same invariant, checked against the tables rather than the DOM.
-    const advertised = new Set(SITEMAP_ENTRIES.map((e) => e.path));
-    for (const page of COMING_SOON) {
-      const head = PAGE_HEADS[page.headKey];
+  it('every detail page names a head that exists, and the two agree on the path', () => {
+    for (const page of DETAIL_PAGES) {
+      const head = PAGE_HEADS[page.headKey as keyof typeof PAGE_HEADS];
       expect(head, `no PAGE_HEADS entry for "${page.headKey}"`).toBeTruthy();
-      expect(head.path, `${page.headKey} head disagrees with its route`).toBe(page.path);
-      expect(advertised.has(page.path), `${page.path} is indexable but not in the sitemap`)
-        .toBe(true);
+      expect(head.path).toBe(page.path);
     }
-  });
-
-  /*
-   * **The mitigation, asserted.** Indexing a sixty-word "coming soon" page is what teaches a
-   * ranking system that a site does not answer a query. Each placeholder renders the finished
-   * page's real `intro` copy above the notice, so what gets indexed is a couple of hundred
-   * accurate words on the topic. If that regresses, these pages become thin again silently —
-   * they would still render, still be indexable, and still look fine.
-   */
-  it.each(COMING_SOON.map((p) => [p.path] as const))(
-    '%s carries real copy, not just the notice',
-    (path) => {
-      const { container } = at(path, <ComingSoon />);
-      const text = (container.querySelector('main')?.textContent ?? '').replace(/\s+/g, ' ');
-      const detail = DETAIL_BY_PATH.get(path)!;
-
-      /*
-       * **Presence of each section, not a word count.**
-       *
-       * A word-count floor was the first attempt and it was the wrong assertion twice over:
-       * the number had to be guessed, and it was tuned to the longest page, so `/industries`
-       * failed at 156 words while rendering everything correctly. What actually matters is
-       * that all three blocks of real copy reach the DOM — checking for one string from each
-       * says that precisely, and cannot be satisfied by any amount of boilerplate.
-       */
-      expect(text, `${path}: intro missing`).toContain(detail.intro[0].slice(0, 40));
-      expect(text, `${path}: capability list missing`).toContain(detail.listLabel);
-      expect(text, `${path}: benefit tiles missing`).toContain(detail.benefits[0].title);
-
-      // And a floor well under the shortest page (156) but well over the notice and nav on
-      // their own (~85), so a section silently dropping still fails even if the strings above
-      // are ever loosened.
-      const words = text.trim().split(' ').length;
-      expect(words, `${path} renders only ${words} words`).toBeGreaterThan(130);
-
-      cleanup();
-    },
-  );
-
-  it('a placeholder still emits breadcrumbs but no FAQ graph', () => {
-    // Breadcrumbs are true of the page regardless of how finished it is. FAQ markup would not
-    // be — there are no questions on screen, and structured data that does not match visible
-    // content is a rich-result violation.
-    at('/solutions/lead-management', <ComingSoon />);
-    const graphs = [...document.querySelectorAll('script[type="application/ld+json"]')]
-      .map((n) => JSON.parse(n.textContent ?? '{}'));
-    expect(graphs.some((g) => g['@type'] === 'BreadcrumbList')).toBe(true);
-    expect(graphs.some((g) => g['@type'] === 'FAQPage')).toBe(false);
-    cleanup();
   });
 });
 
@@ -340,9 +293,9 @@ describe('the workflow diagrams', () => {
 
   it('put exactly one arrow between each pair of steps in a vertical chain', () => {
     // n steps means n-1 connectors — never a trailing arrow pointing at nothing.
-    // The automation page is picked because its worked example is the longest vertical
-    // chain on the site; a page without one would vacuously pass.
-    const { container } = at('/features/whatsapp-automation', <WhatsAppAutomation />);
+    // Lead management is picked because it has the longest worked example (seven stages);
+    // not every detail page declares a flow, and one without would vacuously pass.
+    const { container } = at('/solutions/lead-management', <DetailPage />);
     const flow = [...container.querySelectorAll('ol')]
       .find((ol) => ol.querySelector('svg.lucide-arrow-down'));
 
@@ -353,69 +306,48 @@ describe('the workflow diagrams', () => {
   });
 });
 
-describe('the header dropdowns', () => {
-  /*
-   * **Two of them now, and the same assertions have to hold for both.**
-   *
-   * Solutions grew a dropdown after Features had one, and the failure mode with a second
-   * instance of an interactive component is that it is *nearly* the first: the panel opens
-   * but the parent stopped being a link, or the children render but the mobile drawer
-   * lists only one group's. Parameterising over the table is what makes adding a third
-   * dropdown a zero-line change to this suite.
-   */
-  const DROPDOWNS = [
-    ['Features', FEATURE_LINKS, '/features'],
-    ['Solutions', SOLUTION_LINKS, '/solutions'],
-  ] as const;
+describe('the Features dropdown in the header', () => {
+  const featuresEntry = PRIMARY_NAV.find((n) => n.children)!;
 
-  it('are exactly the two entries that declare children', () => {
-    expect(PRIMARY_NAV.filter((n) => n.children).map((n) => n.label))
-      .toEqual(['Features', 'Solutions']);
+  it('has children, and they are the feature pages', () => {
+    expect(featuresEntry.label).toBe('Features');
+    expect(featuresEntry.children).toEqual(FEATURE_LINKS);
   });
 
-  it.each(DROPDOWNS)('%s lists its own pages', (label, links) => {
-    const entry = PRIMARY_NAV.find((n) => n.label === label)!;
-    expect(entry.children).toEqual(links);
-  });
-
-  it.each(DROPDOWNS)(
-    '%s **stays closed until asked**, then lists every child with its own href',
-    (label, links) => {
-      const { container } = at('/', <Landing />);
-      const toggle = screen.getByRole('button', { name: new RegExp(`${label} menu`, 'i') });
-
-      // Closed by default, and it says so — a dropdown that lies about `aria-expanded`
-      // is invisible to a screen reader even when it works with a mouse.
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle.getAttribute('aria-haspopup')).toBe('true');
-
-      fireEvent.click(toggle);
-      expect(toggle.getAttribute('aria-expanded')).toBe('true');
-
-      // Every child is present, and points at its own page rather than at the hub.
-      const panel = toggle.closest('div')!;
-      for (const child of links) {
-        const anchors = [...panel.querySelectorAll(`a[href="${child.href}"]`)];
-        expect(anchors.length, `${child.label} is missing from the ${label} dropdown`)
-          .toBeGreaterThan(0);
-        expect(within(anchors[0] as HTMLElement).getByText(child.label)).toBeTruthy();
-      }
-      cleanup();
-    },
-  );
-
-  it.each(DROPDOWNS)('%s keeps the parent a real link to the hub', (_label, _links, hub) => {
-    // The whole point of the chevron being separate: the hub itself is a page, and a
-    // parent that only opens a menu makes it unreachable from the nav.
+  it('**stays closed until asked**, then lists every feature page with its own href', () => {
     const { container } = at('/', <Landing />);
-    const nav = container.querySelector('nav')!;
-    expect(nav.querySelector(`a[href="${hub}"]`)).toBeTruthy();
+    const toggle = screen.getByRole('button', { name: /features menu/i });
+
+    // Closed by default, and it says so — a dropdown that lies about `aria-expanded`
+    // is invisible to a screen reader even when it works with a mouse.
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-haspopup')).toBe('true');
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    // Every child is present, and points at its own page rather than at the hub.
+    const panel = container.querySelector('[aria-expanded="true"]')!.closest('div')!;
+    for (const child of FEATURE_LINKS) {
+      const links = [...panel.querySelectorAll(`a[href="${child.href}"]`)];
+      expect(links.length, `${child.label} is missing from the dropdown`).toBeGreaterThan(0);
+      expect(within(links[0] as HTMLElement).getByText(child.label)).toBeTruthy();
+    }
     cleanup();
   });
 
-  it.each(DROPDOWNS)('%s closes on Escape', (label) => {
+  it('keeps the parent a real link to the hub', () => {
+    // The whole point of the chevron being separate: "Features" itself is a page, and a
+    // parent that only opens a menu makes it unreachable from the nav.
+    const { container } = at('/', <Landing />);
+    const nav = container.querySelector('nav')!;
+    expect(nav.querySelector('a[href="/features"]')).toBeTruthy();
+    cleanup();
+  });
+
+  it('closes on Escape', () => {
     at('/', <Landing />);
-    const toggle = screen.getByRole('button', { name: new RegExp(`${label} menu`, 'i') });
+    const toggle = screen.getByRole('button', { name: /features menu/i });
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -423,12 +355,12 @@ describe('the header dropdowns', () => {
     cleanup();
   });
 
-  it('lists every child of both groups in the mobile drawer without needing hover', () => {
+  it('lists the children in the mobile drawer without needing hover', () => {
     // Touch has no hover, so the drawer shows them outright.
     const { container } = at('/', <Landing />);
     fireEvent.click(screen.getByRole('button', { name: /^menu$/i }));
     const drawer = container.querySelector('.lg\\:hidden.border-t')!;
-    for (const child of [...FEATURE_LINKS, ...SOLUTION_LINKS]) {
+    for (const child of FEATURE_LINKS) {
       expect(
         drawer.querySelector(`a[href="${child.href}"]`),
         `${child.label} is missing from the mobile drawer`,
@@ -436,18 +368,104 @@ describe('the header dropdowns', () => {
     }
     cleanup();
   });
+});
 
+describe('the rotating headline', () => {
   /*
-   * **Testimonial and FAQ are gone from the bar.** Asserted by absence, because the
-   * request was specifically that they stop being top-level nav items and the regression
-   * would be someone re-adding them to `PRIMARY_NAV` without the cross-page consequence
-   * in mind — see the note on `PRIMARY_NAV` itself.
+   * Three things about it are worth pinning, and none of them are visible in a screenshot:
+   *
+   *   • the static half never changes, so the h1 always reads as a sentence;
+   *   • there is still exactly one h1 (a rotator built as a second heading is an SEO defect);
+   *   • the reserved box is sized by the *longest* phrase, which is what stops the page jumping
+   *     every few seconds. jsdom cannot measure width, but it can prove the sizer element is
+   *     present and holds the longest string — the mechanism, if not the pixels.
    */
-  it('shows no Testimonial or FAQ entry', () => {
+  it('keeps the static half, one h1, and a sizer holding the longest phrase', () => {
+    const { container } = at('/', <Landing />);
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+
+    const text = headingText(h1s[0]);
+    expect(text.startsWith('Grow Your Business Faster with')).toBe(true);
+
+
+    // Exactly one feature name in the heading, not six and not a hidden copy of the longest.
+    // The first version reserved width with an invisible duplicate, which held the layout and
+    // put a second phrase into the heading's text — invisible on screen, present in every
+    // text extraction.
+    const names = FEATURE_LINKS.filter((f) => text.includes(f.label));
+    expect(names.length, 'the heading should contain exactly one feature name').toBe(1);
+
+    // The height is reserved instead, so nothing below the heading moves between phrases.
+    const reserved = h1s[0].querySelector('span.relative.block');
+    expect(reserved, 'no reserved-height line — the heading will jump between phrases').toBeTruthy();
+    expect(reserved!.className).toContain('min-h-');
+    cleanup();
+  });
+
+  it('links the rotating phrase at whichever feature is showing', () => {
+    const { container } = at('/', <Landing />);
+    const h1 = container.querySelector('h1')!;
+    const link = h1.querySelector('a')!;
+
+    expect(link, 'the rotating phrase is not a link').toBeTruthy();
+    // Whatever it is showing, it must be one of the six feature pages.
+    expect(FEATURE_LINKS.map((f) => f.href)).toContain(link.getAttribute('href'));
+    cleanup();
+  });
+});
+
+describe('the header menus', () => {
+  it('opens Solutions as well as Features, with every child linked', () => {
+    // Both hubs have real children now. A hub whose children are only reachable from the hub
+    // itself buries six indexable pages a click deeper than they need to be.
+    const { container } = at('/', <Landing />);
+    const toggle = screen.getByRole('button', { name: /solutions menu/i });
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    const panel = container.querySelector('[aria-expanded="true"]')!.closest('div')!;
+    for (const child of SOLUTION_LINKS) {
+      expect(
+        panel.querySelector(`a[href="${child.href}"]`),
+        `${child.label} is missing from the Solutions dropdown`,
+      ).toBeTruthy();
+    }
+    cleanup();
+  });
+
+  it('no longer offers Testimonial or FAQ in the bar', () => {
+    // Both were home-page fragments, so on any other route they meant "leave, then scroll".
     const labels = PRIMARY_NAV.map((n) => n.label);
     expect(labels).not.toContain('Testimonial');
     expect(labels).not.toContain('FAQ');
-    expect(labels).toEqual(['Home', 'Features', 'Solutions', 'Pricing', 'Contact Us']);
+  });
+});
+
+describe('the primary call-to-action pair', () => {
+  /*
+   * The two buttons must be the same size. They were `px-7` each, so each was as wide as its own
+   * label and the pair rendered mismatched in every hero, every CTA band and the footer. Width is
+   * now a shared constant, and this asserts the two elements carry the same one — a check that
+   * survives a copy change, which a pixel measurement in jsdom would not.
+   */
+  it('renders both buttons at the same width, and Get Started signs you in', () => {
+    const { container } = at('/', <CtaPair />);
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons.length).toBe(2);
+
+    // `startsWith`, not `includes` — `shadow-violet-300` contains "w-" and would be counted as
+    // a width class, which is how this assertion first failed against two correct buttons.
+    const isWidth = (c: string) => /^(?:[a-z]+:)?w-/.test(c);
+    const widths = buttons.map((b) => [...b.classList].filter(isWidth).sort().join(' '));
+    expect(widths[0], 'the two CTA buttons are different widths').toBe(widths[1]);
+
+    expect(container.querySelector('a[href="/login"]'), 'Get Started does not reach sign in').toBeTruthy();
+    expect(container.textContent).toContain('Get Started');
+    expect(container.textContent).not.toContain('Start Free');
+    cleanup();
   });
 });
 
@@ -522,12 +540,12 @@ describe('the team inbox hub links to every sibling feature', () => {
 describe('the link graph has no dangling ends', () => {
   /*
    * Every route that exists: the bespoke feature pages, the two hubs, the legal and
-   * conversion pages, and the placeholders under `/solutions` and `/industries`.
+   * conversion pages, plus whatever is still rendered by the shared `DetailPage`.
    *
    * The bespoke half is written out rather than derived, because there is nothing to
    * derive it from — those pages are components, not table rows. Which means this list
-   * is the thing that goes stale when a placeholder graduates to its own file, and the
-   * assertion below is what catches it.
+   * is the thing that goes stale when a page graduates from `DETAIL_PAGES` to its own
+   * file, and the assertion below is what catches it.
    */
   const BESPOKE = [
     '/features/whatsapp-automation',
@@ -541,7 +559,7 @@ describe('the link graph has no dangling ends', () => {
     '/', '/features', '/solutions', '/pricing', '/contact', '/privacy', '/terms',
     '/signup', '/login',
     ...BESPOKE,
-    ...COMING_SOON.map((entry) => entry.path),
+    ...DETAIL_PAGES.map((entry) => entry.path),
   ]);
 
   const linkTable = [
@@ -556,30 +574,17 @@ describe('the link graph has no dangling ends', () => {
     expect(ROUTES.has(target)).toBe(true);
   });
 
-  it('every "in the meantime" link on a placeholder resolves', () => {
-    for (const page of COMING_SOON) {
-      for (const link of [...page.related, page.parent]) {
+  it('every "related pages" link on a detail page resolves', () => {
+    for (const page of DETAIL_PAGES) {
+      for (const link of page.related) {
         expect(ROUTES.has(link.href), `${page.path} → ${link.href}`).toBe(true);
       }
     }
   });
 
-  /*
-   * **The header carries no fragment links any more, and that is now the assertion.**
-   *
-   * `Testimonial` and `FAQ` were `/#testimonial` and `/#faq` sitting between real routes,
-   * so on every page except the home page two of the seven nav items navigated to a
-   * different page and then scrolled. Both sections still exist on the home page; neither
-   * is a top-level destination. This fails if one is put back without the cross-page
-   * behaviour being thought about again.
-   */
-  it('the header links to routes only, never to home-page fragments', () => {
-    expect(PRIMARY_NAV.filter((n) => n.anchor)).toEqual([]);
-  });
-
-  it('the home page still has the sections the footer links to', () => {
+  it('the home page anchors the header points at all exist', () => {
     const { container } = at('/', <Landing />);
-    for (const entry of LEGAL_LINKS.filter((n) => n.anchor)) {
+    for (const entry of PRIMARY_NAV.filter((n) => n.anchor)) {
       const id = entry.href.replace('/#', '');
       expect(container.querySelector(`#${id}`), `#${id} is missing from the home page`).toBeTruthy();
     }

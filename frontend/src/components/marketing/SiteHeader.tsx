@@ -4,7 +4,7 @@ import { ChevronDown, Menu as MenuIcon, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
-import { CTA_LABEL, PRIMARY_NAV, SIGNUP_LINK, type NavItem } from '@/lib/marketing-nav';
+import { PRIMARY_NAV, GET_STARTED_LINK, type NavItem } from '@/lib/marketing-nav';
 import { EASE_OUT, SPRING } from './primitives';
 
 /*
@@ -59,17 +59,6 @@ function useActiveSection(ids: string[]): string {
 
   return active;
 }
-
-/**
- * The header's own CTA box.
- *
- * Narrower and shorter than the in-page `CtaPair` — a nav bar is not a hero — but a
- * fixed `min-w` for the same reason: "Get Started" and "Go to Dashboard" swap places
- * depending on whether someone is signed in, and without a floor the header visibly
- * resizes at the moment the auth state resolves.
- */
-const HEADER_CTA =
-  'rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 min-w-[9.5rem] text-sm shadow-md shadow-violet-200';
 
 export function Logo() {
   return (
@@ -275,21 +264,21 @@ export default function SiteHeader() {
           {token ? (
             <Link to="/dashboard">
               <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-                <Button className={HEADER_CTA}>Go to Dashboard</Button>
+                <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">
+                  Go to Dashboard
+                </Button>
               </motion.div>
             </Link>
           ) : (
-            /*
-              **One control, not two.** "Sign in" and "Get Started" both pointed at `/login` —
-              the same screen, because signing up and signing in are one flow here. Two
-              adjacent links to one destination is a choice the visitor has to think about and
-              cannot get wrong, which is the worst kind. Removed on request; `SIGNUP_LINK`
-              already resolves to the sign-in screen, so existing users lose nothing.
-            */
             <>
-              <Link to={SIGNUP_LINK}>
+              <Link to="/login" className="text-[15px] font-medium text-slate-700 hover:text-slate-900 px-3">
+                Sign in
+              </Link>
+              <Link to={GET_STARTED_LINK}>
                 <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-                  <Button className={HEADER_CTA}>{CTA_LABEL}</Button>
+                  <Button className="rounded-full bg-violet-600 hover:bg-violet-700 px-5 h-10 text-sm shadow-md shadow-violet-200">
+                    Get Started
+                  </Button>
                 </motion.div>
               </Link>
             </>
@@ -356,15 +345,18 @@ export default function SiteHeader() {
               <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
                 {token ? (
                   <Link to="/dashboard" onClick={() => setOpen(false)}>
-                    <Button className="w-full rounded-full bg-violet-600 hover:bg-violet-700 h-11">
+                    <Button className="w-full rounded-full bg-violet-600 hover:bg-violet-700">
                       Go to Dashboard
                     </Button>
                   </Link>
                 ) : (
                   <>
-                    <Link to={SIGNUP_LINK} onClick={() => setOpen(false)}>
-                      <Button className="w-full rounded-full bg-violet-600 hover:bg-violet-700 h-11">
-                        {CTA_LABEL}
+                    <Link to="/login" onClick={() => setOpen(false)} className="px-3 py-2 text-slate-700">
+                      Sign in
+                    </Link>
+                    <Link to={GET_STARTED_LINK} onClick={() => setOpen(false)}>
+                      <Button className="w-full rounded-full bg-violet-600 hover:bg-violet-700">
+                        Get Started
                       </Button>
                     </Link>
                   </>

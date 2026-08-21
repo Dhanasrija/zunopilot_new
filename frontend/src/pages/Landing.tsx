@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Star, ArrowRight, Check, Building2, GraduationCap, ShoppingBag, Stethoscope,
@@ -8,7 +8,7 @@ import {
   TrendingUp, UserPlus, Users, Workflow, Zap,
 } from 'lucide-react';
 import {
-  motion, useScroll, useTransform, useReducedMotion,
+  motion, AnimatePresence, useScroll, useTransform, useReducedMotion,
 } from 'framer-motion';
 import { useCountUp } from '@/hooks/useCountUp';
 import { useDocumentHead } from '@/lib/document-head';
@@ -20,7 +20,7 @@ import {
   FaqSection, ScrollProgress, Section, SectionHead, StepRail, TileGrid, fadeUp,
   item, scaleIn, stagger, viewport
 } from '@/components/marketing/primitives';
-import { IconTitle, Reveal } from '@/components/marketing/motion-kit';
+import { IconTitle, Reveal, useTravellingIndex } from '@/components/marketing/motion-kit';
 
 /*
  * The home page.
@@ -82,6 +82,105 @@ export default function Landing() {
 /* -------------------------------------------------------------------------- */
 
 
+/*
+ * The rotating half of the home page's headline.
+ *
+ * **What rotates and what does not.** "Grow Your Business Faster with" is static and keeps the
+ * heading colour it already had (`text-slate-900`); only the feature name after it changes. The
+ * whole thing is still one `<h1>`, so the page has exactly one top-level heading and it reads as a
+ * complete sentence at every moment — a crawler that renders the first frame gets "Grow Your
+ * Business Faster with WhatsApp Automation", which is a real heading, not a fragment.
+ *
+ * **Colours are the existing palette, not new ones.** The page's accent is `violet-600` and its
+ * headings are `slate-900`; nothing else coloured appears in the hero. So the six are the violet
+ * accent itself plus five of its immediate neighbours on the cool side — indigo, purple, fuchsia,
+ * blue and a deeper violet. Every one is a sibling of the accent rather than a new brand colour,
+ * and every one clears 5.5:1 against the near-white hero, so they pass AA as body text let alone
+ * at 34–60px display size. Deliberately avoided: anything warm (orange, amber, rose) which would
+ * read as a different brand, and WhatsApp green, which the guidelines reserve for connection
+ * status.
+ *
+ * **No layout shift, and no duplicated text.** The first attempt reserved the box with an
+ * invisible copy of the longest phrase. It held the width — and it also put that phrase into the
+ * `<h1>`'s text, so the heading read "…Faster with WhatsApp Number MaskingWhatsApp Automation" to
+ * anything reading text rather than pixels: a crawler, a copy-paste, a text extraction. `aria-hidden`
+ * hides it from a screen reader and does nothing about that.
+ *
+ * So there is no sizer. The phrase sits on its own line with a **min-height in `em`** — two lines
+ * on mobile where the longest phrase wraps, one line from `sm` up where none of them do — and the
+ * entering and leaving phrases are absolutely positioned inside that reserved height. Nothing below
+ * the heading can move, because the height is fixed by the type size rather than by the string. The
+ * line re-centres as the width changes, which is what a centred rotating headline should do.
+ *
+ * **It is a link, so it pauses.** A link whose destination changes under a pointer or a keyboard
+ * focus is a defect. `paused` freezes the rotation on hover and on focus-within, so whatever a
+ * visitor is about to click is what they get.
+ */
+const HEADLINE_FEATURES = [
+  { label: 'WhatsApp Automation', href: '/features/whatsapp-automation', className: 'text-violet-600' },
+  { label: 'AI WhatsApp Automation', href: '/features/ai-whatsapp-automation', className: 'text-indigo-600' },
+  { label: 'WhatsApp Number Masking', href: '/features/whatsapp-number-masking', className: 'text-purple-700' },
+  { label: 'WhatsApp Campaigns', href: '/features/whatsapp-campaigns', className: 'text-fuchsia-700' },
+  { label: 'WhatsApp Team Inbox', href: '/features/whatsapp-team-inbox', className: 'text-blue-700' },
+  { label: 'WhatsApp Business API', href: '/features/whatsapp-business-api', className: 'text-violet-800' },
+] as const;
+
+function RotatingHeadline() {
+  const reduceMotion = useReducedMotion();
+  const [paused, setPaused] = useState(false);
+  const index = useTravellingIndex(HEADLINE_FEATURES.length, 2600, 0, paused);
+  const current = HEADLINE_FEATURES[index];
+
+  return (
+    <motion.h1
+      variants={fadeUp}
+      className="text-[34px] leading-[1.15] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900"
+    >
+      <span className="block">Grow Your Business Faster with{'\u00A0'}</span>
+
+      {/*
+        The reserved line. `min-h` in `em` scales with the type size at every breakpoint, and
+        `2.4em` is two lines at 1.15 line-height — enough for the longest phrase to wrap on a
+        narrow screen without the block growing when it does.
+      */}
+      <span
+        className="relative block min-h-[2.4em] sm:min-h-[1.2em]"
+        onPointerEnter={() => setPaused(true)}
+        onPointerLeave={() => setPaused(false)}
+        onFocus={() => setPaused(true)}
+        onBlur={() => setPaused(false)}
+      >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={current.href}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -14 }}
+            transition={{ duration: 0.42, ease: EASE_OUT }}
+            className="absolute inset-x-0 top-0 block"
+          >
+            <Link
+              to={current.href}
+              /*
+                No underline, on hover or otherwise.
+
+                It had `hover:decoration-current`, on the reasoning that a link should announce
+                itself. At display size that reads as a rule under the headline rather than as a
+                link affordance — the colour is already doing that job, and the phrase is the only
+                coloured thing in the hero. The keyboard ring stays: a focus indicator is not
+                decoration, and removing it would make the heading unusable without a mouse.
+              */
+              className={`${current.className} rounded-md no-underline transition-opacity duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2`}
+            >
+              {current.label}
+            </Link>
+          </motion.span>
+        </AnimatePresence>
+      </span>
+    </motion.h1>
+  );
+}
+
 function Hero() {
   const reduceMotion = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
@@ -115,12 +214,7 @@ function Hero() {
         variants={stagger(0.05, 0.14)}
       >
         <div className="text-center max-w-4xl mx-auto">
-          <AnimatedHeading
-            as="h1"
-            trigger="mount"
-            className="text-[34px] leading-[1.15] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900"
-            lines={['AI-Powered WhatsApp', 'Business Automation']}
-          />
+          <RotatingHeadline />
 
           <motion.p
             variants={fadeUp}
@@ -747,39 +841,28 @@ function Testimonials() {
         viewport={viewport}
         variants={stagger(0, 0.08)}
       >
-        {/*
-          **Indian names and Indian businesses**, on request — and it is the right call beyond
-          the request. The site prices in rupees, shows GST, and lists a Hyderabad address; a
-          testimonial wall of Marco Rossi and Sarah Jenkins read as stock copy and quietly
-          told an Indian visitor that this product was built for somebody else. The cities and
-          business types are ones this product plausibly serves.
-
-          The two `TestimonialImage` alt texts are updated with them. Those files are stock
-          portraits, so the alt text names a person whose face may not match — worth replacing
-          the assets when real customer photos exist.
-        */}
         <TestimonialCard
           className="md:col-span-2" rating
-          quote='"ZunoPilot completely changed how we handle table bookings. The keyword replies answered most of our repeat questions, and order updates reach customers instantly."'
-          name="Rahul Deshmukh" role="Owner, Spice Route Kitchen, Pune"
+          quote='"ZunoPilot completely changed how we handle reservations. The keyword automatic replies answered 80% of our FAQs, and order triggers update customers instantly."'
+          name="Marco Rossi" role="Owner, Luigi's Italian Kitchen"
         />
         <TestimonialCard
           className="md:col-span-1"
-          quote='"Running three salon branches from one phone was chaos. The shared inbox lets our front desk and managers handle bookings together."'
-          name="Ananya Iyer" role="Founder, Tresse Studio, Bengaluru"
+          quote='"Running a multi-seat salon was messy with just one phone. The shared inbox lets our front desk and managers organize bookings seamlessly."'
+          name="Sarah Jenkins" role="Founder, Glow & Co. Salon"
         />
-        <TestimonialImage src="/testimonial-1.png" alt="Ananya Iyer" className="md:col-span-1" />
+        <TestimonialImage src="/testimonial-1.png" alt="Sarah Jenkins" className="md:col-span-1" />
 
-        <TestimonialImage src="/testimonial-2.png" alt="Vikram Nair" className="md:col-span-1" />
+        <TestimonialImage src="/testimonial-2.png" alt="Alex Tan" className="md:col-span-1" />
         <TestimonialCard
           className="md:col-span-1"
-          quote='"Catalogue sync and order-tracking updates cut our support volume by half. For a small ecommerce team, that is a real difference."'
-          name="Vikram Nair" role="Marketing Head, Kalaa Threads, Kochi"
+          quote='"The Catalog Menu sync and order tracking triggers have dropped our support volumes by 50%. Incredible ROI for our e-commerce boutique!"'
+          name="Alex Tan" role="Marketing Director, UrbanThread"
         />
         <TestimonialCard
           className="md:col-span-2" rating
-          quote='"Our first-response time dropped sharply after moving to ZunoPilot. The shared inbox and automation let our support team clear customer queries much faster."'
-          name="Priya Sharma" role="Customer Success Manager, Hyderabad"
+          quote='"Our response time dropped by 70% after switching to ZunoPilot. The shared inbox and automation features helped our support team handle customer queries much faster."'
+          name="Priya Sharma" role="Customer Success Manager"
         />
       </motion.div>
     </Section>

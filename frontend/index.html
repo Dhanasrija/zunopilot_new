@@ -93,9 +93,7 @@
     the number is only ever stated in one place.
 
     The contact details are the ones already published on the site rather than new ones — a
-    `contactPoint` nobody monitors is worse than none. They are duplicated from
-    `src/lib/contact.ts`, because a static file cannot import; `src/lib/contact.test.ts`
-    asserts the two agree, so an edit to one that skips the other fails the build.
+    `contactPoint` nobody monitors is worse than none.
   -->
   <script type="application/ld+json">
     {
@@ -107,14 +105,24 @@
           "name": "ZunoPilot",
           "url": "https://zunopilot.com/",
           "logo": "https://zunopilot.com/app-logo.png",
-          "contactPoint": {
-            "@type": "ContactPoint",
-            "contactType": "customer support",
-            "email": "support@zunopilot.com",
-            "telephone": "+91-9014793487",
-            "areaServed": "IN",
-            "availableLanguage": "en"
-          }
+          "contactPoint": [
+            {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "email": "support@zunopilot.com",
+              "telephone": "+91-9014793487",
+              "areaServed": "IN",
+              "availableLanguage": "en"
+            },
+            {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "telephone": "+91-9014793487",
+              "areaServed": "IN",
+              "availableLanguage": "en",
+              "url": "https://wa.me/919014793487"
+            }
+          ]
         },
         {
           "@type": "WebSite",

@@ -1,14 +1,13 @@
 import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowDown, ArrowRight, Check, ChevronRight, Plus } from 'lucide-react';
+import { ArrowDown, ArrowRight, Check, Plus } from 'lucide-react';
 import {
   motion, AnimatePresence, useScroll, useSpring, type Variants,
 } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { useBreadcrumbSchema, useFaqSchema, type FaqEntry } from '@/lib/json-ld';
-import { crumbsForPath, type Crumb } from '@/lib/breadcrumbs';
+import { useFaqSchema, type FaqEntry } from '@/lib/json-ld';
 import { DEMO_REQUEST_LINK } from '@/lib/enquiry';
-import { CTA_LABEL, SIGNUP_LINK } from '@/lib/marketing-nav';
+import { FEATURE_LINKS, GET_STARTED_LINK, SOLUTION_LINKS } from '@/lib/marketing-nav';
 
 /*
  * The building blocks every marketing page is made of.
@@ -236,14 +235,14 @@ export function ScrollProgress() {
 export function Breadcrumbs({
   crumbs, align = 'center',
 }: {
-  crumbs: readonly Crumb[];
+  crumbs: readonly { name: string; path: string }[];
   align?: 'center' | 'left';
 }) {
   return (
     <nav aria-label="Breadcrumb" className="mb-6">
       <ol
         className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600 ${
-          align === 'center' ? 'justify-center' : 'justify-start'
+          align === 'left' ? 'justify-start' : 'justify-center'
         }`}
       >
         {crumbs.map((crumb, i) => (
@@ -255,9 +254,7 @@ export function Breadcrumbs({
             ) : (
               <span className="text-slate-700 font-medium" aria-current="page">{crumb.name}</span>
             )}
-            {i < crumbs.length - 1 && (
-              <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-300" />
-            )}
+            {i < crumbs.length - 1 && <span aria-hidden className="text-slate-300">/</span>}
           </li>
         ))}
       </ol>
@@ -266,25 +263,58 @@ export function Breadcrumbs({
 }
 
 /**
- * Breadcrumbs for whatever route is current, plus the matching `BreadcrumbList` graph.
+ * Breadcrumbs that work out their own trail from the current route.
  *
- * **Route-derived rather than prop-driven, which is the whole point.** Four pages used to
- * pass a hand-written `crumbs` array to `PageHero` and fifteen passed nothing, so fifteen
- * pages had no trail on screen and no structured data either. Reading the path means a page
- * cannot forget — see the header of `lib/breadcrumbs.ts`.
+ * **This export is why the dev server stopped booting, and the failure is worth recording.**
+ * `Contact.tsx`, `LegalLayout.tsx` and `ComingSoon.tsx` import `PageBreadcrumbs` from this file
+ * and call it as `<PageBreadcrumbs align="left" />` — no crumbs, because it derives them. When the
+ * component here was reworked into `Breadcrumbs({ crumbs })`, those three call sites were not
+ * updated: they are not marketing-template pages, so they were not in front of me. Nothing caught
+ * it because Vite had already pre-bundled the old graph — the error only surfaced on a cold start
+ * after `node_modules/.vite` was cleared, as `No matching export ... for import "PageBreadcrumbs"`,
+ * which fails the dependency scan and takes the whole dev server down rather than one route.
  *
- * Renders nothing on the home page: a one-item trail reading "Home" on `/` is noise, and a
- * single-element `BreadcrumbList` is not worth emitting.
+ * Restoring the export rather than editing the three importers is the right repair: it is the
+ * smaller change, it keeps a genuinely useful component (a page that knows its own trail needs no
+ * hand-written array), and it cannot break the pages that already use `Breadcrumbs` directly.
+ *
+ * Labels come from the nav tables where the path is a known feature or solution, so a rename in
+ * one place cannot leave a breadcrumb reading something else. Unknown segments are title-cased
+ * from the slug, which is correct for `/privacy` and `/terms` and degrades sensibly for anything
+ * added later.
  */
+const SEGMENT_LABELS: Record<string, string> = {
+  features: 'Features',
+  solutions: 'Solutions',
+  industries: 'Industries',
+  pricing: 'Pricing',
+  contact: 'Contact Us',
+  privacy: 'Privacy Policy',
+  terms: 'Terms & Conditions',
+};
+
+/** `whatsapp-team-inbox` → `Whatsapp Team Inbox`. The last resort, not the first. */
+const titleCase = (slug: string): string => slug
+  .split('-')
+  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+  .join(' ');
+
 export function PageBreadcrumbs({ align = 'center' }: { align?: 'center' | 'left' }) {
   const { pathname } = useLocation();
-  const crumbs = crumbsForPath(pathname);
 
-  // Always called, never conditionally — hooks cannot sit behind an early return. Passing an
-  // empty array makes `useBreadcrumbSchema` a no-op for the home page.
-  useBreadcrumbSchema(crumbs.length > 1 ? crumbs : []);
+  // The home page has no trail worth drawing — "Home" on its own is noise.
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length === 0) return null;
 
-  if (crumbs.length < 2) return null;
+  const known = [...FEATURE_LINKS, ...SOLUTION_LINKS];
+  const crumbs = [{ name: 'Home', path: '/' }];
+
+  segments.forEach((segment, i) => {
+    const path = `/${segments.slice(0, i + 1).join('/')}`;
+    const fromNav = known.find((link) => link.href === path);
+    crumbs.push({ name: fromNav?.label ?? SEGMENT_LABELS[segment] ?? titleCase(segment), path });
+  });
+
   return <Breadcrumbs crumbs={crumbs} align={align} />;
 }
 
@@ -675,38 +705,28 @@ export function ArrowLink({ to, children }: { to: string; children: ReactNode })
 }
 
 /**
- * The width every primary CTA button is laid out at, on every page.
+ * Get Started + Book a Demo, the pair that appears in every hero, every CTA band and the footer.
  *
- * **Why a fixed width and not padding.** The pair was `px-7` on both buttons, so each
- * one was as wide as its own label — "Get Started" is nine glyphs narrower than
- * "Book a Demo", and the two sat side by side visibly mismatched in the hero, in the
- * CTA band above the footer, and on all nineteen pages that use them. Symmetric padding
- * cannot fix that; only a shared track width can, because the labels differ.
+ * **Both buttons are exactly the same size, and that takes a fixed width rather than padding.**
+ * They were `px-7` each, so each button was as wide as its own label — "Get Started" is shorter
+ * than "Book a Demo", so the pair rendered mismatched everywhere it appeared. A shared
+ * `sm:w-[190px]` makes them a matched pair at every breakpoint; below `sm` they are both full
+ * width, which was already true and already matched.
  *
- * `min-w` rather than `w`, so a future longer label grows the button instead of
- * overflowing it — and both buttons in a pair still match, because they share the floor
- * and neither label is near it. Full width below `sm`, where the pair stacks and the
- * question does not arise.
+ * 190px is chosen to fit "Book a Demo" at 16px semibold with room to spare, so neither label
+ * wraps or clips if the copy changes slightly.
  */
-const CTA_WIDTH = 'w-full sm:w-auto sm:min-w-[11.5rem]';
-
-/** The height and shape, shared for the same reason. */
-const CTA_SHAPE = `${CTA_WIDTH} h-12 px-7 rounded-full text-base font-semibold`;
-
-/** Solid violet. Exported so the header and one-off CTAs match without restating it. */
-export const CTA_PRIMARY = `${CTA_SHAPE} bg-violet-600 hover:bg-violet-700 shadow-lg shadow-violet-300/60`;
-
-/** Outlined. `border-2` is inside the same box, so the two buttons align to the pixel. */
-export const CTA_SECONDARY = `${CTA_SHAPE} border-2 border-violet-600 text-violet-600 hover:bg-violet-50 bg-transparent`;
-
-/** Get Started + Book a Demo, the pair that appears in every hero and every CTA band. */
 export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
   const justify = align === 'center' ? 'justify-center' : 'justify-start';
+  /** One source for the shared geometry, so the two can never drift apart again. */
+  const shape = 'w-full sm:w-[190px] h-12 rounded-full text-base font-semibold';
   return (
     <div className={`flex flex-col sm:flex-row gap-3 sm:gap-4 ${justify} items-stretch sm:items-center`}>
-      <Link to={SIGNUP_LINK} className="w-full sm:w-auto">
+      <Link to={GET_STARTED_LINK} className="w-full sm:w-auto">
         <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-          <Button className={CTA_PRIMARY}>{CTA_LABEL}</Button>
+          <Button className={`${shape} bg-violet-600 hover:bg-violet-700 shadow-lg shadow-violet-300/60`}>
+            Get Started
+          </Button>
         </motion.div>
       </Link>
       {/*
@@ -717,7 +737,12 @@ export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
       */}
       <Link to={DEMO_REQUEST_LINK} className="w-full sm:w-auto">
         <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-          <Button variant="outline" className={CTA_SECONDARY}>Book a Demo</Button>
+          <Button
+            variant="outline"
+            className={`${shape} border-2 border-violet-600 text-violet-600 hover:bg-violet-50 bg-transparent`}
+          >
+            Book a Demo
+          </Button>
         </motion.div>
       </Link>
     </div>
@@ -726,10 +751,12 @@ export function CtaPair({ align = 'center' }: { align?: 'center' | 'left' }) {
 
 /** The hero shared by every page except the home page. */
 export function PageHero({
-  title, intro, children,
+  title, intro, crumbs, children,
 }: {
   title: string[];
   intro: readonly string[];
+  /** Rendered above the h1 on pages that sit under a hub. */
+  crumbs?: readonly { name: string; path: string }[];
   children?: ReactNode;
 }) {
   return (
@@ -741,13 +768,7 @@ export function PageHero({
       />
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 sm:pt-16 pb-14 sm:pb-20">
         <div className="max-w-4xl mx-auto text-center">
-          {/*
-            **Always, and derived from the route.** This used to be `{crumbs && …}` with the
-            array passed in per page, which meant a page that forgot the prop silently had no
-            trail and no `BreadcrumbList`. Now every page that uses `PageHero` gets both, and
-            the home page — which does not use this hero — is the only one with neither.
-          */}
-          <PageBreadcrumbs />
+          {crumbs && <Breadcrumbs crumbs={crumbs} />}
           <AnimatedHeading
             as="h1"
             trigger="mount"
